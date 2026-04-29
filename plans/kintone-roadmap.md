@@ -8,13 +8,13 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-04-29 09:40 |
-| ステータス | 進行中（M02 完了） |
+| 最終更新 | 2026-04-29 12:58 |
+| ステータス | 進行中（M03 完了） |
 
 ## Current Focus
-- **マイルストーン**: M3: kintoneapi クライアント + API Token 認証
-- **直近の完了**: M02 — config 層（toml + env + profile）（feat/m02-config-layer ブランチ）
-- **次のアクション**: M03 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
+- **マイルストーン**: M4: service 層（read 系 operations）+ CLI api コマンド
+- **直近の完了**: M03 — kintoneapi クライアント + API Token 認証（feat/m03-kintoneapi-client ブランチ）
+- **次のアクション**: M04 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
 
 ## Progress
 
@@ -42,13 +42,16 @@
 - 詳細: plans/kintone-m02-config-layer.md
 - ブランチ: feat/m02-config-layer（main への merge 待ち）
 
-### M3: kintoneapi クライアント + API Token 認証
-- [ ] internal/auth/{apitoken.go, *_test.go}
-- [ ] internal/kintoneapi/{client.go, transport.go, errors.go, *_test.go}（net/http 薄ラッパー）
-- [ ] エンドポイント: GET /k/v1/records.json, GET /k/v1/record.json, GET /k/v1/app.json, GET /k/v1/app/form/fields.json
-- [ ] レート制限・リトライ（Retry-After 対応）
-- [ ] httptest によるモック動作確認
-- 詳細: 着手時生成
+### M3: kintoneapi クライアント + API Token 認証 ✅ 完了
+- [x] internal/auth/{apitoken.go, apitoken_test.go}（X-Cybozu-API-Token ヘッダ付与）
+- [x] internal/kintoneapi/{client.go, transport.go, errors.go, *_test.go}（net/http 薄ラッパー）
+- [x] エンドポイント: GET /k/v1/records.json, GET /k/v1/record.json, GET /k/v1/app.json, GET /k/v1/app/form/fields.json
+- [x] レート制限・リトライ（Retry-After 対応）
+- [x] httptest によるモック動作確認
+- [x] internal/cli/errors.go: KINTONE_UNAUTHORIZED / FORBIDDEN / NOT_FOUND / RATE_LIMITED / VALIDATION / INTERNAL / NETWORK のマッピング追加
+- [x] 全テスト pass（auth 100% / kintoneapi 86.2% / cli 87.4% カバレッジ）
+- 詳細: plans/kintone-m03-kintoneapi-client.md
+- ブランチ: feat/m03-kintoneapi-client（main への merge 待ち）
 
 ### M4: service 層（read 系 operations）+ CLI api コマンド
 - [ ] internal/service/api/{*.go}（薄い API 透過層）
@@ -134,3 +137,4 @@
 | 2026-04-29 07:55 | 作成 | ロードマップ初版作成（インタビューに基づき M1-M11 を確定） |
 | 2026-04-29 09:15 | 進捗 | M01 完了（feat/m01-project-skeleton ブランチで 9 コミット）。devflow:cycle の Planner→devils-advocate→advocate(2 周)→advisor()→implementer(TDD)→手動動作確認まで一気通貫で実施。Current Focus を M02 に更新 |
 | 2026-04-29 09:40 | 進捗 | M02 完了（feat/m02-config-layer ブランチ）。internal/config（91.4% カバレッジ）と CLI config show/init を実装。advisor() 指摘 4 件を計画に反映後 TDD で実装、手動確認 8 件 pass。Current Focus を M03 に更新 |
+| 2026-04-29 12:58 | 進捗 | M03 完了（feat/m03-kintoneapi-client ブランチ）。internal/auth/apitoken（100%）・internal/kintoneapi（86.2%）・cli エラーマッピング（87.4%）を TDD で実装。全テスト pass、golangci-lint クリーン。Current Focus を M04 に更新 |
