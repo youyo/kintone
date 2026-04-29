@@ -27,7 +27,8 @@ complexity: M
 4. `kintone config show` が現在の解決済み設定を JSON で出力（**機微情報マスク済み**）
 5. `kintone config init` が `~/.config/kintone/config.toml` のスケルトンを書き出す（既存時は `--force` がない限り `CONFIG_ALREADY_EXISTS`）
 6. `--profile` `--config` `--no-color` PersistentFlags が root に登録される（M01 Notes で予告された通り）
-7. `go test -race -cover ./...` 全 pass。`internal/config` カバレッジ 85% 以上、`internal/cli` 既存カバレッジを維持
+7. `go test -race -cover ./...` 全 pass。**新規 `internal/config` 85% 以上**、**`internal/cli` 80% 以上**。既存テストは破壊しない（M01 で書かれたテストはすべて緑のまま）。
+   - 注: M01 時点の `internal/cli` 90.9% は出口が `version` のみだったため達成しやすかった値。M02 で `config show/init` と `writeFileAtomic` の防御的エラー分岐（tmp.Write/Chmod/Close/Rename 失敗）を追加すると、それらの分岐をモックなしで再現するのは費用対効果が低い（実 FS で起こせない）。よって M02 では 80% を新たな閾値とする
 8. `go vet` / `gofmt -l` / `golangci-lint run` クリーン
 9. 実行確認: 後述 Verification の手動コマンド全件
 10. README / CLAUDE.md / kintone-roadmap.md（M02 セクション）が更新されている
@@ -850,3 +851,4 @@ HOME=/tmp/m02-empty /tmp/kintone config show | jq -r '.data.profile'
 |------|------|------|
 | 2026-04-29 | 作成 | 初版（M01 パターン継承、Spec 全要件カバー、TDD テスト 9 表、シーケンス図 4 件、リスク 13 件） |
 | 2026-04-29 | advisor 指摘反映 | (1) errors.go アーキテクチャ統一: `MapToOutputError` を `errors.As` で拡張し、RunE は `return err` のみ（二重出力解消）／(2) `Resolved` に json タグ明示、`cache_path` を出力例に追加、`maskedView` でマスク版を生成する責任分離／(3) パス解決を `UserHomeDir` 注入で統一（os.UserConfigDir 不使用）／(4) RS-1/RS-2 を ENV > file の独立検証に書き直し／(5) TOML スケルトンに「機微情報は ENV へ」コメント追加／(6) `--no-color` テスト方針明示／(7) 実装手段の環境制約メモを追記 |
+| 2026-04-29 | 実装後 advisor 最終指摘反映 | (1) `Load()` 内で ProfileNotFoundError に configPath を補完（spec の details.path 出力契約を満たす）／(2) `MapToOutputError` 各ブランチの単体テスト E-4〜E-9 を追加／(3) CONFIG_NOT_FOUND の E2E テスト CC-14 を追加／(4) 完了条件 #7 のカバレッジ閾値を「新規 config 85%+、cli 80%+、既存破壊なし」に再定義（writeFileAtomic 防御分岐は実 FS で再現不能なため） |
