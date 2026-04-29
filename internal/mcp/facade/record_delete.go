@@ -5,20 +5,25 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/youyo/kintone/internal/resolver"
 	"github.com/youyo/kintone/internal/service/operations"
 )
 
 func recordDeleteTool() mcp.Tool {
 	return mcp.NewTool("record_delete",
 		mcp.WithDescription(
-			"kintone のレコードを複数件削除する。ids は対象レコード ID の配列（必須・1 件以上）。"+
+			"kintone のレコードを複数件削除する。"+
+				"app（数値 ID）または app_ref（数値文字列 / code / name / partial）のいずれか必須・両方指定不可。"+
+				"ids は対象レコード ID の配列（必須・1 件以上）。"+
 				"revisions を指定する場合は ids と同じ長さで対応する revision を渡し、楽観ロックする。"+
 				"結果は {\"ok\":true,\"data\":{\"deleted\":N}} 形式の JSON envelope（N は削除リクエスト件数）。",
 		),
 		mcp.WithNumber("app",
-			mcp.Required(),
-			mcp.Description("アプリ ID（必須・正の整数）。"),
+			mcp.Description("アプリ ID（数値・app_ref と排他）。"),
 			mcp.Min(1),
+		),
+		mcp.WithString("app_ref",
+			mcp.Description("アプリ参照（数値文字列 / code / name / partial、app と排他）。"),
 		),
 		mcp.WithArray("ids",
 			mcp.Required(),
@@ -40,7 +45,11 @@ func RecordDeleteHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 func recordDeleteHandler(deps ToolDeps) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
-		app, err := requireInt64(args, "app")
+		app, err := optInt64(args, "app")
+		if err != nil {
+			return invalidParams(err.Error())
+		}
+		appRef, err := optString(args, "app_ref")
 		if err != nil {
 			return invalidParams(err.Error())
 		}
@@ -52,8 +61,10 @@ func recordDeleteHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 		if err != nil {
 			return invalidParams(err.Error())
 		}
-		out, err := operations.RecordDelete(ctx, deps.API, operations.RecordDeleteInput{
+		r := resolver.New(deps.API)
+		out, err := operations.RecordDelete(ctx, deps.API, r, operations.RecordDeleteInput{
 			App:       app,
+			AppRef:    appRef,
 			IDs:       ids,
 			Revisions: revisions,
 		})

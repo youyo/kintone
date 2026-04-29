@@ -5,6 +5,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/youyo/kintone/internal/resolver"
 	"github.com/youyo/kintone/internal/service/operations"
 )
 
@@ -12,25 +13,31 @@ func recordUpdateTool() mcp.Tool {
 	return mcp.NewTool("record_update",
 		mcp.WithDescription(
 			"kintone のレコードを単件更新する。"+
-				"id（数値）または update_key_field+update_key_value（文字列フィールドの値で特定）のいずれか一方で対象を指定する。"+
+				"app（数値 ID）または app_ref（数値文字列 / code / name / partial）のいずれか必須・両方指定不可。"+
+				"id（数値）または update_key_field/update_key_field_ref + update_key_value（文字列フィールドの値で特定）のいずれか一方で対象を指定する。"+
 				"record は更新フィールドの object（{\"フィールドコード\":{\"value\":\"値\"}}）で必須。"+
 				"revision を指定すると楽観ロック（指定 revision と一致する場合のみ更新）。"+
 				"結果は {\"ok\":true,\"data\":{\"revision\":N}} 形式の JSON envelope。",
 		),
 		mcp.WithNumber("app",
-			mcp.Required(),
-			mcp.Description("アプリ ID（必須・正の整数）。"),
+			mcp.Description("アプリ ID（数値・app_ref と排他）。"),
 			mcp.Min(1),
+		),
+		mcp.WithString("app_ref",
+			mcp.Description("アプリ参照（数値文字列 / code / name / partial、app と排他）。"),
 		),
 		mcp.WithNumber("id",
 			mcp.Description("対象レコード ID。update_key_* と排他。"),
 			mcp.Min(1),
 		),
 		mcp.WithString("update_key_field",
-			mcp.Description("updateKey 用フィールドコード（重複禁止のフィールドのみ）。update_key_value と併用。"),
+			mcp.Description("updateKey 用フィールドコード（重複禁止のフィールドのみ）。update_key_value と併用。update_key_field_ref と排他。"),
+		),
+		mcp.WithString("update_key_field_ref",
+			mcp.Description("updateKey 用フィールド参照（label / partial）。resolver で field code に解決される。update_key_field と排他。"),
 		),
 		mcp.WithString("update_key_value",
-			mcp.Description("updateKey 用の値（文字列）。update_key_field と併用。"),
+			mcp.Description("updateKey 用の値（文字列）。update_key_field / update_key_field_ref と併用。"),
 		),
 		mcp.WithNumber("revision",
 			mcp.Description("楽観ロック用 revision（任意・未指定で省略）。"),
@@ -50,7 +57,11 @@ func RecordUpdateHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 func recordUpdateHandler(deps ToolDeps) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
-		app, err := requireInt64(args, "app")
+		app, err := optInt64(args, "app")
+		if err != nil {
+			return invalidParams(err.Error())
+		}
+		appRef, err := optString(args, "app_ref")
 		if err != nil {
 			return invalidParams(err.Error())
 		}
@@ -59,6 +70,10 @@ func recordUpdateHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 			return invalidParams(err.Error())
 		}
 		ukField, err := optString(args, "update_key_field")
+		if err != nil {
+			return invalidParams(err.Error())
+		}
+		ukFieldRef, err := optString(args, "update_key_field_ref")
 		if err != nil {
 			return invalidParams(err.Error())
 		}
@@ -80,13 +95,16 @@ func recordUpdateHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 		if err != nil {
 			return invalidParams(err.Error())
 		}
-		out, err := operations.RecordUpdate(ctx, deps.API, operations.RecordUpdateInput{
-			App:            app,
-			ID:             id,
-			UpdateKeyField: ukField,
-			UpdateKeyValue: ukValue,
-			Revision:       revPtr,
-			Record:         record,
+		r := resolver.New(deps.API)
+		out, err := operations.RecordUpdate(ctx, deps.API, r, operations.RecordUpdateInput{
+			App:               app,
+			AppRef:            appRef,
+			ID:                id,
+			UpdateKeyField:    ukField,
+			UpdateKeyFieldRef: ukFieldRef,
+			UpdateKeyValue:    ukValue,
+			Revision:          revPtr,
+			Record:            record,
 		})
 		if err != nil {
 			return errorResult(err)

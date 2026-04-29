@@ -165,19 +165,6 @@ func optInt64(args map[string]any, field string) (int64, error) {
 	return int64(n), nil
 }
 
-// requireInt64 は args[field] を必須数値として取得する。
-func requireInt64(args map[string]any, field string) (int64, error) {
-	v, ok := args[field]
-	if !ok || v == nil {
-		return 0, fmt.Errorf("%w: %s is required", errInvalidArgType, field)
-	}
-	n, ok := v.(float64)
-	if !ok {
-		return 0, fmt.Errorf("%w: %s must be a number", errInvalidArgType, field)
-	}
-	return int64(n), nil
-}
-
 // optBool は args[field] を bool として取得する。
 func optBool(args map[string]any, field string) (bool, error) {
 	v, ok := args[field]
