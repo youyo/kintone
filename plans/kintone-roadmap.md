@@ -12,9 +12,10 @@
 | ステータス | 進行中（M09 完了） |
 
 ## Current Focus
-- **マイルストーン**: M11: completion + Docker + GoReleaser リリース
-- **直近の完了**: M10 — idproxy + multi-user MCP（feat/m10-idproxy-multiuser-mcp ブランチ）
-- **次のアクション**: M11 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
+- **マイルストーン**: 全 11 マイルストーン完了 / リリース準備完了
+- **直近の完了**: M11 — completion + Docker + GoReleaser（feat/m11-completion-docker-release ブランチ）
+- **次のアクション**: main へ merge → タグ push（`git tag v0.1.0 && git push origin v0.1.0`）で GoReleaser ワークフロー起動。
+  事前準備として `youyo/homebrew-tap` リポジトリ作成と `HOMEBREW_TAP_GITHUB_TOKEN` Secret 登録が必要
 
 ## Progress
 
@@ -145,13 +146,16 @@
 - 詳細: plans/kintone-m10-idproxy-multiuser-mcp.md
 - ブランチ: feat/m10-idproxy-multiuser-mcp（main への merge 待ち）
 
-### M11: completion + Docker + GoReleaser リリース
-- [ ] CLI: `kintone completion {bash|zsh|fish|powershell}`
-- [ ] Dockerfile（multi-stage build, alpine base）
-- [ ] .goreleaser.yaml（cross-compile + GitHub Releases + Homebrew Tap + ghcr.io）
-- [ ] .github/workflows/release.yml（タグプッシュで起動）
-- [ ] README 完備（インストール 4 方式 / 認証 3 方式 / CLI コマンド一覧 / MCP セットアップ）
-- 詳細: 着手時生成
+### M11: completion + Docker + GoReleaser リリース ✅ 完了
+- [x] CLI: `kintone completion {bash|zsh|fish|powershell}`（cobra Gen*Completion 経由 / JSON envelope の例外として明示）
+- [x] Dockerfile（multi-stage build, golang:1.26-alpine → distroless/static:nonroot, CGO_ENABLED=0）+ .dockerignore
+- [x] .goreleaser.yaml（linux/{amd64,arm64} + darwin/{amd64,arm64} + windows/amd64 + Homebrew Tap + ghcr.io multi-arch manifest）
+- [x] .github/workflows/release.yml（タグ push → goreleaser/goreleaser-action@v6 / actionlint クリア）
+- [x] README 完備（インストール 4 方式 / 認証 3 方式表 / completion セクション / MCP セットアップ / リリース手順 runbook）
+- [x] M10 持ち越し polish: transport.go errcheck 解消（IIFE 形式）/ facade ToolDeps に APIResolver Factory 追加 / ErrAuthRequired → AUTH_REQUIRED マッピング
+- [x] go test -race -cover ./... 全 22 パッケージ pass、golangci-lint 違反 0（既存 transport.go 2 件も解消）
+- 詳細: plans/kintone-m11-completion-docker-release.md
+- ブランチ: feat/m11-completion-docker-release（main への merge 待ち）
 
 ## Blockers
 なし
@@ -180,3 +184,4 @@
 | 2026-04-29 18:50 | 進捗 | M08 完了（feat/m08-resolver ブランチ）。`internal/resolver` パッケージで App / Field 名前解決を TDD で実装（coverage 97.8%）。App: `ID 直接 → code 完全一致 → name 完全一致 → name 部分一致`、Field: `code → label 完全一致 → label 部分一致`、各段階でヒットしたら即 return（fallback しない）。operations 層に `AppRef` / `UpdateKeyFieldRef` フィールドを追加し、resolver 引数（nil 許容）でハイブリッド解決（既存 `App int64` 直指定経路は完全後方互換）。CLI 全コマンドに `--app-ref` / `--update-key-field-ref` を追加、MCP 全 tools に `app_ref` / `update_key_field_ref` を追加（`app: required` を外す）。`RESOLVER_APP_NOT_FOUND` / `RESOLVER_APP_AMBIGUOUS` 等のエラーコードと `details.candidates` を CLI/facade 両方にミラー実装。CachingAPI 経由で apps/fields のキャッシュを共有（resolver 専用キャッシュは持たない）。全テスト pass（resolver 97.8% / operations 98.2% / cli 85.2% / cli/api 72.1% / cli/ops 70.9% / facade 79.6%）、新規 lint 違反 0。Current Focus を M09 に更新 |
 | 2026-04-29 23:00 | 進捗 | M09 完了（feat/m09-oauth-auth ブランチ）。`internal/auth/oauth` パッケージで OAuth 2.0 Authorization Code + PKCE フローを TDD で実装（coverage 88.3%）。loopback callback サーバ（sync.Once + graceful shutdown）/ PKCE S256（crypto/rand）/ state 検証（subtle.ConstantTimeCompare）/ refresh_token 自動更新（skew 60s + sync.Mutex 並行制御）/ OS 別ブラウザ起動（darwin/linux/windows）。`kintoneapi.NewFromResolvedWithAuth` を新設し依存方向を維持。CLI に `kintone auth login --oauth --principal-id <id>` / `auth status` / `auth logout` を追加。config に `KINTONE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URL/SCOPES` 環境変数を追加、`config show` で client_secret を `***` マスク。TokenStore（M07 既存基盤）を本格利用。全テスト pass（auth/oauth 88.3% / cli/auth 74.1% / cli 86.7%）、新規 lint 違反 0。Current Focus を M10 に更新 |
 | 2026-04-30 00:50 | 進捗 | M10 完了（feat/m10-idproxy-multiuser-mcp ブランチ）。`github.com/youyo/idproxy` v0.4.2 を採用し thin wrapper（`internal/idproxy`）で kintone Principal context へ正規化。HTTP/Streamable transport を `internal/mcp/server/http.go` に追加し、`mark3labs/mcp-go` v0.49.0 の `NewStreamableHTTPServer` で /mcp を提供。`kintone mcp serve --listen :8080 --auth oidc --authz oauth` で multi-user remote MCP 起動が可能に。`service/api/PrincipalAPIFactory` で per-request にユーザー別 TokenStore（M07 基盤）を引く設計。SSE transport は仕様 2025-03-26 で非推奨方向のため M11+ に明示移動。advisor の指摘 3 点（mcp-go API 検証 / principalFromUser 単体テスト / プロビジョニングモデル明記）を計画に反映後 TDD で実装。全 21 パッケージ test pass（race 検出なし）、新規 lint 違反 0、既存 stdio + auth=none + authz=api-token は完全後方互換。Current Focus を M11 に更新 |
+| 2026-04-30 01:05 | 進捗 | M11 完了（feat/m11-completion-docker-release ブランチ）。`internal/cli/completion` パッケージで `kintone completion {bash|zsh|fish|powershell}` を実装（cobra `Gen*Completion` ラップ、JSON envelope の例外として明示）。Dockerfile を multi-stage（`golang:1.26-alpine` → `gcr.io/distroless/static-debian12:nonroot` / CGO_ENABLED=0 / uid 65532）で作成、`.dockerignore` で context 最小化。`.goreleaser.yaml` で linux/{amd64,arm64} + darwin/{amd64,arm64} + windows/amd64 cross build、Homebrew Tap (`youyo/homebrew-tap`)、ghcr.io multi-arch manifest を構成（`goreleaser check` 通過）。`.github/workflows/release.yml` でタグ push 起動の goreleaser/goreleaser-action@v6 ワークフローを追加（actionlint クリア）。M10 持ち越し polish: transport.go errcheck を IIFE 形式 `defer func() { _ = resp.Body.Close() }()` で解消、`internal/mcp/facade.ToolDeps` に `APIResolver` interface 型 `Factory` フィールドを追加（オプショナル / 後方互換）、6 ハンドラを `resolveAPI(ctx, deps)` 共通ヘルパー経由に統一、`facade.MapError` に `serviceapi.ErrAuthRequired` → `AUTH_REQUIRED` マッピングを追加。README をインストール 4 方式 / 認証 3 方式 / completion / MCP セットアップ / リリース runbook で完備。全 22 パッケージ test pass（race 検出なし）、`golangci-lint run` 違反 0（既存 transport.go errcheck 2 件も解消）。**全 11 マイルストーン完了 / リリース準備完了**。 |
