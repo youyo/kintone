@@ -8,13 +8,13 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-04-29 12:58 |
-| ステータス | 進行中（M03 完了） |
+| 最終更新 | 2026-04-29 13:14 |
+| ステータス | 進行中（M04 完了） |
 
 ## Current Focus
-- **マイルストーン**: M4: service 層（read 系 operations）+ CLI api コマンド
-- **直近の完了**: M03 — kintoneapi クライアント + API Token 認証（feat/m03-kintoneapi-client ブランチ）
-- **次のアクション**: M04 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
+- **マイルストーン**: M5: CLI ops コマンド（write 系 + describe）
+- **直近の完了**: M04 — service 層（read 系 operations）+ CLI api コマンド（feat/m04-service-read-cli-api ブランチ）
+- **次のアクション**: M05 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
 
 ## Progress
 
@@ -53,12 +53,14 @@
 - 詳細: plans/kintone-m03-kintoneapi-client.md
 - ブランチ: feat/m03-kintoneapi-client（main への merge 待ち）
 
-### M4: service 層（read 系 operations）+ CLI api コマンド
-- [ ] internal/service/api/{*.go}（薄い API 透過層）
-- [ ] internal/service/operations/{records_query.go, app_describe.go, *_test.go}（LLM 向け抽象化）
-- [ ] internal/cli/api/{records.go, app.go}
-- [ ] 動作確認: 実 kintone 環境で record query が JSON で返る
-- 詳細: 着手時生成
+### M4: service 層（read 系 operations）+ CLI api コマンド ✅ 完了
+- [x] internal/service/api/{api.go, doc.go, api_test.go}（薄い API 透過層、interface でモック容易化）
+- [x] internal/service/operations/{records_query.go, app_describe.go, doc.go, *_test.go}（LLM 向け抽象化）
+- [x] internal/cli/api/{root.go, helpers.go, records.go, record.go, app.go, *_test.go}
+- [x] 既存 cli/root.go に `api` サブコマンドを統合
+- [x] 動作確認: `kintone api --help` 動作 / 全テスト pass / カバレッジ達成（service/api 100% / service/operations 100% / cli/api 82%）
+- 詳細: plans/kintone-m04-service-read-cli-api.md
+- ブランチ: feat/m04-service-read-cli-api（main への merge 待ち）
 
 ### M5: CLI ops コマンド（write 系 + describe）
 - [ ] operations: record_create / record_update / record_delete / app_describe（fields 含む）
@@ -138,3 +140,4 @@
 | 2026-04-29 09:15 | 進捗 | M01 完了（feat/m01-project-skeleton ブランチで 9 コミット）。devflow:cycle の Planner→devils-advocate→advocate(2 周)→advisor()→implementer(TDD)→手動動作確認まで一気通貫で実施。Current Focus を M02 に更新 |
 | 2026-04-29 09:40 | 進捗 | M02 完了（feat/m02-config-layer ブランチ）。internal/config（91.4% カバレッジ）と CLI config show/init を実装。advisor() 指摘 4 件を計画に反映後 TDD で実装、手動確認 8 件 pass。Current Focus を M03 に更新 |
 | 2026-04-29 12:58 | 進捗 | M03 完了（feat/m03-kintoneapi-client ブランチ）。internal/auth/apitoken（100%）・internal/kintoneapi（86.2%）・cli エラーマッピング（87.4%）を TDD で実装。全テスト pass、golangci-lint クリーン。Current Focus を M04 に更新 |
+| 2026-04-29 13:14 | 進捗 | M04 完了（feat/m04-service-read-cli-api ブランチ）。internal/service/api（100%）・internal/service/operations（100%）・internal/cli/api（82%）を TDD で実装。`kintone api {records,record,app} ...` で kintone REST を JSON で叩けるように。CLI から kintoneapi 直 import 禁止のレイヤー分離を確立。全テスト pass、M04 新規 lint 違反 0。Current Focus を M05 に更新 |
