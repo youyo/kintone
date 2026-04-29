@@ -4,12 +4,16 @@ import (
 	"context"
 
 	"github.com/youyo/kintone/internal/kintoneapi"
+	"github.com/youyo/kintone/internal/resolver"
 	serviceapi "github.com/youyo/kintone/internal/service/api"
 )
 
 // RecordDeleteInput は record_delete オペレーションの入力。
+//
+// App / AppRef は M08 ハイブリッド解決（排他、どちらか必須）。
 type RecordDeleteInput struct {
 	App       int64
+	AppRef    string // M08
 	IDs       []int64
 	Revisions []int64
 }
@@ -24,13 +28,14 @@ type RecordDeleteOutput struct {
 // RecordDelete は DELETE /k/v1/records.json を呼ぶ。
 //
 // バリデーション:
-//   - App <= 0 → ErrInvalidApp
+//   - App / AppRef → resolveAppID
 //   - len(IDs) == 0 → ErrEmptyIDs
 //   - IDs に <= 0 の要素が含まれる → ErrInvalidID
 //   - len(Revisions) > 0 かつ len(Revisions) != len(IDs) → ErrRevisionsLengthMismatch
-func RecordDelete(ctx context.Context, a serviceapi.API, in RecordDeleteInput) (*RecordDeleteOutput, error) {
-	if in.App <= 0 {
-		return nil, ErrInvalidApp
+func RecordDelete(ctx context.Context, a serviceapi.API, r *resolver.Resolver, in RecordDeleteInput) (*RecordDeleteOutput, error) {
+	appID, err := resolveAppID(ctx, r, in.App, in.AppRef)
+	if err != nil {
+		return nil, err
 	}
 	if len(in.IDs) == 0 {
 		return nil, ErrEmptyIDs
@@ -45,7 +50,7 @@ func RecordDelete(ctx context.Context, a serviceapi.API, in RecordDeleteInput) (
 	}
 
 	if err := a.DeleteRecords(ctx, kintoneapi.DeleteRecordsRequest{
-		App:       in.App,
+		App:       appID,
 		IDs:       in.IDs,
 		Revisions: in.Revisions,
 	}); err != nil {

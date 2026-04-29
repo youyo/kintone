@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/youyo/kintone/internal/kintoneapi"
+	"github.com/youyo/kintone/internal/resolver"
 	serviceapi "github.com/youyo/kintone/internal/service/api"
 )
 
@@ -14,8 +15,15 @@ import (
 var ErrInvalidApp = errors.New("operations: app must be > 0")
 
 // RecordsQueryInput は records_query オペレーションの入力。
+//
+// App と AppRef は M08 ハイブリッド解決（排他、どちらか必須）:
+//   - App > 0 & AppRef == ""   → 既存の int64 直指定経路（後方互換）
+//   - App == 0 & AppRef != ""  → resolver.ResolveApp(AppRef) → ID に変換
+//   - 両方指定 → ErrConflictingAppRef
+//   - どちらも未指定 → ErrInvalidApp
 type RecordsQueryInput struct {
-	App        int64    // 必須
+	App        int64    // 既存（M04）: int64 直指定（AppRef と排他）
+	AppRef     string   // 新規（M08）: 数値文字列 / code / name / partial（App と排他）
 	Query      string   // 任意（kintone クエリ言語）
 	Fields     []string // 任意（レスポンスを絞り込むフィールドコード）
 	TotalCount bool     // 任意（true で TotalCount を含める）
@@ -32,14 +40,15 @@ type RecordsQueryOutput struct {
 
 // RecordsQuery は GET /k/v1/records.json を呼び、レコード一覧を取得する。
 //
-// 名前解決（M08）はこの関数の冒頭（service/api コール前）で挿入する想定。
-// キャッシュ（M07）は service/api 層で吸収するため operations は意識しない。
-func RecordsQuery(ctx context.Context, a serviceapi.API, in RecordsQueryInput) (*RecordsQueryOutput, error) {
-	if in.App <= 0 {
-		return nil, ErrInvalidApp
+// AppRef が指定された場合は r で App ID に解決してから REST を呼ぶ。
+// r == nil でも App 直指定経路は動作する（後方互換）。
+func RecordsQuery(ctx context.Context, a serviceapi.API, r *resolver.Resolver, in RecordsQueryInput) (*RecordsQueryOutput, error) {
+	appID, err := resolveAppID(ctx, r, in.App, in.AppRef)
+	if err != nil {
+		return nil, err
 	}
 	resp, err := a.GetRecords(ctx, kintoneapi.GetRecordsRequest{
-		App:        in.App,
+		App:        appID,
 		Query:      in.Query,
 		Fields:     in.Fields,
 		TotalCount: in.TotalCount,

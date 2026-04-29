@@ -8,13 +8,13 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-04-29 18:10 |
-| ステータス | 進行中（M07 完了） |
+| 最終更新 | 2026-04-29 18:50 |
+| ステータス | 進行中（M08 完了） |
 
 ## Current Focus
-- **マイルストーン**: M8: Resolver（名前解決）
-- **直近の完了**: M07 — SQLite キャッシュ + TokenStore（feat/m07-sqlite-cache-tokenstore ブランチ）
-- **次のアクション**: M08 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
+- **マイルストーン**: M9: OAuth 認証 + 自動更新
+- **直近の完了**: M08 — Resolver（名前解決）（feat/m08-resolver ブランチ）
+- **次のアクション**: M09 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
 
 ## Progress
 
@@ -101,13 +101,20 @@
 - 詳細: plans/kintone-m07-sqlite-cache-tokenstore.md
 - ブランチ: feat/m07-sqlite-cache-tokenstore（main への merge 待ち）
 
-### M8: Resolver（名前解決）
-- [ ] internal/resolver/{app.go, field.go, *_test.go}
-- [ ] App: ID → code → name → partial の順
-- [ ] Field: code → label → partial の順
-- [ ] キャッシュ統合
-- [ ] CLI/MCP からの透過利用
-- 詳細: 着手時生成
+### M8: Resolver（名前解決） ✅ 完了
+- [x] internal/resolver/{resolver.go, app.go, field.go, errors.go, *_test.go}（resolver パッケージ実装、coverage 97.8%）
+- [x] App: ID 直接 → code 完全一致 → name 完全一致 → name 部分一致 の順
+- [x] Field: code 完全一致 → label 完全一致 → label 部分一致 の順
+- [x] キャッシュ統合（CachingAPI 経由で apps/fields=1 年 TTL）
+- [x] operations 層に AppRef / UpdateKeyFieldRef ハイブリッド追加（後方互換維持）
+- [x] CLI に `--app-ref` / `--update-key-field-ref` フラグを全コマンドで追加
+- [x] MCP 全 tools に `app_ref` / `update_key_field_ref` を追加（`app: required` を外す）
+- [x] エラーコード: `RESOLVER_APP_NOT_FOUND` / `RESOLVER_APP_AMBIGUOUS` / `RESOLVER_FIELD_NOT_FOUND` / `RESOLVER_FIELD_AMBIGUOUS` / `RESOLVER_APP_LIST_TOO_LARGE`、`details.candidates` に候補配列を含める
+- [x] cli/errors.go と facade/errors.go の両方に Resolver エラーマッピング追加（CLI=USAGE、MCP=INVALID_PARAMS）
+- [x] 全テスト pass（resolver 97.8% / operations 98.2% / cli 85.2% / cli/api 72.1% / cli/ops 70.9% / facade 79.6%）
+- [x] golangci-lint クリア（既存 transport.go 2 件は M11 polish 対象として残存）
+- 詳細: plans/kintone-m08-resolver.md
+- ブランチ: feat/m08-resolver（main への merge 待ち）
 
 ### M9: OAuth 認証 + 自動更新
 - [ ] internal/auth/oauth/{flow.go, refresh.go, *_test.go}
@@ -160,3 +167,4 @@
 | 2026-04-29 13:40 | 進捗 | M05 完了（feat/m05-cli-ops-write ブランチ）。kintoneapi に write 系（POST/PUT/DELETE）を追加し、service/api interface 拡張、operations.{RecordCreate, RecordUpdate, RecordDelete} を実装。CLI に `ops record {create,update,delete}` と `ops app describe` を追加。`--dry-run` で送信予定 body を JSON 出力（実 API と byte 一致）、書き込み系は MaxAttempts=1 デフォルト、`UsageError` 型 sentinel で USAGE 分類を堅牢化（advisor 6 件指摘反映済）。全テスト pass、カバレッジ目標達成。Current Focus を M06 に更新 |
 | 2026-04-29 13:55 | 進捗 | M06 完了（feat/m06-mcp-server-facade ブランチ）。mark3labs/mcp-go v0.49.0 を採用、`internal/mcp/{server,facade}` と `internal/cli/mcp` を実装。kintoneapi に `ListApps`（GET /k/v1/apps.json）を新規追加、service/api interface 拡張。MCP 6 tools（apps_search / app_describe / records_query / record_create / record_update / record_delete）が完成し、`kintone mcp serve` で stdio 起動可能。`facade.MapError` で operations.Err\* / kintoneapi.APIError / network → MCP code をマップ（M05 ハンドオフ最重要事項対応）。出力は CLI と同じ `output.Success/Failure` envelope を `CallToolResult.Content[0].Text` に格納、契約共有を実現。in-process client で 6 tools 往復テストを網羅。全テスト pass、新規 lint 違反 0。Current Focus を M07 に更新 |
 | 2026-04-29 18:10 | 進捗 | M07 完了（feat/m07-sqlite-cache-tokenstore ブランチ）。modernc.org/sqlite v1.50.0 を採用、`internal/cache`（SQLite キャッシュ層・TTL・パス解決）と `internal/tokenstore`（OAuth トークン保存）を TDD で実装。`CachingAPI` decorator（service/api）で `GetApp` / `GetAppFormFields` / `ListApps` にキャッシュを注入。CLI に `kintone cache clear / stats` サブコマンドを追加。`KINTONE_CACHE_DISABLE=1` で無効化対応。全テスト pass（cache 76.2% / tokenstore 79.0% / service/api 88.9%）、新規 lint 違反 0。Current Focus を M08 に更新 |
+| 2026-04-29 18:50 | 進捗 | M08 完了（feat/m08-resolver ブランチ）。`internal/resolver` パッケージで App / Field 名前解決を TDD で実装（coverage 97.8%）。App: `ID 直接 → code 完全一致 → name 完全一致 → name 部分一致`、Field: `code → label 完全一致 → label 部分一致`、各段階でヒットしたら即 return（fallback しない）。operations 層に `AppRef` / `UpdateKeyFieldRef` フィールドを追加し、resolver 引数（nil 許容）でハイブリッド解決（既存 `App int64` 直指定経路は完全後方互換）。CLI 全コマンドに `--app-ref` / `--update-key-field-ref` を追加、MCP 全 tools に `app_ref` / `update_key_field_ref` を追加（`app: required` を外す）。`RESOLVER_APP_NOT_FOUND` / `RESOLVER_APP_AMBIGUOUS` 等のエラーコードと `details.candidates` を CLI/facade 両方にミラー実装。CachingAPI 経由で apps/fields のキャッシュを共有（resolver 専用キャッシュは持たない）。全テスト pass（resolver 97.8% / operations 98.2% / cli 85.2% / cli/api 72.1% / cli/ops 70.9% / facade 79.6%）、新規 lint 違反 0。Current Focus を M09 に更新 |

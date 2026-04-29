@@ -6,15 +6,17 @@ import (
 	"strconv"
 
 	"github.com/youyo/kintone/internal/kintoneapi"
+	"github.com/youyo/kintone/internal/resolver"
 	serviceapi "github.com/youyo/kintone/internal/service/api"
 )
 
 // RecordCreateInput は record_create オペレーションの入力。
 //
-// Record（単件）と Records（複数件）どちらか一方を指定する。
-// 両方/どちらも未指定はエラー。
+// App / AppRef は M08 ハイブリッド解決（排他、どちらか必須）。
+// Record（単件）と Records（複数件）どちらか一方を指定する。両方/どちらも未指定はエラー。
 type RecordCreateInput struct {
 	App     int64
+	AppRef  string // M08: code / name / partial で App を指定する場合
 	Record  map[string]any
 	Records []map[string]any
 }
@@ -22,7 +24,6 @@ type RecordCreateInput struct {
 // RecordCreateOutput は record_create の出力。
 //
 // kintone REST は ids/revisions を文字列配列で返すため、operations 層で int64 に正規化する。
-// LLM が JSON 数値として消費しやすくするための変換。
 type RecordCreateOutput struct {
 	IDs       []int64 `json:"ids"`
 	Revisions []int64 `json:"revisions"`
@@ -31,12 +32,13 @@ type RecordCreateOutput struct {
 // RecordCreate は POST /k/v1/records.json を呼び、レコードを新規登録する。
 //
 // バリデーション:
-//   - App <= 0 → ErrInvalidApp
+//   - App / AppRef → resolveAppID（排他・必須）
 //   - len(Records)==0 かつ Record == nil → ErrEmptyRecords
 //   - Record と Records 両方指定 → ErrConflictingRecords
-func RecordCreate(ctx context.Context, a serviceapi.API, in RecordCreateInput) (*RecordCreateOutput, error) {
-	if in.App <= 0 {
-		return nil, ErrInvalidApp
+func RecordCreate(ctx context.Context, a serviceapi.API, r *resolver.Resolver, in RecordCreateInput) (*RecordCreateOutput, error) {
+	appID, err := resolveAppID(ctx, r, in.App, in.AppRef)
+	if err != nil {
+		return nil, err
 	}
 	hasSingle := in.Record != nil
 	hasMulti := len(in.Records) > 0
@@ -53,7 +55,7 @@ func RecordCreate(ctx context.Context, a serviceapi.API, in RecordCreateInput) (
 	}
 
 	resp, err := a.InsertRecords(ctx, kintoneapi.InsertRecordsRequest{
-		App:     in.App,
+		App:     appID,
 		Records: records,
 	})
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/youyo/kintone/internal/kintoneapi"
 	"github.com/youyo/kintone/internal/output"
+	"github.com/youyo/kintone/internal/resolver"
 	"github.com/youyo/kintone/internal/service/operations"
 )
 
@@ -31,9 +32,31 @@ func MapError(err error) *output.Error {
 		return nil
 	}
 
-	// operations のバリデーションエラー → INVALID_PARAMS
+	// resolver の AmbiguousError → RESOLVER_*_AMBIGUOUS（M08）
+	var ambErr *resolver.AmbiguousError
+	if errors.As(err, &ambErr) {
+		return resolverAmbiguousFacade(ambErr)
+	}
+
+	// resolver の NotFoundError → RESOLVER_*_NOT_FOUND（M08）
+	var nfErr *resolver.NotFoundError
+	if errors.As(err, &nfErr) {
+		return resolverNotFoundFacade(nfErr)
+	}
+
+	// resolver の sentinel
+	if errors.Is(err, resolver.ErrAppListTooLarge) {
+		return &output.Error{Code: "RESOLVER_APP_LIST_TOO_LARGE", Message: err.Error()}
+	}
+	if errors.Is(err, resolver.ErrEmptyRef) || errors.Is(err, resolver.ErrInvalidAppID) {
+		return &output.Error{Code: "INVALID_PARAMS", Message: err.Error()}
+	}
+
+	// operations のバリデーションエラー → INVALID_PARAMS（M08 で AppRef 系も追加）
 	switch {
 	case errors.Is(err, operations.ErrInvalidApp),
+		errors.Is(err, operations.ErrConflictingAppRef),
+		errors.Is(err, operations.ErrConflictingUpdateKeyFieldRef),
 		errors.Is(err, operations.ErrEmptyRecords),
 		errors.Is(err, operations.ErrConflictingRecords),
 		errors.Is(err, operations.ErrMissingUpdateKey),
@@ -43,6 +66,8 @@ func MapError(err error) *output.Error {
 		errors.Is(err, operations.ErrInvalidID),
 		errors.Is(err, operations.ErrRevisionsLengthMismatch):
 		return &output.Error{Code: "INVALID_PARAMS", Message: err.Error()}
+	case errors.Is(err, operations.ErrResolverUnavailable):
+		return &output.Error{Code: "INTERNAL", Message: err.Error()}
 	}
 
 	// kintone REST API のエラー
@@ -83,6 +108,64 @@ func MapError(err error) *output.Error {
 	}
 
 	return &output.Error{Code: "INTERNAL", Message: err.Error()}
+}
+
+// resolverAmbiguousFacade は resolver.AmbiguousError を output.Error に変換する（facade 経路 / M08）。
+func resolverAmbiguousFacade(e *resolver.AmbiguousError) *output.Error {
+	code := "RESOLVER_APP_AMBIGUOUS"
+	if e.Kind == "field" {
+		code = "RESOLVER_FIELD_AMBIGUOUS"
+	}
+	return &output.Error{
+		Code:    code,
+		Message: e.Error(),
+		Details: map[string]any{
+			"kind":       e.Kind,
+			"ref":        e.Ref,
+			"candidates": resolverCandidatesToMap(e.Candidates),
+		},
+	}
+}
+
+// resolverNotFoundFacade は resolver.NotFoundError を output.Error に変換する（facade 経路 / M08）。
+func resolverNotFoundFacade(e *resolver.NotFoundError) *output.Error {
+	code := "RESOLVER_APP_NOT_FOUND"
+	if e.Kind == "field" {
+		code = "RESOLVER_FIELD_NOT_FOUND"
+	}
+	return &output.Error{
+		Code:    code,
+		Message: e.Error(),
+		Details: map[string]any{
+			"kind":       e.Kind,
+			"ref":        e.Ref,
+			"candidates": resolverCandidatesToMap(e.Candidates),
+		},
+	}
+}
+
+// resolverCandidatesToMap は []resolver.Candidate を JSON 出力用 []map[string]any に変換する。
+//
+// 空フィールドは map に含めない（output.Error.Details の見やすさ優先）。
+func resolverCandidatesToMap(cs []resolver.Candidate) []map[string]any {
+	out := make([]map[string]any, 0, len(cs))
+	for _, c := range cs {
+		m := map[string]any{}
+		if c.ID != "" {
+			m["id"] = c.ID
+		}
+		if c.Code != "" {
+			m["code"] = c.Code
+		}
+		if c.Name != "" {
+			m["name"] = c.Name
+		}
+		if c.Label != "" {
+			m["label"] = c.Label
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // apiErrorCode は APIError.Category に対応する output.Error.Code を返す。

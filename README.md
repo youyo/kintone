@@ -132,14 +132,21 @@ export KINTONE_API_TOKEN=xxxxxxxxxxxxxxxxxxxx
 ```bash
 $ kintone api records get --app 1 --query 'name = "foo"' --field name --field age --total-count
 {"ok":true,"data":{"records":[{...}],"total_count":3}}
+
+# code / name / partial で App を指定可（M08 名前解決）
+$ kintone api records get --app-ref sales --query 'createdAt > LAST_WEEK()'
+{"ok":true,"data":{"records":[{...}]}}
 ```
 
 | フラグ | 型 | 必須 | 説明 |
 |--------|---|------|------|
-| `--app` | int64 | ◎ | kintone アプリ ID |
+| `--app` | int64 | △ | kintone アプリ ID（数値直指定、`--app-ref` と排他） |
+| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
 | `--query` | string | - | kintone クエリ言語 |
 | `--field` | string（複数指定可） | - | レスポンスを絞り込むフィールドコード |
 | `--total-count` | bool | - | true で `total_count` を含める |
+
+`--app` と `--app-ref` は **どちらか必須・両方指定は USAGE エラー**。
 
 > `--field` は **複数フラグ繰り返し**で指定します（`--field name --field age`）。カンマ区切りはサポートしません。
 
@@ -203,12 +210,14 @@ $ kintone ops record create --app 1 --record-json '{"name":{"value":"foo"}}' --d
 
 | フラグ | 型 | 必須 | 説明 |
 |--------|---|------|------|
-| `--app` | int64 | ◎ | kintone アプリ ID |
+| `--app` | int64 | △ | kintone アプリ ID（`--app-ref` と排他） |
+| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
 | `--record-json` | string | △ | 単件レコード JSON |
 | `--records-json` | string | △ | 複数件レコード JSON 配列 |
 | `--dry-run` | bool | - | true で API を呼ばず送信予定 body を出力 |
 
-`--record-json` と `--records-json` は **どちらか必須・両方指定は USAGE エラー** です。
+`--app` と `--app-ref` は **どちらか必須・両方指定は USAGE エラー**。
+`--record-json` と `--records-json` は **どちらか必須・両方指定は USAGE エラー**。
 
 ### レコード単件更新
 
@@ -230,14 +239,22 @@ $ kintone ops record update --app 1 --id 7 --revision 2 --record-json '{"name":{
 
 | フラグ | 型 | 必須 | 説明 |
 |--------|---|------|------|
-| `--app` | int64 | ◎ | kintone アプリ ID |
+| `--app` | int64 | △ | kintone アプリ ID（`--app-ref` と排他） |
+| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
 | `--id` | int64 | △ | 更新対象レコード ID |
-| `--update-key-field` / `--update-key-value` | string | △ | updateKey 指定（id と排他） |
+| `--update-key-field` | string | △ | updateKey: フィールドコード（`--update-key-field-ref` と排他） |
+| `--update-key-field-ref` | string | △ | updateKey: フィールド参照（label / partial、M08） |
+| `--update-key-value` | string | △ | updateKey: 値（updateKey 経路で必須） |
 | `--record-json` | string | ◎ | 更新内容 JSON |
 | `--revision` | int64 | - | 楽観ロック用 revision |
 | `--dry-run` | bool | - | 送信予定 body のみ出力 |
 
+`--app` と `--app-ref` は **どちらか必須・両方指定は USAGE エラー**。
 `--id` と `--update-key-*` は **排他**。どちらかが必須です。
+`--update-key-field` と `--update-key-field-ref` は **排他**。
+
+`--update-key-field-ref` を指定すると、まず App ID 解決後に label / partial で field code が解決されます。
+ambiguous 時は `RESOLVER_FIELD_AMBIGUOUS` で候補を `details.candidates` に返します。
 
 ### レコード削除
 
@@ -259,7 +276,8 @@ $ kintone ops record delete --app 1 --id 7 --id 8 --dry-run
 
 | フラグ | 型 | 必須 | 説明 |
 |--------|---|------|------|
-| `--app` | int64 | ◎ | kintone アプリ ID |
+| `--app` | int64 | △ | kintone アプリ ID（`--app-ref` と排他） |
+| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
 | `--id` | int64（複数指定可） | ◎ | 削除対象レコード ID（`--id 1 --id 2`） |
 | `--revision` | int64（複数指定可） | - | 楽観ロック用 revision（`--id` と同要素数） |
 | `--dry-run` | bool | - | 送信予定 body のみ出力 |
@@ -272,6 +290,56 @@ $ kintone ops record delete --app 1 --id 7 --id 8 --dry-run
 $ kintone ops app describe --app 1 --lang ja
 {"ok":true,"data":{"app":{"app_id":"1","name":"テスト",...},"fields":{...},"revision":"5"}}
 ```
+
+## 名前解決（Resolver / M08）
+
+CLI / MCP の `--app` 引数（および `--update-key-field`）に **数値 ID 以外**の参照を渡せます。
+
+### App の解決順序
+
+1. **ID 直接**: `"42"` のような数値文字列はそのまま App ID として採用
+2. **code 完全一致**: `ListApps?codes[]=ref` で完全一致を検索
+3. **name 完全一致**: `ListApps?name=ref` の結果から `Name == ref` を抽出
+4. **name 部分一致**: 同レスポンスから `Name` に `ref` が含まれるものを抽出
+
+各段階でヒットしたら即採用（fallback しない / predictability 優先）。
+ambiguous（複数ヒット）時は `RESOLVER_APP_AMBIGUOUS` を返し `details.candidates` に全候補を含めます。
+
+### Field の解決順序
+
+1. **code 完全一致**: `properties` のキー一致
+2. **label 完全一致**: properties 全走査
+3. **label 部分一致**: `strings.Contains` で抽出
+
+### 利用例
+
+```bash
+# code で App を解決
+$ kintone api records get --app-ref sales --query 'createdAt > LAST_WEEK()'
+{"ok":true,"data":{"records":[...]}}
+
+# name 部分一致で複数ヒット → ambiguous
+$ kintone api app describe --app-ref 営業
+{"ok":false,"error":{"code":"RESOLVER_APP_AMBIGUOUS","message":"...","details":{"kind":"app","ref":"営業","candidates":[{"id":"42","code":"sales","name":"営業 A"},{"id":"55","code":"sales2","name":"営業 B"}]}}}
+
+# field を label で解決して updateKey 経由更新
+$ kintone ops record update --app-ref sales --update-key-field-ref 顧客名 --update-key-value 山田 --record-json '{"phone":{"value":"080-..."}}'
+```
+
+### キャッシュとの統合
+
+Resolver は `service/api.API`（M07 の CachingAPI でラップ済み）越しに `ListApps` / `GetFormFields` を呼びます。
+1 年 TTL でキャッシュされるため、同じ ref を 2 回引いた場合の REST 呼び出しは 1 回。
+
+名前変更時の追従:
+- 1 年間は古い名前で resolve され続けるため、`kintone cache clear --scope=apps` で手動更新してください。
+
+### 後方互換
+
+既存の `--app <int>` 直指定は変更なしで動作します。
+MCP の `app: number` 引数も継続して受理します（`Required` のみ外し、`app_ref: string` を追加）。
+
+---
 
 ## キャッシュ管理（`kintone cache ...`）
 
@@ -317,11 +385,15 @@ $ KINTONE_DOMAIN=example.cybozu.com \
 | ツール名 | 説明 |
 |---------|------|
 | `apps_search` | アプリを ids/codes/name/space_ids/limit/offset で検索 |
-| `app_describe` | 単一アプリの基本情報 + フォームのフィールド定義を取得 |
-| `records_query` | kintone クエリでレコード一覧を取得（query / fields / total_count） |
-| `record_create` | レコード新規登録（record / records 排他、最大 100 件） |
-| `record_update` | レコード単件更新（id / update_key_* 排他、楽観ロック対応） |
-| `record_delete` | レコード複数件削除（revisions 任意） |
+| `app_describe` | 単一アプリの基本情報 + フォームのフィールド定義を取得（`app` または `app_ref`） |
+| `records_query` | kintone クエリでレコード一覧を取得（query / fields / total_count、`app` または `app_ref`） |
+| `record_create` | レコード新規登録（record / records 排他、最大 100 件、`app` または `app_ref`） |
+| `record_update` | レコード単件更新（id / update_key_* 排他、楽観ロック対応、`app`+`app_ref`、`update_key_field`+`update_key_field_ref` 排他） |
+| `record_delete` | レコード複数件削除（revisions 任意、`app` または `app_ref`） |
+
+`apps_search` 以外の全 tool は **M08 から `app_ref: string` 引数を追加**しました。
+`app: number` と `app_ref: string` は排他（どちらか必須）。
+`record_update` は `update_key_field_ref: string` も追加（label / partial で field code を解決）。
 
 各 tool の出力は CLI と同じ JSON envelope（`{"ok":true,"data":{...}}` /
 `{"ok":false,"error":{...}}`）を `CallToolResult.Content[0].Text` に格納します。

@@ -33,7 +33,7 @@ func TestAppDescribe_OK(t *testing.T) {
 			}, nil
 		},
 	}
-	out, err := operations.AppDescribe(context.Background(), s, operations.AppDescribeInput{App: 42, Lang: "ja"})
+	out, err := operations.AppDescribe(context.Background(), s, nil, operations.AppDescribeInput{App: 42, Lang: "ja"})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestAppDescribe_InvalidApp(t *testing.T) {
 			return nil, nil
 		},
 	}
-	_, err := operations.AppDescribe(context.Background(), s, operations.AppDescribeInput{App: 0})
+	_, err := operations.AppDescribe(context.Background(), s, nil, operations.AppDescribeInput{App: 0})
 	if !errors.Is(err, operations.ErrInvalidApp) {
 		t.Errorf("err=%v", err)
 	}
@@ -81,7 +81,7 @@ func TestAppDescribe_GetAppError(t *testing.T) {
 			return nil, nil
 		},
 	}
-	_, err := operations.AppDescribe(context.Background(), s, operations.AppDescribeInput{App: 42})
+	_, err := operations.AppDescribe(context.Background(), s, nil, operations.AppDescribeInput{App: 42})
 	var got *kintoneapi.APIError
 	if !errors.As(err, &got) {
 		t.Fatalf("expected APIError, got %v", err)
@@ -99,7 +99,7 @@ func TestAppDescribe_GetFormFieldsError(t *testing.T) {
 			return nil, apiErr
 		},
 	}
-	_, err := operations.AppDescribe(context.Background(), s, operations.AppDescribeInput{App: 42})
+	_, err := operations.AppDescribe(context.Background(), s, nil, operations.AppDescribeInput{App: 42})
 	var got *kintoneapi.APIError
 	if !errors.As(err, &got) {
 		t.Fatalf("expected APIError, got %v", err)
@@ -119,7 +119,7 @@ func TestAppDescribe_LangPropagation(t *testing.T) {
 			return &kintoneapi.GetFormFieldsResponse{}, nil
 		},
 	}
-	_, err := operations.AppDescribe(context.Background(), s, operations.AppDescribeInput{App: 1, Lang: "en"})
+	_, err := operations.AppDescribe(context.Background(), s, nil, operations.AppDescribeInput{App: 1, Lang: "en"})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestAppDescribe_LangOmitted(t *testing.T) {
 			return &kintoneapi.GetFormFieldsResponse{}, nil
 		},
 	}
-	_, err := operations.AppDescribe(context.Background(), s, operations.AppDescribeInput{App: 1})
+	_, err := operations.AppDescribe(context.Background(), s, nil, operations.AppDescribeInput{App: 1})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/youyo/kintone/internal/resolver"
 	"github.com/youyo/kintone/internal/service/operations"
 )
 
@@ -12,12 +13,15 @@ func recordsQueryTool() mcp.Tool {
 	return mcp.NewTool("records_query",
 		mcp.WithDescription(
 			"kintone のレコード一覧を取得する。kintone クエリ言語（query フィールド）でフィルタ・並び替え・ページングを行える。"+
+				"app（数値 ID）または app_ref（数値文字列 / code / name / partial）のいずれか必須・両方指定不可。"+
 				"結果は {\"ok\":true,\"data\":{\"records\":[...],\"total_count\":N?}} 形式の JSON envelope。",
 		),
 		mcp.WithNumber("app",
-			mcp.Required(),
-			mcp.Description("アプリ ID（必須・正の整数）。"),
+			mcp.Description("アプリ ID（数値・app_ref と排他）。"),
 			mcp.Min(1),
+		),
+		mcp.WithString("app_ref",
+			mcp.Description("アプリ参照（数値文字列 / code / name / partial、app と排他）。"),
 		),
 		mcp.WithString("query",
 			mcp.Description("kintone クエリ言語。例: 'name like \"佐藤\" order by 作成日時 desc limit 10'"),
@@ -40,7 +44,11 @@ func RecordsQueryHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 func recordsQueryHandler(deps ToolDeps) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
-		app, err := requireInt64(args, "app")
+		app, err := optInt64(args, "app")
+		if err != nil {
+			return invalidParams(err.Error())
+		}
+		appRef, err := optString(args, "app_ref")
 		if err != nil {
 			return invalidParams(err.Error())
 		}
@@ -56,8 +64,10 @@ func recordsQueryHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 		if err != nil {
 			return invalidParams(err.Error())
 		}
-		out, err := operations.RecordsQuery(ctx, deps.API, operations.RecordsQueryInput{
+		r := resolver.New(deps.API)
+		out, err := operations.RecordsQuery(ctx, deps.API, r, operations.RecordsQueryInput{
 			App:        app,
+			AppRef:     appRef,
 			Query:      query,
 			Fields:     fields,
 			TotalCount: totalCount,

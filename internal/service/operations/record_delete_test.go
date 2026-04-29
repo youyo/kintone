@@ -17,7 +17,7 @@ func TestRecordDelete_IDsOnly(t *testing.T) {
 			return nil
 		},
 	}
-	out, err := operations.RecordDelete(context.Background(), s, operations.RecordDeleteInput{
+	out, err := operations.RecordDelete(context.Background(), s, nil, operations.RecordDeleteInput{
 		App: 42, IDs: []int64{1, 2, 3},
 	})
 	if err != nil {
@@ -41,7 +41,7 @@ func TestRecordDelete_WithRevisions(t *testing.T) {
 			return nil
 		},
 	}
-	_, err := operations.RecordDelete(context.Background(), s, operations.RecordDeleteInput{
+	_, err := operations.RecordDelete(context.Background(), s, nil, operations.RecordDeleteInput{
 		App: 42, IDs: []int64{1, 2}, Revisions: []int64{10, 11},
 	})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestRecordDelete_WithRevisions(t *testing.T) {
 // OD-3: App=0
 func TestRecordDelete_InvalidApp(t *testing.T) {
 	s := &stubAPI{}
-	_, err := operations.RecordDelete(context.Background(), s, operations.RecordDeleteInput{
+	_, err := operations.RecordDelete(context.Background(), s, nil, operations.RecordDeleteInput{
 		IDs: []int64{1},
 	})
 	if !errors.Is(err, operations.ErrInvalidApp) {
@@ -66,7 +66,7 @@ func TestRecordDelete_InvalidApp(t *testing.T) {
 // OD-4: IDs 空
 func TestRecordDelete_EmptyIDs(t *testing.T) {
 	s := &stubAPI{}
-	_, err := operations.RecordDelete(context.Background(), s, operations.RecordDeleteInput{
+	_, err := operations.RecordDelete(context.Background(), s, nil, operations.RecordDeleteInput{
 		App: 1, IDs: nil,
 	})
 	if !errors.Is(err, operations.ErrEmptyIDs) {
@@ -77,7 +77,7 @@ func TestRecordDelete_EmptyIDs(t *testing.T) {
 // OD-5: IDs に 0 含む
 func TestRecordDelete_InvalidID(t *testing.T) {
 	s := &stubAPI{}
-	_, err := operations.RecordDelete(context.Background(), s, operations.RecordDeleteInput{
+	_, err := operations.RecordDelete(context.Background(), s, nil, operations.RecordDeleteInput{
 		App: 1, IDs: []int64{1, 0, 2},
 	})
 	if !errors.Is(err, operations.ErrInvalidID) {
@@ -88,7 +88,7 @@ func TestRecordDelete_InvalidID(t *testing.T) {
 // OD-6: revisions 長さ不一致
 func TestRecordDelete_RevisionsLengthMismatch(t *testing.T) {
 	s := &stubAPI{}
-	_, err := operations.RecordDelete(context.Background(), s, operations.RecordDeleteInput{
+	_, err := operations.RecordDelete(context.Background(), s, nil, operations.RecordDeleteInput{
 		App: 1, IDs: []int64{1, 2}, Revisions: []int64{10},
 	})
 	if !errors.Is(err, operations.ErrRevisionsLengthMismatch) {
@@ -104,7 +104,7 @@ func TestRecordDelete_APIErrorPassThrough(t *testing.T) {
 			return apiErr
 		},
 	}
-	_, err := operations.RecordDelete(context.Background(), s, operations.RecordDeleteInput{
+	_, err := operations.RecordDelete(context.Background(), s, nil, operations.RecordDeleteInput{
 		App: 1, IDs: []int64{1},
 	})
 	var got *kintoneapi.APIError
