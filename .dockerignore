@@ -1,0 +1,30 @@
+# VCS / IDE
+.git
+.gitignore
+.github
+.serena
+.claude
+.vscode
+.idea
+
+# 計画書 / ドキュメント（ビルドに不要）
+plans
+docs
+
+# ビルド成果物 / 一時ファイル
+*.test
+*.out
+coverage.*
+dist
+*.log
+*.tmp
+
+# secret 系（誤コピー防止）
+.env
+.envrc
+*.pem
+*.key
+
+# バイナリ（host build の混入防止）
+kintone
+/cmd/kintone/kintone
