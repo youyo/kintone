@@ -64,8 +64,12 @@ func recordsQueryHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 		if err != nil {
 			return invalidParams(err.Error())
 		}
-		r := resolver.New(deps.API)
-		out, err := operations.RecordsQuery(ctx, deps.API, r, operations.RecordsQueryInput{
+		api, err := resolveAPI(ctx, deps)
+		if err != nil {
+			return errorResult(err)
+		}
+		r := resolver.New(api)
+		out, err := operations.RecordsQuery(ctx, api, r, operations.RecordsQueryInput{
 			App:        app,
 			AppRef:     appRef,
 			Query:      query,
