@@ -187,6 +187,35 @@ func TestLoad_ExplicitConfigPathNotFound(t *testing.T) {
 	}
 }
 
+func TestLoad_ProfileNotFoundErrorPathPropagated(t *testing.T) {
+	t.Parallel()
+	content := []byte(`
+[profiles.default]
+domain = "x"
+auth   = "api-token"
+`)
+	opts := LoadOptions{
+		CLI:         CLIConfig{Profile: "prod", ConfigPath: "/etc/kintone.toml"},
+		Getenv:      mockGetenv(map[string]string{}),
+		ReadFile:    mockReadFile(content, nil),
+		UserHomeDir: func() (string, error) { return "/home/test", nil },
+	}
+	_, err := Load(opts)
+	if err == nil {
+		t.Fatalf("expected ProfileNotFoundError, got nil")
+	}
+	var pne *ProfileNotFoundError
+	if !errors.As(err, &pne) {
+		t.Fatalf("expected *ProfileNotFoundError, got %T: %v", err, err)
+	}
+	if pne.Path != "/etc/kintone.toml" {
+		t.Errorf("ProfileNotFoundError.Path = %q, want %q", pne.Path, "/etc/kintone.toml")
+	}
+	if pne.Name != "prod" {
+		t.Errorf("ProfileNotFoundError.Name = %q, want %q", pne.Name, "prod")
+	}
+}
+
 func TestLoad_DefaultPathNotFoundIsNotError(t *testing.T) {
 	t.Parallel()
 	// 明示指定なしでデフォルトパスに何もない場合はエラーにしない（spec 完了条件 #2）

@@ -9,6 +9,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -153,6 +154,11 @@ func Load(opts LoadOptions) (*Resolved, error) {
 
 	r, err := Resolve(profileName, opts.CLI, env, file)
 	if err != nil {
+		// ProfileNotFoundError には参考情報として最終解決済みの configPath を補完する
+		var pne *ProfileNotFoundError
+		if errors.As(err, &pne) {
+			pne.Path = configPath
+		}
 		return nil, err
 	}
 	r.ConfigPath = configPath
