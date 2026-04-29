@@ -8,10 +8,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/youyo/kintone/internal/auth/oauth"
 	"github.com/youyo/kintone/internal/cli"
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/kintoneapi"
 )
+
+// OAuth エラーのヘルパー関数群
+func oauthErrStateMismatch() error      { return oauth.ErrStateMismatch }
+func oauthErrCallbackTimeout() error    { return oauth.ErrCallbackTimeout }
+func oauthErrRefreshRevoked() error     { return oauth.ErrRefreshTokenRevoked }
+func oauthErrTokenExpired() error       { return oauth.ErrTokenExpired }
+func oauthErrInvalidRedirectURL() error { return oauth.ErrInvalidRedirectURL }
+func oauthErrMissingCredentials() error { return oauth.ErrMissingClientCredentials }
+func oauthProviderError() error {
+	return &oauth.OAuthError{Code: "invalid_scope", Description: "scope is invalid", HTTPStatus: 400}
+}
 
 // E-1: cobra の unknown command エラーが USAGE にマップされる
 func TestMapToOutputError_UnknownCommand(t *testing.T) {
@@ -209,5 +221,66 @@ func TestMapToOutputError_WrappedAPIError(t *testing.T) {
 	oe := cli.MapToOutputError(wrapped)
 	if oe.Code != "KINTONE_UNAUTHORIZED" {
 		t.Errorf("Code=%q want KINTONE_UNAUTHORIZED", oe.Code)
+	}
+}
+
+// OAuth エラーマッピングテスト（M09）
+
+// EO-1: ErrStateMismatch → OAUTH_STATE_MISMATCH
+func TestMapToOutputError_OAuthStateMismatch(t *testing.T) {
+	oe := cli.MapToOutputError(oauthErrStateMismatch())
+	if oe.Code != "OAUTH_STATE_MISMATCH" {
+		t.Errorf("Code=%q want OAUTH_STATE_MISMATCH", oe.Code)
+	}
+}
+
+// EO-2: ErrCallbackTimeout → OAUTH_CALLBACK_TIMEOUT
+func TestMapToOutputError_OAuthCallbackTimeout(t *testing.T) {
+	oe := cli.MapToOutputError(oauthErrCallbackTimeout())
+	if oe.Code != "OAUTH_CALLBACK_TIMEOUT" {
+		t.Errorf("Code=%q want OAUTH_CALLBACK_TIMEOUT", oe.Code)
+	}
+}
+
+// EO-3: ErrRefreshTokenRevoked → OAUTH_REFRESH_REVOKED
+func TestMapToOutputError_OAuthRefreshRevoked(t *testing.T) {
+	oe := cli.MapToOutputError(oauthErrRefreshRevoked())
+	if oe.Code != "OAUTH_REFRESH_REVOKED" {
+		t.Errorf("Code=%q want OAUTH_REFRESH_REVOKED", oe.Code)
+	}
+}
+
+// EO-4: ErrTokenExpired → KINTONE_UNAUTHORIZED
+func TestMapToOutputError_OAuthTokenExpired(t *testing.T) {
+	oe := cli.MapToOutputError(oauthErrTokenExpired())
+	if oe.Code != "KINTONE_UNAUTHORIZED" {
+		t.Errorf("Code=%q want KINTONE_UNAUTHORIZED", oe.Code)
+	}
+}
+
+// EO-5: ErrInvalidRedirectURL → USAGE
+func TestMapToOutputError_OAuthInvalidRedirectURL(t *testing.T) {
+	oe := cli.MapToOutputError(oauthErrInvalidRedirectURL())
+	if oe.Code != "USAGE" {
+		t.Errorf("Code=%q want USAGE", oe.Code)
+	}
+}
+
+// EO-6: ErrMissingClientCredentials → USAGE
+func TestMapToOutputError_OAuthMissingCredentials(t *testing.T) {
+	oe := cli.MapToOutputError(oauthErrMissingCredentials())
+	if oe.Code != "USAGE" {
+		t.Errorf("Code=%q want USAGE", oe.Code)
+	}
+}
+
+// EO-7: *OAuthError → OAUTH_PROVIDER_ERROR
+func TestMapToOutputError_OAuthProviderError(t *testing.T) {
+	oe := cli.MapToOutputError(oauthProviderError())
+	if oe.Code != "OAUTH_PROVIDER_ERROR" {
+		t.Errorf("Code=%q want OAUTH_PROVIDER_ERROR", oe.Code)
+	}
+	if _, ok := oe.Details["provider_code"]; !ok {
+		t.Errorf("expected provider_code in details, got %v", oe.Details)
 	}
 }

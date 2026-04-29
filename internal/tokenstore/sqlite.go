@@ -164,6 +164,47 @@ func (s *SQLiteStore) Delete(ctx context.Context, domain, principalID string, t 
 	return nil
 }
 
+// ListByDomain は指定ドメイン + 認証タイプに該当するトークンを全件返す。
+// M09 の auth status / logout --all で使用する。
+// Store interface には含まれないため、型アサーション経由でアクセスする。
+func (s *SQLiteStore) ListByDomain(ctx context.Context, domain string, t AuthType) ([]*Token, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT domain, principal_id, auth_type, api_token, access_token, refresh_token, expires_at, updated_at
+		 FROM tokens
+		 WHERE domain=? AND auth_type=?
+		 ORDER BY principal_id`,
+		domain, string(t),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("tokenstore: list by domain (%s,%s): %w", domain, t, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []*Token
+	for rows.Next() {
+		var tok Token
+		var expiresAtSec, updatedAtSec int64
+		var authTypeStr string
+		if scanErr := rows.Scan(
+			&tok.Domain, &tok.PrincipalID, &authTypeStr,
+			&tok.APIToken, &tok.AccessToken, &tok.RefreshToken,
+			&expiresAtSec, &updatedAtSec,
+		); scanErr != nil {
+			return nil, fmt.Errorf("tokenstore: scan: %w", scanErr)
+		}
+		tok.AuthType = AuthType(authTypeStr)
+		if expiresAtSec > 0 {
+			tok.ExpiresAt = time.Unix(expiresAtSec, 0).UTC()
+		}
+		tok.UpdatedAt = time.Unix(updatedAtSec, 0).UTC()
+		result = append(result, &tok)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("tokenstore: list by domain rows: %w", err)
+	}
+	return result, nil
+}
+
 // Close は DB ハンドルを閉じる。
 func (s *SQLiteStore) Close() error {
 	if s == nil || s.db == nil {
