@@ -235,6 +235,25 @@ func TestClient_DeleteRecords(t *testing.T) {
 	}
 }
 
+// SA-8: ListApps 透過
+func TestClient_ListApps(t *testing.T) {
+	var gotPath string
+	sc, _ := newServiceAPIWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = io.WriteString(w, `{"apps":[{"appId":"1","code":"hr","name":"人事"}]}`)
+	})
+	resp, err := sc.ListApps(context.Background(), kintoneapi.ListAppsRequest{Name: "hr"})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if gotPath != "/k/v1/apps.json" {
+		t.Errorf("path=%q", gotPath)
+	}
+	if len(resp.Apps) != 1 || resp.Apps[0].AppID != "1" {
+		t.Errorf("apps=%v", resp.Apps)
+	}
+}
+
 // SA-W-4: write 系のエラー透過（422）
 func TestClient_InsertRecords_ErrorPassThrough(t *testing.T) {
 	sc, _ := newServiceAPIWithMock(t, func(w http.ResponseWriter, r *http.Request) {

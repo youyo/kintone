@@ -22,6 +22,8 @@ type API interface {
 	GetRecord(ctx context.Context, req kintoneapi.GetRecordRequest) (*kintoneapi.GetRecordResponse, error)
 	GetApp(ctx context.Context, req kintoneapi.GetAppRequest) (*kintoneapi.GetAppResponse, error)
 	GetFormFields(ctx context.Context, req kintoneapi.GetFormFieldsRequest) (*kintoneapi.GetFormFieldsResponse, error)
+	// Apps 一覧（M06）
+	ListApps(ctx context.Context, req kintoneapi.ListAppsRequest) (*kintoneapi.ListAppsResponse, error)
 	// Write 系（M05）
 	InsertRecords(ctx context.Context, req kintoneapi.InsertRecordsRequest) (*kintoneapi.InsertRecordsResponse, error)
 	UpdateRecord(ctx context.Context, req kintoneapi.UpdateRecordRequest) (*kintoneapi.UpdateRecordResponse, error)
@@ -61,6 +63,11 @@ func (c *Client) GetApp(ctx context.Context, req kintoneapi.GetAppRequest) (*kin
 // GetFormFields は GET /k/v1/app/form/fields.json を呼ぶ。
 func (c *Client) GetFormFields(ctx context.Context, req kintoneapi.GetFormFieldsRequest) (*kintoneapi.GetFormFieldsResponse, error) {
 	return c.k.GetFormFields(ctx, req)
+}
+
+// ListApps は GET /k/v1/apps.json を呼ぶ（M06）。
+func (c *Client) ListApps(ctx context.Context, req kintoneapi.ListAppsRequest) (*kintoneapi.ListAppsResponse, error) {
+	return c.k.ListApps(ctx, req)
 }
 
 // InsertRecords は POST /k/v1/records.json を呼ぶ（M05）。
