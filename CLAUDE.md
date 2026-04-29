@@ -4,21 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト現状
 
-**M06 完了済み**。M07（SQLite キャッシュ + TokenStore）が次のマイルストーン。
+**M07 完了済み**。M08（Resolver 名前解決）が次のマイルストーン。
 
 - Go 1.26、module: `github.com/youyo/kintone`
-- 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...` / `ops {record create|update|delete, app describe}` / **`mcp serve`**（M06）
+- 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...` / `ops {record create|update|delete, app describe}` / `mcp serve`（M06）/ **`cache clear|stats`**（M07）
 - 実装済みパッケージ:
   - `internal/output` — JSON 出力規約（CLI / MCP 共通）
-  - `internal/cli` + `internal/cli/api` + `internal/cli/ops` + **`internal/cli/mcp`** + `internal/cli/clierr`（共通 UsageError）
-  - `internal/config` — CLI > ENV > toml の優先解決
+  - `internal/cli` + `internal/cli/api` + `internal/cli/ops` + `internal/cli/mcp` + `internal/cli/clierr`（共通 UsageError）+ **`internal/cli/cache`**（M07）
+  - `internal/config` — CLI > ENV > toml の優先解決（`KINTONE_CACHE_PATH` 対応）
   - `internal/auth/apitoken` — `X-Cybozu-API-Token` ヘッダ付与
-  - `internal/kintoneapi` — net/http 薄ラッパー REST クライアント（read 系 + write 系 + **`ListApps`**（apps_search 用））
-  - `internal/service/api` — `kintoneapi` の薄い透過層（interface でモック容易化、M07 cache 挿入点）
+  - `internal/kintoneapi` — net/http 薄ラッパー REST クライアント（read 系 + write 系 + `ListApps`（apps_search 用））
+  - `internal/service/api` — `kintoneapi` の薄い透過層（interface でモック容易化）+ **`CachingAPI` decorator**（M07）
   - `internal/service/operations` — LLM 向け抽象化: `RecordsQuery` / `AppDescribe` / `RecordCreate` / `RecordUpdate` / `RecordDelete`
-  - **`internal/mcp/server`** — mark3labs/mcp-go v0.49.0 の薄いラッパー（stdio 起動）
-  - **`internal/mcp/facade`** — 6 つの MCP tools ハンドラ（apps_search / app_describe / records_query / record_create / record_update / record_delete）と `MapError`（`cli.MapToOutputError` と同等の error→code マッパー）
-- 依存方向: `cli/{api,ops,mcp} → service/operations → service/api → kintoneapi → auth` / `cli/mcp → mcp/server → mcp/facade → service/operations`
+  - `internal/mcp/server` — mark3labs/mcp-go v0.49.0 の薄いラッパー（stdio 起動）
+  - `internal/mcp/facade` — 6 つの MCP tools ハンドラと `MapError`
+  - **`internal/cache`** — SQLite ベースのキャッシュ層（modernc.org/sqlite v1.50.0 / TTL 管理 / パス解決）（M07）
+  - **`internal/tokenstore`** — OAuth アクセストークン保存（Get/Put/Delete、Key=Domain+PrincipalID+AuthType）（M07）
+- 依存方向: `cli/{api,ops,mcp} → service/api(CachingAPI) → kintoneapi → auth` / `cli/mcp → mcp/server → mcp/facade → service/operations` / `CachingAPI → cache`
 - **設計原則**: CLI / MCP から `internal/kintoneapi` 直 import 禁止。必ず `service/api` または `service/operations` を経由する
 - **設計判断（M05）**:
   - `clierr.UsageError` 型 sentinel + `MapToOutputError` `errors.As` 分岐で USAGE 分類を堅牢化（文字列 prefix 依存を排除）。配置は中立パッケージ `internal/cli/clierr` で循環なし
@@ -29,8 +31,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `facade.MapError` は `errors.Is`（operations の Err\*）→ `errors.As`（`*kintoneapi.APIError`、`*url.Error`）→ context error の優先順で分類し、`INVALID_PARAMS` / `KINTONE_*` / `KINTONE_NETWORK` / `INTERNAL` に振り分ける
   - dry-run は MCP には露出しない（LLM ツール選択のセマンティクスに不適）
   - `internal/cli/mcp/helpers.go` は `cli/api` と同型の `NewAPIBuilder` hook を持ち、テストで stub を注入可能（並列テスト禁止）
-- `go test -race -cover ./...` 全 pass（mcp/facade 80.3% / mcp/server 75.0% / cli/mcp 57.1% / それ以外は M05 と同等以上）
-- ブランチ: `feat/m06-mcp-server-facade`（main への merge 待ち）
+- **設計判断（M07）**:
+  - `CachingAPI` は `service/api.API` interface の decorator パターン。upstream を wrap し、`GetApp` / `GetAppFormFields` / `ListApps` にキャッシュ TTL（1 年）を適用
+  - `KINTONE_CACHE_DISABLE=1` で CachingAPI をスキップし、upstream を直接使用する
+  - `cache.OpenIfExists` で DB ファイル不在時は auto-create しない（`cache clear/stats` サブコマンドは `cache.Store` がなければ空統計を返す）
+  - キャッシュパス: ホスト `~/.cache/kintone/cache.db` / コンテナ `KINTONE_CACHE_PATH` 環境変数で上書き
+  - `tokenstore` は `cache` パッケージとは独立した DB ファイル（将来の multi-user OAuth 対応のため `TokenStore` を分離）
+- `go test -race -cover ./...` 全 pass（cache 76.2% / cli/cache 73.6% / tokenstore 79.0% / service/api 88.9% / それ以外は M06 と同等以上）
+- ブランチ: `feat/m07-sqlite-cache-tokenstore`（main への merge 待ち）
 
 ## 開発ワークフロー
 
@@ -117,4 +125,5 @@ go run ./cmd/kintone version       # JSON 出力で動作確認
 - M04 詳細計画: `plans/kintone-m04-service-read-cli-api.md`
 - M05 詳細計画: `plans/kintone-m05-cli-ops-write.md`
 - M06 詳細計画: `plans/kintone-m06-mcp-server-facade.md`
-- M07 以降の詳細計画は着手時に `/devflow:plan` で生成する
+- M07 詳細計画: `plans/kintone-m07-sqlite-cache-tokenstore.md`
+- M08 以降の詳細計画は着手時に `/devflow:plan` で生成する

@@ -92,7 +92,8 @@ $ kintone config show --profile dev
 |------|------|
 | `KINTONE_PROFILE` | 使用する profile 名 |
 | `KINTONE_CONFIG_PATH` | config.toml のパス |
-| `KINTONE_CACHE_PATH` | cache db のパス（M07 で利用） |
+| `KINTONE_CACHE_PATH` | cache db のパス（デフォルト: `~/.cache/kintone/cache.db`、コンテナ: `/data/kintone/cache.db`） |
+| `KINTONE_CACHE_DISABLE` | `1` で SQLite キャッシュを無効化（API を毎回直叩き） |
 | `KINTONE_DOMAIN` | kintone ドメイン（例: `example.cybozu.com`） |
 | `KINTONE_AUTH` | 認証モード（`api-token` / `oauth`） |
 | `KINTONE_API_TOKEN` | API Token |
@@ -271,6 +272,33 @@ $ kintone ops record delete --app 1 --id 7 --id 8 --dry-run
 $ kintone ops app describe --app 1 --lang ja
 {"ok":true,"data":{"app":{"app_id":"1","name":"テスト",...},"fields":{...},"revision":"5"}}
 ```
+
+## キャッシュ管理（`kintone cache ...`）
+
+kintone API の app / field 情報を SQLite にキャッシュし、繰り返しリクエストを削減します。
+TokenStore は OAuth アクセストークンを安全に保存・管理します。
+
+### キャッシュの統計確認
+
+```bash
+$ kintone cache stats
+{"ok":true,"data":{"db_path":"/Users/foo/.cache/kintone/cache.db","exists":true,"size_bytes":49152,"entry_count":12,"expired_count":0}}
+```
+
+DB ファイルが存在しない場合は `exists: false` の統計を返します。
+
+### キャッシュの削除
+
+```bash
+$ kintone cache clear
+{"ok":true,"data":{"cleared":true,"deleted_count":12}}
+```
+
+特定キーパターンのみ削除する場合は `--key` フラグを使用します（省略時は全件削除）。
+
+| フラグ | 型 | 必須 | 説明 |
+|--------|---|------|------|
+| `--key` | string | - | 削除対象キーのプレフィックス（省略時は全件削除） |
 
 ## MCP サーバー（`kintone mcp serve`）
 
