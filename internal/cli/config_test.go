@@ -268,6 +268,35 @@ func TestConfigInit_DefaultPath(t *testing.T) {
 	}
 }
 
+// CC-14: --config /nonexistent.toml で show すると CONFIG_NOT_FOUND
+func TestConfigShow_ExplicitConfigNotFound(t *testing.T) {
+	tmp := t.TempDir()
+	missingPath := filepath.Join(tmp, "no-such.toml")
+	t.Setenv("KINTONE_API_TOKEN", "")
+
+	var out, errOut bytes.Buffer
+	err := cli.ExecuteWith([]string{"config", "show", "--config", missingPath}, &out, &errOut)
+	if err == nil {
+		t.Fatal("expected error for nonexistent config, got nil")
+	}
+	var resp struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string         `json:"code"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
+		t.Fatalf("parse JSON: %v, out=%q", err, out.String())
+	}
+	if resp.Error.Code != "CONFIG_NOT_FOUND" {
+		t.Errorf("Code = %q, want CONFIG_NOT_FOUND", resp.Error.Code)
+	}
+	if got, _ := resp.Error.Details["path"].(string); got != missingPath {
+		t.Errorf("Details.path = %v, want %q", resp.Error.Details["path"], missingPath)
+	}
+}
+
 // CC-13: writeFileAtomic の rename 失敗をシミュレート
 // （TempDir を read-only にして CreateTemp 失敗を起こす）
 func TestConfigInit_TempCreateFailure(t *testing.T) {
