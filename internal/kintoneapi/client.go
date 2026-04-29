@@ -118,7 +118,8 @@ func New(opts ClientOptions) (*Client, error) {
 // NewFromResolved は config.Resolved から Client を構築する便利関数。
 //
 // Resolved.Auth が "api-token" のとき auth.NewAPITokenAuthenticator を使い、
-// それ以外は ErrUnsupportedAuthMode を返す（M09 で OAuth を追加予定）。
+// "oauth" のとき ErrUnsupportedAuthMode を返す（OAuth の場合は NewFromResolvedWithAuth を使うこと）。
+// それ以外の未知の値も ErrUnsupportedAuthMode を返す。
 func NewFromResolved(r *config.Resolved) (*Client, error) {
 	if r == nil {
 		return nil, errors.New("kintoneapi: resolved config is nil")
@@ -133,6 +134,24 @@ func NewFromResolved(r *config.Resolved) (*Client, error) {
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedAuthMode, r.Auth)
 	}
+}
+
+// NewFromResolvedWithAuth は config.Resolved と外部から構築済みの Authenticator から
+// Client を構築する。
+//
+// OAuth 用 Authenticator（oauth.Authenticator）を注入するときに使用する。
+// Authenticator の構築は cli/auth/helpers.go の責務として完全に切り出し、
+// kintoneapi は auth パッケージ詳細（oauth, tokenstore）を知らない設計を維持する。
+//
+// 使用例:
+//
+//	a := oauth.NewAuthenticator(store, domain, principalID, refresher, nil)
+//	client, err := kintoneapi.NewFromResolvedWithAuth(resolved, a)
+func NewFromResolvedWithAuth(r *config.Resolved, a auth.Authenticator) (*Client, error) {
+	if r == nil {
+		return nil, errors.New("kintoneapi: resolved config is nil")
+	}
+	return New(ClientOptions{Domain: r.Domain, Authenticator: a})
 }
 
 // validateDomain は Domain の形式を検証する。
