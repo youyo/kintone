@@ -42,7 +42,9 @@ func newVersionCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if short {
 				// 規約例外: プレーンテキスト出力（人間/シェルスクリプト向け）
-				fmt.Fprintln(cmd.OutOrStdout(), Version)
+				if _, err := fmt.Fprintln(cmd.OutOrStdout(), Version); err != nil {
+					return err
+				}
 				return nil
 			}
 			payload, err := output.Success(versionPayload{

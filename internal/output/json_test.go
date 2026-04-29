@@ -24,10 +24,6 @@ func TestSuccess_Simple(t *testing.T) {
 
 // O-2: Success: ネストした data
 func TestSuccess_Nested(t *testing.T) {
-	type inner struct {
-		A int      `json:"a"`
-		B []string `json:"b"`
-	}
 	type payload struct {
 		A int      `json:"a"`
 		B []string `json:"b"`
