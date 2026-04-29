@@ -1,21 +1,66 @@
 # kintone CLI
 
-kintone API を操作するための CLI ツールです。
+kintone API を操作するための CLI ツール / MCP サーバーです。
 全コマンドは LLM・パイプ処理に適した JSON 形式で結果を出力します。
 
+> **Status**: 全 11 マイルストーン完了。リリース準備済み（タグ push で GitHub Releases / Homebrew / ghcr.io へ自動配布）。
+
 ## インストール
+
+以下の 4 方式から選べます。
+
+### 1. Homebrew（macOS / Linux）
+
+```bash
+brew install youyo/tap/kintone
+```
+
+> 事前に Homebrew Tap リポジトリ `youyo/homebrew-tap` が公開されている必要があります（リリース後に自動更新）。
+
+### 2. Docker（multi-arch: amd64 / arm64）
+
+```bash
+docker pull ghcr.io/youyo/kintone:latest
+docker run --rm ghcr.io/youyo/kintone:latest version
+```
+
+`~/.config/kintone` と `~/.cache/kintone` をマウントして使うと便利です:
+
+```bash
+docker run --rm -it \
+  -v "$HOME/.config/kintone:/home/nonroot/.config/kintone" \
+  -v "$HOME/.cache/kintone:/home/nonroot/.cache/kintone" \
+  ghcr.io/youyo/kintone:latest api records --app 1
+```
+
+### 3. `go install`
 
 ```bash
 go install github.com/youyo/kintone/cmd/kintone@latest
 ```
 
-または手動ビルド:
+### 4. GitHub Releases バイナリ
+
+[Releases](https://github.com/youyo/kintone/releases) から OS / arch に合った tar.gz / zip を取得し展開してください。
+SHA256 checksum (`checksums.txt`) で整合性を検証できます。
+
+### ソースからビルド（開発者向け）
 
 ```bash
 git clone https://github.com/youyo/kintone.git
 cd kintone
 go build -o /usr/local/bin/kintone ./cmd/kintone
 ```
+
+## 認証方式の使い分け
+
+| 方式 | 想定ユース | 必要設定 | コマンド |
+|---|---|---|---|
+| **API Token** | CLI 単発実行 / シングルユーザ MCP / シンプルな自動化 | `KINTONE_DOMAIN` + `KINTONE_API_TOKEN`（または config.toml） | `kintone api/ops/mcp serve`（既定） |
+| **OAuth 2.0** | ユーザー個別の権限で操作 / マルチユーザ | OAuth クライアント登録 + `kintone auth login --oauth --principal-id <id>` | `kintone api/ops ...`（自動的に保存トークンを使用） |
+| **OIDC remote (idproxy)** | リモート MCP サーバ + 複数ユーザ + ID プロバイダ連携 | OIDC Issuer / Client / Cookie Secret 等 | `kintone mcp serve --listen :8080 --auth oidc --authz oauth` |
+
+詳細は本 README の「API Token 認証」「OAuth 認証」「MCP サーバー」セクション参照。
 
 ## 使い方
 
@@ -453,6 +498,46 @@ $ kintone cache clear
 |--------|---|------|------|
 | `--key` | string | - | 削除対象キーのプレフィックス（省略時は全件削除） |
 
+## シェル補完（`kintone completion`）
+
+bash / zsh / fish / powershell の補完スクリプトを生成します。
+
+> **出力規約の例外**: completion 出力はシェルが直接 source / Invoke-Expression するため、
+> 通常の JSON envelope（`{"ok":true,...}`）には包まずプレーンスクリプトを stdout に出力します。
+> `version --short` と同列の例外として明示しています。
+
+### bash
+
+```bash
+# Linux
+kintone completion bash | sudo tee /etc/bash_completion.d/kintone > /dev/null
+
+# macOS（Homebrew）
+kintone completion bash > "$(brew --prefix)/etc/bash_completion.d/kintone"
+```
+
+### zsh
+
+```bash
+kintone completion zsh > "${fpath[1]}/_kintone"
+# 反映
+autoload -U compinit && compinit
+```
+
+### fish
+
+```bash
+kintone completion fish > ~/.config/fish/completions/kintone.fish
+```
+
+### PowerShell
+
+`$PROFILE` に追記:
+
+```powershell
+kintone completion powershell | Out-String | Invoke-Expression
+```
+
 ## MCP サーバー（`kintone mcp serve`）
 
 LLM クライアント（Claude Desktop など）から kintone を操作するための
@@ -577,6 +662,29 @@ $ kintone version | jq -r '.data.version'
 ## ロードマップ
 
 詳細は [plans/kintone-roadmap.md](plans/kintone-roadmap.md) を参照してください。
+全 11 マイルストーン完了済。
+
+## リリース手順（メンテナ向け）
+
+タグを push すると `.github/workflows/release.yml` が起動し、
+GitHub Releases / Homebrew Tap / ghcr.io へ成果物を配布します。
+
+```bash
+# 1. main の最終確認
+git checkout main && git pull
+go test -race ./... && golangci-lint run ./...
+
+# 2. タグ作成と push
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+事前準備（初回のみ）:
+
+- `youyo/homebrew-tap` リポジトリを GitHub に作成（空でよい）
+- リポジトリ Settings > Secrets > Actions に `HOMEBREW_TAP_GITHUB_TOKEN` を登録
+  （上記 Tap リポジトリへの `repo` 権限を持つ Personal Access Token）
+- ghcr.io への push は `GITHUB_TOKEN` の `packages: write` 権限で動作（追加設定不要）
 
 ## ライセンス
 
