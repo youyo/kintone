@@ -1,14 +1,17 @@
 package cli
 
 import (
+	"context"
 	"errors"
+	"net/url"
 	"strings"
 
 	"github.com/youyo/kintone/internal/config"
+	"github.com/youyo/kintone/internal/kintoneapi"
 	"github.com/youyo/kintone/internal/output"
 )
 
-// MapToOutputError は cobra および config 関連のエラーを *output.Error に変換する。
+// MapToOutputError は cobra、config、kintoneapi 関連のエラーを *output.Error に変換する。
 // nil を渡すと nil を返す。
 //
 // 優先順位（先頭ヒットを採用）:
@@ -16,8 +19,10 @@ import (
 //  2. config.ParseError           → CONFIG_PARSE_ERROR
 //  3. config.AlreadyExistsError   → CONFIG_ALREADY_EXISTS
 //  4. config.NotFoundError        → CONFIG_NOT_FOUND
-//  5. cobra USAGE 系              → USAGE
-//  6. その他                      → INTERNAL
+//  5. kintoneapi.APIError         → KINTONE_*
+//  6. net/url.Error / context.DeadlineExceeded → KINTONE_NETWORK
+//  7. cobra USAGE 系              → USAGE
+//  8. その他                      → INTERNAL
 func MapToOutputError(err error) *output.Error {
 	if err == nil {
 		return nil
@@ -67,11 +72,71 @@ func MapToOutputError(err error) *output.Error {
 		}
 	}
 
+	var apiErr *kintoneapi.APIError
+	if errors.As(err, &apiErr) {
+		code := mapAPIErrorCode(apiErr)
+		details := map[string]any{"http_status": apiErr.HTTPStatus}
+		if apiErr.Code != "" {
+			details["kintone_code"] = apiErr.Code
+		}
+		if apiErr.ID != "" {
+			details["kintone_id"] = apiErr.ID
+		}
+		if apiErr.RetryAfter > 0 {
+			details["retry_after_sec"] = int(apiErr.RetryAfter.Seconds())
+		}
+		return &output.Error{
+			Code:    code,
+			Message: apiErr.Error(),
+			Details: details,
+		}
+	}
+
+	// net/url.Error（タイムアウト含む）→ KINTONE_NETWORK
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		details := map[string]any{"timeout": urlErr.Timeout()}
+		return &output.Error{
+			Code:    "KINTONE_NETWORK",
+			Message: urlErr.Error(),
+			Details: details,
+		}
+	}
+
+	// context.DeadlineExceeded / context.Canceled → KINTONE_NETWORK
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return &output.Error{
+			Code:    "KINTONE_NETWORK",
+			Message: err.Error(),
+			Details: map[string]any{"timeout": true},
+		}
+	}
+
 	msg := err.Error()
 	if isUsageError(msg) {
 		return &output.Error{Code: "USAGE", Message: msg}
 	}
 	return &output.Error{Code: "INTERNAL", Message: msg}
+}
+
+// mapAPIErrorCode は APIError の Category に応じた output コードを返す。
+func mapAPIErrorCode(e *kintoneapi.APIError) string {
+	switch e.Category {
+	case kintoneapi.CategoryUnauthorized:
+		return "KINTONE_UNAUTHORIZED"
+	case kintoneapi.CategoryForbidden:
+		return "KINTONE_FORBIDDEN"
+	case kintoneapi.CategoryNotFound:
+		return "KINTONE_NOT_FOUND"
+	case kintoneapi.CategoryRateLimited:
+		return "KINTONE_RATE_LIMITED"
+	case kintoneapi.CategoryValidation, kintoneapi.CategoryClientError:
+		return "KINTONE_VALIDATION"
+	case kintoneapi.CategoryServerError:
+		return "KINTONE_INTERNAL"
+	default:
+		return "KINTONE_INTERNAL"
+	}
 }
 
 // isUsageError は cobra のエラーメッセージがユーザー操作ミスによるものかを判定する。
