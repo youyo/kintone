@@ -4,13 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト現状
 
-**M01 完了済み**。M02（config パッケージ）が次のマイルストーン。
+**M02 完了済み**。M03（kintoneapi クライアント + API Token 認証）が次のマイルストーン。
 
 - Go 1.26、module: `github.com/youyo/kintone`
 - `kintone version` が `{"ok":true,"data":{"version":"0.1.0"}}` を JSON 出力
-- `internal/output`（JSON 出力規約）と `internal/cli`（cobra root/version/errors）を実装済み
-- `go test -race -cover ./...` 全 pass、golangci-lint クリーン
-- ブランチ: `feat/m01-project-skeleton`（main への merge 待ち）
+- `kintone config show` / `kintone config init` で TOML + env + profile の設定解決を提供
+- `internal/config`（CLI > ENV > toml の優先順位解決）、`internal/output`（JSON 出力規約）、`internal/cli`（cobra root/version/config/errors）を実装済み
+- 設定優先順位: `--profile/--config` フラグ > `KINTONE_*` 環境変数 > `~/.config/kintone/config.toml`
+- `go test -race -cover ./...` 全 pass（output 85.0% / cli 84.1% / config 91.4%）、golangci-lint クリーン
+- ブランチ: `feat/m02-config-layer`（main への merge 待ち）
 
 ## 開発ワークフロー
 
@@ -92,4 +94,5 @@ go run ./cmd/kintone version       # JSON 出力で動作確認
 - 仕様書: `docs/specs/kintone_spec.md`
 - ロードマップ: `plans/kintone-roadmap.md`
 - M01 詳細計画: `plans/kintone-m01-project-skeleton.md`
-- M02 以降の詳細計画は着手時に `/devflow:plan` で生成する
+- M02 詳細計画: `plans/kintone-m02-config-layer.md`
+- M03 以降の詳細計画は着手時に `/devflow:plan` で生成する

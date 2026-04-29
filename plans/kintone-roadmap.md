@@ -8,13 +8,13 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-04-29 09:15 |
-| ステータス | 進行中（M01 完了） |
+| 最終更新 | 2026-04-29 09:40 |
+| ステータス | 進行中（M02 完了） |
 
 ## Current Focus
-- **マイルストーン**: M2: config 層（toml + env + profile）
-- **直近の完了**: M01 — プロジェクト雛形 + JSON 出力規約（feat/m01-project-skeleton ブランチ）
-- **次のアクション**: M02 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
+- **マイルストーン**: M3: kintoneapi クライアント + API Token 認証
+- **直近の完了**: M02 — config 層（toml + env + profile）（feat/m02-config-layer ブランチ）
+- **次のアクション**: M03 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
 
 ## Progress
 
@@ -30,13 +30,17 @@
 - 詳細: plans/kintone-m01-project-skeleton.md
 - ブランチ: feat/m01-project-skeleton（main へ merge 待ち）
 
-### M2: config 層（toml + env + profile）
-- [ ] internal/config/{config.go, profile.go, env.go, *_test.go}
-- [ ] ~/.config/kintone/config.toml ローダー
-- [ ] 優先順位: CLI > ENV > config 実装
-- [ ] KINTONE_PROFILE / KINTONE_CONFIG_PATH / KINTONE_DOMAIN / KINTONE_AUTH 等環境変数
-- [ ] CLI: `kintone config show` / `kintone config init`
-- 詳細: 着手時に /devflow:plan で生成
+### M2: config 層（toml + env + profile） ✅ 完了
+- [x] internal/config/{config.go, profile.go, env.go, loader.go, resolver.go, *_test.go}
+- [x] ~/.config/kintone/config.toml ローダー（BurntSushi/toml v1.6.0）
+- [x] 優先順位: CLI > ENV > config 実装（Resolver 単一責務）
+- [x] KINTONE_PROFILE / KINTONE_CONFIG_PATH / KINTONE_CACHE_PATH / KINTONE_DOMAIN / KINTONE_AUTH / KINTONE_API_TOKEN 環境変数
+- [x] CLI: `kintone config show`（mask 済み JSON）/ `kintone config init`（0o600・atomic write・--force）
+- [x] PersistentFlags: `--profile` / `--config` / `--no-color`（root に登録）
+- [x] errors.go 拡張: CONFIG_PROFILE_NOT_FOUND / CONFIG_PARSE_ERROR / CONFIG_ALREADY_EXISTS / CONFIG_NOT_FOUND
+- [x] 全テスト pass（config 91.4% / cli 84.1% / output 85.0% カバレッジ）
+- 詳細: plans/kintone-m02-config-layer.md
+- ブランチ: feat/m02-config-layer（main への merge 待ち）
 
 ### M3: kintoneapi クライアント + API Token 認証
 - [ ] internal/auth/{apitoken.go, *_test.go}
@@ -129,3 +133,4 @@
 |------|------|------|
 | 2026-04-29 07:55 | 作成 | ロードマップ初版作成（インタビューに基づき M1-M11 を確定） |
 | 2026-04-29 09:15 | 進捗 | M01 完了（feat/m01-project-skeleton ブランチで 9 コミット）。devflow:cycle の Planner→devils-advocate→advocate(2 周)→advisor()→implementer(TDD)→手動動作確認まで一気通貫で実施。Current Focus を M02 に更新 |
+| 2026-04-29 09:40 | 進捗 | M02 完了（feat/m02-config-layer ブランチ）。internal/config（91.4% カバレッジ）と CLI config show/init を実装。advisor() 指摘 4 件を計画に反映後 TDD で実装、手動確認 8 件 pass。Current Focus を M03 に更新 |
