@@ -10,6 +10,8 @@ import (
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/kintoneapi"
 	"github.com/youyo/kintone/internal/output"
+	"github.com/youyo/kintone/internal/resolver"
+	"github.com/youyo/kintone/internal/service/operations"
 )
 
 // MapToOutputError は cobra、config、kintoneapi 関連のエラーを *output.Error に変換する。
@@ -121,11 +123,120 @@ func MapToOutputError(err error) *output.Error {
 		return &output.Error{Code: "USAGE", Message: ue.Error()}
 	}
 
+	// resolver の AmbiguousError → RESOLVER_*_AMBIGUOUS（候補を details に含める / M08）
+	var ambErr *resolver.AmbiguousError
+	if errors.As(err, &ambErr) {
+		return resolverAmbiguousOutput(ambErr)
+	}
+
+	// resolver の NotFoundError → RESOLVER_*_NOT_FOUND（M08）
+	var nfErr *resolver.NotFoundError
+	if errors.As(err, &nfErr) {
+		return resolverNotFoundOutput(nfErr)
+	}
+
+	// resolver の sentinel sentry → RESOLVER_APP_LIST_TOO_LARGE / USAGE
+	if errors.Is(err, resolver.ErrAppListTooLarge) {
+		return &output.Error{Code: "RESOLVER_APP_LIST_TOO_LARGE", Message: err.Error()}
+	}
+	if errors.Is(err, resolver.ErrEmptyRef) || errors.Is(err, resolver.ErrInvalidAppID) {
+		return &output.Error{Code: "USAGE", Message: err.Error()}
+	}
+
+	// operations の人為ミス系 sentinel → USAGE（CLI では USAGE で揃える / M08 advisor #1）
+	switch {
+	case errors.Is(err, operations.ErrInvalidApp),
+		errors.Is(err, operations.ErrConflictingAppRef),
+		errors.Is(err, operations.ErrConflictingUpdateKeyFieldRef),
+		errors.Is(err, operations.ErrEmptyRecord),
+		errors.Is(err, operations.ErrEmptyRecords),
+		errors.Is(err, operations.ErrConflictingRecords),
+		errors.Is(err, operations.ErrMissingUpdateKey),
+		errors.Is(err, operations.ErrConflictingUpdateKey),
+		errors.Is(err, operations.ErrEmptyIDs),
+		errors.Is(err, operations.ErrInvalidID),
+		errors.Is(err, operations.ErrRevisionsLengthMismatch):
+		return &output.Error{Code: "USAGE", Message: err.Error()}
+	case errors.Is(err, operations.ErrResolverUnavailable):
+		return &output.Error{Code: "INTERNAL", Message: err.Error()}
+	}
+
 	msg := err.Error()
 	if isUsageError(msg) {
 		return &output.Error{Code: "USAGE", Message: msg}
 	}
 	return &output.Error{Code: "INTERNAL", Message: msg}
+}
+
+// resolverAmbiguousOutput は AmbiguousError を output.Error に変換する。
+//
+// Kind ("app" | "field") に応じて RESOLVER_APP_AMBIGUOUS / RESOLVER_FIELD_AMBIGUOUS を返し、
+// 候補は details.candidates に配列で含める。
+func resolverAmbiguousOutput(e *resolver.AmbiguousError) *output.Error {
+	code := "RESOLVER_APP_AMBIGUOUS"
+	if e.Kind == "field" {
+		code = "RESOLVER_FIELD_AMBIGUOUS"
+	}
+	candidates := make([]map[string]any, 0, len(e.Candidates))
+	for _, c := range e.Candidates {
+		m := map[string]any{}
+		if c.ID != "" {
+			m["id"] = c.ID
+		}
+		if c.Code != "" {
+			m["code"] = c.Code
+		}
+		if c.Name != "" {
+			m["name"] = c.Name
+		}
+		if c.Label != "" {
+			m["label"] = c.Label
+		}
+		candidates = append(candidates, m)
+	}
+	return &output.Error{
+		Code:    code,
+		Message: e.Error(),
+		Details: map[string]any{
+			"kind":       e.Kind,
+			"ref":        e.Ref,
+			"candidates": candidates,
+		},
+	}
+}
+
+// resolverNotFoundOutput は NotFoundError を output.Error に変換する。
+func resolverNotFoundOutput(e *resolver.NotFoundError) *output.Error {
+	code := "RESOLVER_APP_NOT_FOUND"
+	if e.Kind == "field" {
+		code = "RESOLVER_FIELD_NOT_FOUND"
+	}
+	candidates := make([]map[string]any, 0, len(e.Candidates))
+	for _, c := range e.Candidates {
+		m := map[string]any{}
+		if c.ID != "" {
+			m["id"] = c.ID
+		}
+		if c.Code != "" {
+			m["code"] = c.Code
+		}
+		if c.Name != "" {
+			m["name"] = c.Name
+		}
+		if c.Label != "" {
+			m["label"] = c.Label
+		}
+		candidates = append(candidates, m)
+	}
+	return &output.Error{
+		Code:    code,
+		Message: e.Error(),
+		Details: map[string]any{
+			"kind":       e.Kind,
+			"ref":        e.Ref,
+			"candidates": candidates,
+		},
+	}
 }
 
 // mapAPIErrorCode は APIError の Category に応じた output コードを返す。
