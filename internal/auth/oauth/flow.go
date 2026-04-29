@@ -24,14 +24,14 @@ var defaultOAuthScopes = []string{
 
 // Config は Login フローの入力。
 type Config struct {
-	Domain       string        // kintone domain (host only)
+	Domain       string // kintone domain (host only)
 	ClientID     string
 	ClientSecret string
-	RedirectURL  string        // http://127.0.0.1:<port>/callback（ポート 0 で動的割り当て）
-	Scopes       []string      // 未指定なら defaultOAuthScopes
-	HTTPClient   *http.Client  // nil なら 30s timeout の http.Client
+	RedirectURL  string                 // http://127.0.0.1:<port>/callback（ポート 0 で動的割り当て）
+	Scopes       []string               // 未指定なら defaultOAuthScopes
+	HTTPClient   *http.Client           // nil なら 30s timeout の http.Client
 	OpenBrowser  func(url string) error // nil なら DefaultOpenBrowser
-	NoBrowser    bool          // true のとき ブラウザ起動をスキップし URL を OpenBrowser に渡さない
+	NoBrowser    bool                   // true のとき ブラウザ起動をスキップし URL を OpenBrowser に渡さない
 	Now          func() time.Time
 	RandReader   io.Reader
 	Timeout      time.Duration // callback 待ち上限。0 なら 5min
@@ -39,7 +39,7 @@ type Config struct {
 
 // Result は Login の成功結果。
 type Result struct {
-	PrincipalID  string    // M09 では空（呼び出し元で設定）
+	PrincipalID  string // M09 では空（呼び出し元で設定）
 	AccessToken  string
 	RefreshToken string
 	ExpiresAt    time.Time

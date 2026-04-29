@@ -15,7 +15,7 @@ import (
 type statusEntry struct {
 	PrincipalID     string `json:"principal_id"`
 	Domain          string `json:"domain"`
-	AccessToken     string `json:"access_token"`      // マスク済み
+	AccessToken     string `json:"access_token"` // マスク済み
 	HasRefreshToken bool   `json:"has_refresh_token"`
 	ExpiresAt       string `json:"expires_at"` // RFC3339
 	Scope           string `json:"scope,omitempty"`

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
@@ -56,7 +55,7 @@ func TestLogin_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen tokenstore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	tok, err := store.Get(t.Context(), "example.cybozu.com", "oauth:alice", tokenstore.AuthTypeOAuth)
 	if err != nil {
 		t.Fatalf("TokenStore.Get: %v", err)
@@ -185,7 +184,7 @@ func TestLogin_OutputContainsPrincipalID(t *testing.T) {
 	}
 
 	var resp struct {
-		OK   bool `json:"ok"`
+		OK   bool           `json:"ok"`
 		Data map[string]any `json:"data"`
 	}
 	if parseErr := json.Unmarshal(out.Bytes(), &resp); parseErr != nil {
@@ -219,7 +218,9 @@ func TestLogin_MissingOAuthFlag(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	var resp struct {
-		Error struct{ Code string `json:"code"` } `json:"error"`
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
 	}
 	if parseErr := json.Unmarshal(out.Bytes(), &resp); parseErr != nil {
 		t.Fatalf("parse JSON: %v, out=%q", parseErr, out.String())
@@ -277,7 +278,9 @@ func TestLogin_MissingPrincipalID(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	var resp struct {
-		Error struct{ Code string `json:"code"` } `json:"error"`
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
 	}
 	if parseErr := json.Unmarshal(out.Bytes(), &resp); parseErr != nil {
 		t.Fatalf("parse JSON: %v, out=%q", parseErr, out.String())
@@ -305,7 +308,9 @@ func TestLogin_EmptyPrincipalID(t *testing.T) {
 		t.Fatal("expected error for empty principal-id, got nil")
 	}
 	var resp struct {
-		Error struct{ Code string `json:"code"` } `json:"error"`
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
 	}
 	if parseErr := json.Unmarshal(out.Bytes(), &resp); parseErr != nil {
 		t.Fatalf("parse JSON: %v, out=%q", parseErr, out.String())
@@ -328,6 +333,3 @@ func newTestStore(t *testing.T) tokenstore.Store {
 	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
-
-// errNotOAuthError は OAuth 以外の汎用エラー。
-var _ = errors.New("test error")

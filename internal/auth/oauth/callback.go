@@ -18,12 +18,12 @@ type CallbackResult struct {
 // CallbackServer は loopback HTTP サーバ。
 // /callback パスのみを受け付ける（CSRF state 検証 + authorization code 抽出）。
 type CallbackServer struct {
-	server    *http.Server
-	listener  net.Listener
-	port      int
+	server      *http.Server
+	listener    net.Listener
+	port        int
 	expectState string
-	once      sync.Once
-	resultCh  chan<- CallbackResult
+	once        sync.Once
+	resultCh    chan<- CallbackResult
 }
 
 // NewCallbackServer は指定アドレス（"127.0.0.1:<port>" または "127.0.0.1:0"）で

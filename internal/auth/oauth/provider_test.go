@@ -70,10 +70,10 @@ func (m *mockStore) Close() error { return nil }
 
 // mockRefresher はテスト用 refresh mock。
 type mockRefresher struct {
-	mu          sync.Mutex
-	callCount   int
-	result      *oauth.Result
-	err         error
+	mu        sync.Mutex
+	callCount int
+	result    *oauth.Result
+	err       error
 }
 
 func (mr *mockRefresher) Refresh(_ context.Context, _ string) (*oauth.Result, error) {

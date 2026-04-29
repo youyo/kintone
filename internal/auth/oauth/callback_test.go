@@ -33,7 +33,7 @@ func TestCallbackServer_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET callback: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	select {
 	case result := <-resultCh:
@@ -68,7 +68,7 @@ func TestCallbackServer_StateMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET callback: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	select {
 	case result := <-resultCh:
@@ -104,7 +104,7 @@ func TestCallbackServer_MissingCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET callback: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	select {
 	case result := <-resultCh:
@@ -141,7 +141,7 @@ func TestCallbackServer_DoubleCallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET 1st callback: %v", err)
 	}
-	defer resp1.Body.Close()
+	defer func() { _ = resp1.Body.Close() }()
 
 	// 結果を受け取る
 	select {
@@ -157,7 +157,7 @@ func TestCallbackServer_DoubleCallback(t *testing.T) {
 		// 接続が切れていることもある（サーバが停止済みの場合）
 		return
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	if resp2.StatusCode != http.StatusBadRequest {
 		t.Errorf("2nd callback: expected 400, got %d", resp2.StatusCode)
 	}
@@ -190,7 +190,7 @@ func TestCallbackServer_PortConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pre-listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	// 同じポートに NewCallbackServer を試みる

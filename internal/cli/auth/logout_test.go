@@ -47,7 +47,7 @@ func TestLogout_WithPrincipalID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	defer checkStore.Close()
+	defer func() { _ = checkStore.Close() }()
 
 	// alice が削除されていること
 	_, err = checkStore.Get(t.Context(), "example.cybozu.com", "oauth:alice", tokenstore.AuthTypeOAuth)

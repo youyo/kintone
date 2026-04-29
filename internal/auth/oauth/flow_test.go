@@ -237,7 +237,7 @@ func TestLogin_CallbackTimeout(t *testing.T) {
 		ClientID:     "client-id",
 		ClientSecret: "client-secret",
 		RedirectURL:  "http://127.0.0.1:0/callback",
-		Timeout:      50 * time.Millisecond, // 短い timeout
+		Timeout:      50 * time.Millisecond,               // 短い timeout
 		OpenBrowser:  func(_ string) error { return nil }, // ブラウザ起動しない
 	}
 

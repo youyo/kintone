@@ -1,7 +1,6 @@
 package oauth
 
 import (
-	"fmt"
 	"os/exec"
 	"runtime"
 )
@@ -37,27 +36,6 @@ func browserCommand(url string) (string, []string) {
 	default: // linux, etc.
 		return "xdg-open", []string{url}
 	}
-}
-
-// buildAuthorizeURL は kintone の authorization エンドポイント URL を構築する。
-// PKCE と state を含む。
-func buildAuthorizeURL(domain, clientID, redirectURL, scope, state string, pkce PKCEPair, pkceDisabled bool) string {
-	base := fmt.Sprintf("https://%s/oauth2/authorization", domain)
-	params := fmt.Sprintf(
-		"?response_type=code&client_id=%s&redirect_uri=%s&scope=%s&state=%s",
-		urlEncode(clientID),
-		urlEncode(redirectURL),
-		urlEncode(scope),
-		urlEncode(state),
-	)
-	if !pkceDisabled {
-		params += fmt.Sprintf(
-			"&code_challenge=%s&code_challenge_method=%s",
-			urlEncode(pkce.Challenge),
-			urlEncode(pkce.Method),
-		)
-	}
-	return base + params
 }
 
 // urlEncode は RFC 3986 の unreserved 文字以外をパーセントエンコードする簡易実装。
