@@ -4,22 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト現状
 
-**M04 完了済み**。M05（write 系 operations + CLI ops コマンド）が次のマイルストーン。
+**M05 完了済み**。M06（MCP サーバー雛形 + Facade 層）が次のマイルストーン。
 
 - Go 1.26、module: `github.com/youyo/kintone`
-- 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...`
+- 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...` / **`ops {record create|update|delete, app describe}`**（M05）
 - 実装済みパッケージ:
   - `internal/output` — JSON 出力規約
-  - `internal/cli` + `internal/cli/api` — cobra コマンドツリー
+  - `internal/cli` + `internal/cli/api` + **`internal/cli/ops`** + **`internal/cli/clierr`**（共通 UsageError） — cobra コマンドツリー
   - `internal/config` — CLI > ENV > toml の優先解決
   - `internal/auth/apitoken` — `X-Cybozu-API-Token` ヘッダ付与
-  - `internal/kintoneapi` — net/http 薄ラッパー REST クライアント（read 系エンドポイント完備）
+  - `internal/kintoneapi` — net/http 薄ラッパー REST クライアント（read 系 + write 系 POST/PUT/DELETE 完備、書き込みは MaxAttempts=1 デフォルト）
   - `internal/service/api` — `kintoneapi` の薄い透過層（interface でモック容易化、M07 cache 挿入点）
-  - `internal/service/operations` — LLM 向け抽象化: `RecordsQuery`（totalCount を int64 化）/ `AppDescribe`（app + fields 合成）
-- 依存方向: `cli/api → service/operations → service/api → kintoneapi → auth`
+  - `internal/service/operations` — LLM 向け抽象化: `RecordsQuery` / `AppDescribe` / **`RecordCreate` / `RecordUpdate` / `RecordDelete`**
+- 依存方向: `cli/{api,ops} → service/operations → service/api → kintoneapi → auth`
 - **設計原則**: CLI から `internal/kintoneapi` 直 import 禁止。必ず `service/api` または `service/operations` を経由する
-- `go test -race -cover ./...` 全 pass（service/api 100% / service/operations 100% / cli/api 82% / cli 87.5% / config 92.7% / kintoneapi 86.2% / auth 100% / output 85.0%）、M04 新規 lint 違反 0
-- ブランチ: `feat/m04-service-read-cli-api`（main への merge 待ち）
+- **設計判断（M05）**:
+  - `clierr.UsageError` 型 sentinel + `MapToOutputError` `errors.As` 分岐で USAGE 分類を堅牢化（文字列 prefix 依存を排除）。配置は中立パッケージ `internal/cli/clierr` で循環なし
+  - `--dry-run` フラグで送信予定 body を JSON 出力（実 API 送信時と byte 完全一致を担保するため、`kintoneapi.BuildXxxBody` を共通化。テストで equivalence を検証）
+  - 書き込み系（POST/PUT/DELETE）は `doJSONWithBody` 内部で `MaxAttempts=1` 強制（多重作成リスク回避）
+- `go test -race -cover ./...` 全 pass（service/api 100% / service/operations 98.8% / cli/ops 87.5% / cli/api 82.0% / cli 87.2% / config 92.7% / kintoneapi 85.5% / auth 100% / output 85.0%）
+- ブランチ: `feat/m05-cli-ops-write`（main への merge 待ち）
 
 ## 開発ワークフロー
 
@@ -104,4 +108,5 @@ go run ./cmd/kintone version       # JSON 出力で動作確認
 - M02 詳細計画: `plans/kintone-m02-config-layer.md`
 - M03 詳細計画: `plans/kintone-m03-kintoneapi-client.md`
 - M04 詳細計画: `plans/kintone-m04-service-read-cli-api.md`
-- M05 以降の詳細計画は着手時に `/devflow:plan` で生成する
+- M05 詳細計画: `plans/kintone-m05-cli-ops-write.md`
+- M06 以降の詳細計画は着手時に `/devflow:plan` で生成する

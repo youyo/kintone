@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/youyo/kintone/internal/cli/clierr"
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/kintoneapi"
 	"github.com/youyo/kintone/internal/output"
@@ -110,6 +111,14 @@ func MapToOutputError(err error) *output.Error {
 			Message: err.Error(),
 			Details: map[string]any{"timeout": true},
 		}
+	}
+
+	// CLI サブパッケージ共通の UsageError（型付き sentinel） → USAGE
+	// 文字列 prefix 依存（isUsageError）に頼らず errors.As で堅牢に分類する（M05 advisor 指摘 #1）。
+	// 配置: internal/cli/clierr（cli / cli/ops 双方から循環なく依存可能な中立パッケージ）。
+	var ue *clierr.UsageError
+	if errors.As(err, &ue) {
+		return &output.Error{Code: "USAGE", Message: ue.Error()}
 	}
 
 	msg := err.Error()

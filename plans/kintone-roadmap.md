@@ -8,13 +8,13 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-04-29 13:14 |
-| ステータス | 進行中（M04 完了） |
+| 最終更新 | 2026-04-29 13:40 |
+| ステータス | 進行中（M05 完了） |
 
 ## Current Focus
-- **マイルストーン**: M5: CLI ops コマンド（write 系 + describe）
-- **直近の完了**: M04 — service 層（read 系 operations）+ CLI api コマンド（feat/m04-service-read-cli-api ブランチ）
-- **次のアクション**: M05 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
+- **マイルストーン**: M6: MCP サーバー雛形 + Facade 層
+- **直近の完了**: M05 — CLI ops コマンド（write 系 + describe）（feat/m05-cli-ops-write ブランチ）
+- **次のアクション**: M06 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
 
 ## Progress
 
@@ -62,12 +62,17 @@
 - 詳細: plans/kintone-m04-service-read-cli-api.md
 - ブランチ: feat/m04-service-read-cli-api（main への merge 待ち）
 
-### M5: CLI ops コマンド（write 系 + describe）
-- [ ] operations: record_create / record_update / record_delete / app_describe（fields 含む）
-- [ ] internal/cli/ops/{record.go, app.go}
-- [ ] バリデーション（必須項目・型）
-- [ ] dry-run フラグ
-- 詳細: 着手時生成
+### M5: CLI ops コマンド（write 系 + describe） ✅ 完了
+- [x] kintoneapi: POST/PUT/DELETE エンドポイント追加（`InsertRecords` / `UpdateRecord` / `DeleteRecords`）+ `doJSONWithBody`（書き込み系は MaxAttempts=1 デフォルト）
+- [x] service/api: interface に write 系 3 メソッドを追加（透過実装）
+- [x] operations: `RecordCreate` / `RecordUpdate`（id / updateKey 排他）/ `RecordDelete`（revisions 任意）
+- [x] internal/cli/ops/{root.go, helpers.go, record.go, app.go}（cobra）
+- [x] バリデーション: 必須項目 / 排他フラグ（id ⊕ updateKey、record-json ⊕ records-json）
+- [x] dry-run フラグ: `BuildXxxBody` で実 API 送信と byte 完全一致を担保
+- [x] USAGE 分類の堅牢化: `cli/ops.UsageError` 型 sentinel + `errors.As` 分岐
+- [x] 動作確認: `kintone ops record create/update/delete --dry-run` / `kintone ops app describe` 動作 / 全テスト pass / カバレッジ達成（kintoneapi 85.5% / service/api 100% / service/operations 98.8% / cli/ops 87.5% / cli/api 82.0%）
+- 詳細: plans/kintone-m05-cli-ops-write.md
+- ブランチ: feat/m05-cli-ops-write（main への merge 待ち）
 
 ### M6: MCP サーバー雛形 + Facade 層
 - [ ] internal/mcp/server/{stdio.go, *_test.go}（mark3labs/mcp-go）
@@ -141,3 +146,4 @@
 | 2026-04-29 09:40 | 進捗 | M02 完了（feat/m02-config-layer ブランチ）。internal/config（91.4% カバレッジ）と CLI config show/init を実装。advisor() 指摘 4 件を計画に反映後 TDD で実装、手動確認 8 件 pass。Current Focus を M03 に更新 |
 | 2026-04-29 12:58 | 進捗 | M03 完了（feat/m03-kintoneapi-client ブランチ）。internal/auth/apitoken（100%）・internal/kintoneapi（86.2%）・cli エラーマッピング（87.4%）を TDD で実装。全テスト pass、golangci-lint クリーン。Current Focus を M04 に更新 |
 | 2026-04-29 13:14 | 進捗 | M04 完了（feat/m04-service-read-cli-api ブランチ）。internal/service/api（100%）・internal/service/operations（100%）・internal/cli/api（82%）を TDD で実装。`kintone api {records,record,app} ...` で kintone REST を JSON で叩けるように。CLI から kintoneapi 直 import 禁止のレイヤー分離を確立。全テスト pass、M04 新規 lint 違反 0。Current Focus を M05 に更新 |
+| 2026-04-29 13:40 | 進捗 | M05 完了（feat/m05-cli-ops-write ブランチ）。kintoneapi に write 系（POST/PUT/DELETE）を追加し、service/api interface 拡張、operations.{RecordCreate, RecordUpdate, RecordDelete} を実装。CLI に `ops record {create,update,delete}` と `ops app describe` を追加。`--dry-run` で送信予定 body を JSON 出力（実 API と byte 一致）、書き込み系は MaxAttempts=1 デフォルト、`UsageError` 型 sentinel で USAGE 分類を堅牢化（advisor 6 件指摘反映済）。全テスト pass、カバレッジ目標達成。Current Focus を M06 に更新 |

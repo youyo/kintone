@@ -172,3 +172,83 @@ func TestClient_ErrorPassThrough(t *testing.T) {
 		t.Errorf("category=%v", apiErr.Category)
 	}
 }
+
+// SA-W-1: InsertRecords 透過
+func TestClient_InsertRecords(t *testing.T) {
+	var gotMethod, gotPath string
+	sc, _ := newServiceAPIWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		_, _ = io.WriteString(w, `{"ids":["10"],"revisions":["1"]}`)
+	})
+	resp, err := sc.InsertRecords(context.Background(), kintoneapi.InsertRecordsRequest{
+		App: 1, Records: []map[string]any{{"x": map[string]any{"value": "v"}}},
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/k/v1/records.json" {
+		t.Errorf("method=%s path=%s", gotMethod, gotPath)
+	}
+	if len(resp.IDs) != 1 || resp.IDs[0] != "10" {
+		t.Errorf("ids=%v", resp.IDs)
+	}
+}
+
+// SA-W-2: UpdateRecord 透過
+func TestClient_UpdateRecord(t *testing.T) {
+	var gotMethod string
+	sc, _ := newServiceAPIWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		_, _ = io.WriteString(w, `{"revision":"4"}`)
+	})
+	resp, err := sc.UpdateRecord(context.Background(), kintoneapi.UpdateRecordRequest{
+		App: 1, ID: 1, Record: map[string]any{"x": map[string]any{"value": "v"}},
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if gotMethod != http.MethodPut {
+		t.Errorf("method=%s", gotMethod)
+	}
+	if resp.Revision != "4" {
+		t.Errorf("revision=%q", resp.Revision)
+	}
+}
+
+// SA-W-3: DeleteRecords 透過
+func TestClient_DeleteRecords(t *testing.T) {
+	var gotMethod, gotPath string
+	sc, _ := newServiceAPIWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		_, _ = io.WriteString(w, `{}`)
+	})
+	err := sc.DeleteRecords(context.Background(), kintoneapi.DeleteRecordsRequest{
+		App: 1, IDs: []int64{7},
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if gotMethod != http.MethodDelete || gotPath != "/k/v1/records.json" {
+		t.Errorf("method=%s path=%s", gotMethod, gotPath)
+	}
+}
+
+// SA-W-4: write 系のエラー透過（422）
+func TestClient_InsertRecords_ErrorPassThrough(t *testing.T) {
+	sc, _ := newServiceAPIWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(422)
+		_, _ = io.WriteString(w, `{"code":"CB_VA01","message":"validation"}`)
+	})
+	_, err := sc.InsertRecords(context.Background(), kintoneapi.InsertRecordsRequest{
+		App: 1, Records: []map[string]any{{"x": 1}},
+	})
+	var apiErr *kintoneapi.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %v", err)
+	}
+	if apiErr.Category != kintoneapi.CategoryValidation {
+		t.Errorf("category=%v", apiErr.Category)
+	}
+}

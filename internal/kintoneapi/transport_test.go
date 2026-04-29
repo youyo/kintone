@@ -441,3 +441,156 @@ func TestBackoff(t *testing.T) {
 		t.Fatalf("attempt 10: %v", got)
 	}
 }
+
+// TestTransport_WriteBody は doJSONWithBody の挙動（M05）。
+//
+// - body を JSON エンコードして送信する
+// - body=nil なら http.NoBody（Content-Length=0、Content-Type 付与なし）
+// - retry 時に body が再送される
+// - json.Marshal 失敗を error として返す
+// - DELETE+body の wire 検証（Method, Content-Type, Content-Length>0）
+// - 書き込み系（POST/PUT/DELETE）は MaxAttempts=1 にデフォルト固定（advisor #3）
+func TestTransport_WriteBody(t *testing.T) {
+	t.Parallel()
+
+	t.Run("TR-WriteBody-1 POST が JSON body を送る", func(t *testing.T) {
+		t.Parallel()
+		var gotBody []byte
+		var gotContentType, gotMethod string
+		fx := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+			gotMethod = r.Method
+			gotContentType = r.Header.Get("Content-Type")
+			gotBody, _ = io.ReadAll(r.Body)
+			_, _ = io.WriteString(w, `{"ok":1}`)
+		})
+		err := fx.client.doJSONWithBody(context.Background(), http.MethodPost, "/k/v1/x.json",
+			map[string]any{"a": 1}, nil)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if gotMethod != http.MethodPost {
+			t.Errorf("method=%s", gotMethod)
+		}
+		if gotContentType != "application/json" {
+			t.Errorf("content-type=%q", gotContentType)
+		}
+		if string(gotBody) != `{"a":1}` {
+			t.Errorf("body=%s", gotBody)
+		}
+	})
+
+	t.Run("TR-WriteBody-2 body=nil のとき NoBody（Content-Type 無し）", func(t *testing.T) {
+		t.Parallel()
+		var gotContentType string
+		var gotLen int64
+		fx := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+			gotContentType = r.Header.Get("Content-Type")
+			gotLen = r.ContentLength
+			_, _ = io.WriteString(w, `{}`)
+		})
+		err := fx.client.doJSONWithBody(context.Background(), http.MethodDelete, "/k/v1/x.json", nil, nil)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if gotContentType != "" {
+			t.Errorf("content-type should be empty, got %q", gotContentType)
+		}
+		if gotLen != 0 {
+			t.Errorf("content-length=%d want 0", gotLen)
+		}
+	})
+
+	t.Run("TR-WriteBody-3 retry 時に body が再送される", func(t *testing.T) {
+		t.Parallel()
+		// 書き込み系はデフォルトで MaxAttempts=1 に強制されるため、
+		// 明示的に RetryPolicy{MaxAttempts:2} を渡してリトライを許可する。
+		var attempts int
+		var bodies []string
+		fx := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+			bodies = append(bodies, string(b))
+			attempts++
+			if attempts == 1 {
+				w.WriteHeader(503)
+				_, _ = io.WriteString(w, `temporary`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"ok":1}`)
+		}, RetryPolicy{MaxAttempts: 2, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, RetryOn: []int{503}})
+		err := fx.client.doJSONWithBodyWithPolicy(context.Background(), http.MethodPost, "/k/v1/x.json",
+			map[string]any{"a": 1}, nil, fx.client.retry)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if attempts != 2 {
+			t.Fatalf("attempts=%d want 2", attempts)
+		}
+		if len(bodies) != 2 || bodies[0] != bodies[1] || bodies[0] != `{"a":1}` {
+			t.Fatalf("bodies=%v", bodies)
+		}
+	})
+
+	t.Run("TR-WriteBody-4 json.Marshal 不能型はエラー", func(t *testing.T) {
+		t.Parallel()
+		fx := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+			t.Fatal("should not be called")
+		})
+		// chan は json.Marshal 不能
+		err := fx.client.doJSONWithBody(context.Background(), http.MethodPost, "/k/v1/x.json",
+			make(chan int), nil)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("TR-WriteBody-5 DELETE+body の wire 検証", func(t *testing.T) {
+		t.Parallel()
+		var gotBody []byte
+		var gotMethod, gotContentType string
+		var gotLen int64
+		fx := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+			gotMethod = r.Method
+			gotContentType = r.Header.Get("Content-Type")
+			gotLen = r.ContentLength
+			gotBody, _ = io.ReadAll(r.Body)
+			_, _ = io.WriteString(w, `{}`)
+		})
+		err := fx.client.doJSONWithBody(context.Background(), http.MethodDelete, "/k/v1/records.json",
+			map[string]any{"app": 1, "ids": []int{1}}, nil)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if gotMethod != http.MethodDelete {
+			t.Errorf("method=%s", gotMethod)
+		}
+		if gotContentType != "application/json" {
+			t.Errorf("content-type=%q", gotContentType)
+		}
+		if gotLen <= 0 {
+			t.Errorf("content-length=%d want >0", gotLen)
+		}
+		if !strings.Contains(string(gotBody), `"app":1`) || !strings.Contains(string(gotBody), `"ids":[1]`) {
+			t.Errorf("body=%s", gotBody)
+		}
+	})
+
+	t.Run("TR-WriteBody-RetryDisabled 書き込み系はデフォルト MaxAttempts=1（advisor #3）", func(t *testing.T) {
+		t.Parallel()
+		var attempts int
+		fx := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			w.WriteHeader(503)
+			_, _ = io.WriteString(w, `oops`)
+		})
+		// fx.client.retry は DefaultRetryPolicy（MaxAttempts=3）だが、
+		// doJSONWithBody が write 系 method を検出して MaxAttempts=1 に強制することを確認。
+		err := fx.client.doJSONWithBody(context.Background(), http.MethodPost, "/k/v1/x.json",
+			map[string]any{}, nil)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if attempts != 1 {
+			t.Errorf("attempts=%d want 1 (write methods must default to no retry)", attempts)
+		}
+	})
+}

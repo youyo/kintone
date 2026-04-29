@@ -193,6 +193,124 @@ func buildAPIError(status int, body []byte, retryAfter time.Duration) *APIError 
 	return e
 }
 
+// isWriteMethod は HTTP method が body を伴う書き込み系（POST/PUT/PATCH/DELETE）か判定する。
+// kintone REST の DELETE はリクエスト body に JSON を載せるため write 系に分類する。
+func isWriteMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+// doJSONWithBody は body を伴う非冪等リクエスト（POST/PUT/DELETE 等）を実行する。
+//
+// 設計判断:
+//   - body は json.Marshal で 1 回エンコードし、attempt ごとに bytes.NewReader で再生成（retry 対応）
+//   - body=nil なら http.NoBody を送り、Content-Type ヘッダは付与しない
+//   - 共通動作（auth, UA, APIError 構築, ctx 取り扱い）は doJSON と揃える
+//   - **書き込み系（POST/PUT/PATCH/DELETE）はデフォルトで MaxAttempts=1**（advisor 指摘 #3）。
+//     idempotency 保証がないため body 再送による多重作成リスクを回避する。
+//     上位がリトライしたい場合は doJSONWithBodyWithPolicy を直接使う。
+func (c *Client) doJSONWithBody(ctx context.Context, method, path string, body any, out any) error {
+	policy := c.retry
+	if isWriteMethod(method) {
+		policy.MaxAttempts = 1
+	}
+	return c.doJSONWithBodyWithPolicy(ctx, method, path, body, out, policy)
+}
+
+// doJSONWithBodyWithPolicy は doJSONWithBody の policy 上書き版。テスト用途中心。
+func (c *Client) doJSONWithBodyWithPolicy(ctx context.Context, method, path string, body any, out any, policy RetryPolicy) error {
+	u := c.baseURL + path
+	if policy.MaxAttempts <= 0 {
+		policy.MaxAttempts = 1
+	}
+
+	// body を 1 回だけマーシャル。attempt ごとに bytes.Reader を再生成する。
+	var encoded []byte
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("kintoneapi: marshal body: %w", err)
+		}
+		encoded = b
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		var bodyReader io.Reader = http.NoBody
+		if encoded != nil {
+			bodyReader = bytes.NewReader(encoded)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, u, bodyReader)
+		if err != nil {
+			return fmt.Errorf("kintoneapi: build request: %w", err)
+		}
+		if err := c.auth.Apply(ctx, req); err != nil {
+			return fmt.Errorf("kintoneapi: auth apply: %w", err)
+		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", c.userAgent)
+		if encoded != nil {
+			req.Header.Set("Content-Type", "application/json")
+			req.ContentLength = int64(len(encoded))
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			lastErr = fmt.Errorf("kintoneapi: http do: %w", err)
+			if attempt < policy.MaxAttempts && isTransientNetError(err) {
+				c.sleep(backoff(attempt, 0, policy.BaseBackoff, policy.MaxBackoff))
+				continue
+			}
+			return lastErr
+		}
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			defer resp.Body.Close()
+			if out == nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				return nil
+			}
+			respBody, readErr := io.ReadAll(resp.Body)
+			if readErr != nil {
+				return fmt.Errorf("kintoneapi: read body: %w", readErr)
+			}
+			if len(respBody) == 0 {
+				return nil
+			}
+			if err := json.Unmarshal(respBody, out); err != nil {
+				return fmt.Errorf("kintoneapi: decode body: %w", err)
+			}
+			return nil
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+
+		retryAfter := parseRetryAfter(resp.Header, c.now)
+		if shouldRetry(resp.StatusCode, policy.RetryOn) && attempt < policy.MaxAttempts {
+			c.sleep(backoff(attempt, retryAfter, policy.BaseBackoff, policy.MaxBackoff))
+			continue
+		}
+		return buildAPIError(resp.StatusCode, respBody, retryAfter)
+	}
+
+	if lastErr != nil {
+		return lastErr
+	}
+	return errors.New("kintoneapi: retry exhausted")
+}
+
 // isTransientNetError は net error が一時的（タイムアウト等）かを判定する。
 func isTransientNetError(err error) bool {
 	if err == nil {
