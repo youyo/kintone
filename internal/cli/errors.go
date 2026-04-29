@@ -1,22 +1,72 @@
 package cli
 
 import (
+	"errors"
 	"strings"
 
+	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/output"
 )
 
-// MapToOutputError は cobra のエラーを *output.Error に変換する。
+// MapToOutputError は cobra および config 関連のエラーを *output.Error に変換する。
 // nil を渡すと nil を返す。
-// M1 段階のマッピング:
-//   - cobra の "unknown command" / flag parse error → Code:"USAGE"
-//   - その他 → Code:"INTERNAL"
 //
-// M2 以降で CONFIG_NOT_FOUND 等のコードを追加する。
+// 優先順位（先頭ヒットを採用）:
+//  1. config.ProfileNotFoundError → CONFIG_PROFILE_NOT_FOUND
+//  2. config.ParseError           → CONFIG_PARSE_ERROR
+//  3. config.AlreadyExistsError   → CONFIG_ALREADY_EXISTS
+//  4. config.NotFoundError        → CONFIG_NOT_FOUND
+//  5. cobra USAGE 系              → USAGE
+//  6. その他                      → INTERNAL
 func MapToOutputError(err error) *output.Error {
 	if err == nil {
 		return nil
 	}
+
+	var pne *config.ProfileNotFoundError
+	if errors.As(err, &pne) {
+		details := map[string]any{"name": pne.Name}
+		if pne.Path != "" {
+			details["path"] = pne.Path
+		}
+		return &output.Error{
+			Code:    "CONFIG_PROFILE_NOT_FOUND",
+			Message: pne.Error(),
+			Details: details,
+		}
+	}
+
+	var pe *config.ParseError
+	if errors.As(err, &pe) {
+		details := map[string]any{"path": pe.Path}
+		if pe.Err != nil {
+			details["cause"] = pe.Err.Error()
+		}
+		return &output.Error{
+			Code:    "CONFIG_PARSE_ERROR",
+			Message: pe.Error(),
+			Details: details,
+		}
+	}
+
+	var ae *config.AlreadyExistsError
+	if errors.As(err, &ae) {
+		return &output.Error{
+			Code:    "CONFIG_ALREADY_EXISTS",
+			Message: ae.Error(),
+			Details: map[string]any{"path": ae.Path},
+		}
+	}
+
+	var nfe *config.NotFoundError
+	if errors.As(err, &nfe) {
+		return &output.Error{
+			Code:    "CONFIG_NOT_FOUND",
+			Message: nfe.Error(),
+			Details: map[string]any{"path": nfe.Path},
+		}
+	}
+
 	msg := err.Error()
 	if isUsageError(msg) {
 		return &output.Error{Code: "USAGE", Message: msg}

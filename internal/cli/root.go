@@ -20,7 +20,9 @@ import (
 
 // NewRootCmd はテスト可能な root コマンドを毎回新規生成する。
 // グローバル変数を持たないため、テスト時の状態汚染を防止する。
-// PersistentFlags（--profile, --config 等）は M2 で追加予定。
+//
+// M02 で PersistentFlags（--profile, --config, --no-color）を登録する。
+// --no-color は M02 では宣言のみで挙動は未実装（後続マイルストーンで利用）。
 func NewRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "kintone",
@@ -30,7 +32,11 @@ func NewRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	cmd.PersistentFlags().String("profile", "", "使用する profile 名（KINTONE_PROFILE 環境変数より優先）")
+	cmd.PersistentFlags().String("config", "", "config.toml のパス（KINTONE_CONFIG_PATH 環境変数より優先）")
+	cmd.PersistentFlags().Bool("no-color", false, "カラー出力を無効化（後続マイルストーンで利用予定）")
 	cmd.AddCommand(newVersionCmd())
+	cmd.AddCommand(newConfigCmd())
 	return cmd
 }
 
