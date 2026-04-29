@@ -81,8 +81,7 @@ release:
   prerelease: auto
 
 # Homebrew Tap publishing.
-# 事前に youyo/homebrew-tap リポジトリを作成しておくこと。
-# 認証は HOMEBREW_TAP_GITHUB_TOKEN（Settings > Secrets）を使う。
+# 認証は GitHub Apps token（APP_ID / APP_PRIVATE_KEY）を release.yml で生成して渡す。
 brews:
   - name: kintone
     repository:
