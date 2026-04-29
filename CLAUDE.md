@@ -4,15 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト現状
 
-**M02 完了済み**。M03（kintoneapi クライアント + API Token 認証）が次のマイルストーン。
+**M03 完了済み**。M04（service 層 + CLI api コマンド）が次のマイルストーン。
 
 - Go 1.26、module: `github.com/youyo/kintone`
 - `kintone version` が `{"ok":true,"data":{"version":"0.1.0"}}` を JSON 出力
 - `kintone config show` / `kintone config init` で TOML + env + profile の設定解決を提供
-- `internal/config`（CLI > ENV > toml の優先順位解決）、`internal/output`（JSON 出力規約）、`internal/cli`（cobra root/version/config/errors）を実装済み
-- 設定優先順位: `--profile/--config` フラグ > `KINTONE_*` 環境変数 > `~/.config/kintone/config.toml`
-- `go test -race -cover ./...` 全 pass（output 85.0% / cli 84.1% / config 91.4%）、golangci-lint クリーン
-- ブランチ: `feat/m02-config-layer`（main への merge 待ち）
+- `internal/auth/apitoken`（X-Cybozu-API-Token ヘッダ付与）を実装済み
+- `internal/kintoneapi`（net/http 薄ラッパー: Client / Transport / APIError / records / record / app / fields）を実装済み
+- `internal/cli/errors.go` の `MapToOutputError` に kintoneapi エラー判定（KINTONE_UNAUTHORIZED / FORBIDDEN / NOT_FOUND / RATE_LIMITED / VALIDATION / INTERNAL / NETWORK）を追加
+- `go test -race -cover ./...` 全 pass（auth 100% / kintoneapi 86.2% / cli 87.4% / config 92.7% / output 85.0%）、golangci-lint クリーン
+- ブランチ: `feat/m03-kintoneapi-client`（main への merge 待ち）
 
 ## 開発ワークフロー
 
@@ -95,4 +96,5 @@ go run ./cmd/kintone version       # JSON 出力で動作確認
 - ロードマップ: `plans/kintone-roadmap.md`
 - M01 詳細計画: `plans/kintone-m01-project-skeleton.md`
 - M02 詳細計画: `plans/kintone-m02-config-layer.md`
-- M03 以降の詳細計画は着手時に `/devflow:plan` で生成する
+- M03 詳細計画: `plans/kintone-m03-kintoneapi-client.md`
+- M04 以降の詳細計画は着手時に `/devflow:plan` で生成する

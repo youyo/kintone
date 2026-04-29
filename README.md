@@ -95,7 +95,22 @@ $ kintone config show --profile dev
 | `KINTONE_CACHE_PATH` | cache db のパス（M07 で利用） |
 | `KINTONE_DOMAIN` | kintone ドメイン（例: `example.cybozu.com`） |
 | `KINTONE_AUTH` | 認証モード（`api-token` / `oauth`） |
-| `KINTONE_API_TOKEN` | API Token（M03 以降で利用） |
+| `KINTONE_API_TOKEN` | API Token |
+
+## API Token 認証
+
+`KINTONE_API_TOKEN` 環境変数または config.toml の `api_token` フィールドで API Token を指定します。
+`internal/auth` パッケージが `X-Cybozu-API-Token` ヘッダを自動付与します。
+
+## kintoneapi クライアント
+
+`internal/kintoneapi` パッケージは `net/http` 薄ラッパーとして実装されています。
+
+- `Client`: ベース URL / auth / リトライ設定を保持する REST クライアント
+- `Transport`: `http.RoundTripper` ラッパー（認証ヘッダ付与・エラーパース）
+- `APIError`: kintone 標準エラー（`code` / `id` / `message` / `HTTPStatus` / `RetryAfter`）を構造化
+- エンドポイント: `GET /k/v1/records.json`, `/k/v1/record.json`, `/k/v1/app.json`, `/k/v1/app/form/fields.json`
+- Retry-After ヘッダ対応（429 レート制限時の待機時間を自動解析）
 
 ## JSON 出力規約
 
