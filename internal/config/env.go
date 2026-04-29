@@ -13,5 +13,10 @@ func LoadEnv(getenv func(string) string) EnvConfig {
 		Domain:     getenv("KINTONE_DOMAIN"),
 		Auth:       getenv("KINTONE_AUTH"),
 		APIToken:   getenv("KINTONE_API_TOKEN"),
+		// OAuth 関連（M09）
+		OAuthClientID:     getenv("KINTONE_OAUTH_CLIENT_ID"),
+		OAuthClientSecret: getenv("KINTONE_OAUTH_CLIENT_SECRET"),
+		OAuthRedirectURL:  getenv("KINTONE_OAUTH_REDIRECT_URL"),
+		OAuthScopes:       getenv("KINTONE_OAUTH_SCOPES"),
 	}
 }

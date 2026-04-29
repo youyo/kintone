@@ -344,6 +344,31 @@ func TestConfigInit_ParentMkdirFailure(t *testing.T) {
 	}
 }
 
+// CL-1: config show で oauth_client_secret は "***" にマスクされること（M09）
+func TestConfigShow_OAuthClientSecretMasked(t *testing.T) {
+	t.Setenv("KINTONE_OAUTH_CLIENT_SECRET", "super-secret-oauth")
+	t.Setenv("KINTONE_OAUTH_CLIENT_ID", "my-client-id")
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("KINTONE_API_TOKEN", "")
+
+	var out, errOut bytes.Buffer
+	if err := cli.ExecuteWith([]string{"config", "show"}, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	body := out.String()
+	if bytes.Contains(out.Bytes(), []byte("super-secret-oauth")) {
+		t.Errorf("stdout should not contain raw client_secret: %s", body)
+	}
+	if !bytes.Contains(out.Bytes(), []byte(`"oauth_client_secret":"***"`)) {
+		t.Errorf("expected masked oauth_client_secret in output, got: %s", body)
+	}
+	// client_id はマスクしない
+	if !bytes.Contains(out.Bytes(), []byte("my-client-id")) {
+		t.Errorf("oauth_client_id should not be masked, got: %s", body)
+	}
+}
+
 // CC-9: 壊れた TOML を --config で渡すと CONFIG_PARSE_ERROR
 func TestConfigShow_ParseError(t *testing.T) {
 	tmp := t.TempDir()

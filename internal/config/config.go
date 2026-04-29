@@ -45,11 +45,20 @@ type DefaultProfileBlock struct {
 	Name string `toml:"name"`
 }
 
+// ProfileOAuthBlock は profile の [oauth] サブセクション（M09）。
+type ProfileOAuthBlock struct {
+	ClientID     string   `toml:"client_id"`
+	ClientSecret string   `toml:"client_secret"` // 非推奨: 環境変数推奨
+	RedirectURL  string   `toml:"redirect_url"`
+	Scopes       []string `toml:"scopes"`
+}
+
 // ProfileBlock は 1 プロファイル分の設定。
-// M02 で扱うのは Domain / Auth のみ。
+// M02 で扱うのは Domain / Auth のみ。M09 で OAuth サブセクションを追加。
 type ProfileBlock struct {
-	Domain string `toml:"domain"`
-	Auth   string `toml:"auth"` // "api-token" / "oauth"
+	Domain string            `toml:"domain"`
+	Auth   string            `toml:"auth"`  // "api-token" / "oauth"
+	OAuth  ProfileOAuthBlock `toml:"oauth"` // M09: OAuth 設定
 }
 
 // EnvConfig は環境変数から読み取った生の値（未解決）。
@@ -61,6 +70,11 @@ type EnvConfig struct {
 	Domain     string // KINTONE_DOMAIN
 	Auth       string // KINTONE_AUTH
 	APIToken   string // KINTONE_API_TOKEN
+	// OAuth 関連（M09）
+	OAuthClientID     string // KINTONE_OAUTH_CLIENT_ID
+	OAuthClientSecret string // KINTONE_OAUTH_CLIENT_SECRET
+	OAuthRedirectURL  string // KINTONE_OAUTH_REDIRECT_URL
+	OAuthScopes       string // KINTONE_OAUTH_SCOPES（スペース区切り）
 }
 
 // CLIConfig は CLI フラグから渡された値（未解決）。
@@ -74,7 +88,7 @@ type CLIConfig struct {
 // 後続マイルストーン（auth, kintoneapi）はこの構造のみを参照する。
 //
 // JSON タグは snake_case で統一し、`config show` がこの構造を直接シリアライズできる。
-// ただし api_token は機微情報のため、show 時はマスク済みコピーを別途構築する。
+// ただし api_token / oauth_client_secret は機微情報のため、show 時はマスク済みコピーを別途構築する。
 type Resolved struct {
 	ProfileName string   `json:"profile"`
 	Domain      string   `json:"domain"`
@@ -83,6 +97,11 @@ type Resolved struct {
 	ConfigPath  string   `json:"config_path"`
 	CachePath   string   `json:"cache_path"`
 	Source      Sources  `json:"source"`
+	// OAuth 関連（M09）
+	OAuthClientID     string   `json:"oauth_client_id,omitempty"`
+	OAuthClientSecret string   `json:"oauth_client_secret,omitempty"` // show 時は "***" にマスク
+	OAuthRedirectURL  string   `json:"oauth_redirect_url,omitempty"`
+	OAuthScopes       []string `json:"oauth_scopes,omitempty"`
 }
 
 // Sources は Resolved の各フィールドがどのレイヤから来たかを記録する。

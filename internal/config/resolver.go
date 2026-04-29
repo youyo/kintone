@@ -1,5 +1,7 @@
 package config
 
+import "strings"
+
 // Resolve は profile 確定後に CLI > ENV > FileConfig の優先順位でマージし、
 // *Resolved を返す。
 //
@@ -63,7 +65,50 @@ func Resolve(profileName string, cli CLIConfig, env EnvConfig, file FileConfig) 
 		r.Source.Profile = "default"
 	}
 
+	// OAuth 設定（M09）: ENV > file > default
+	// ClientID: ENV > file
+	if env.OAuthClientID != "" {
+		r.OAuthClientID = env.OAuthClientID
+	} else if pb.OAuth.ClientID != "" {
+		r.OAuthClientID = pb.OAuth.ClientID
+	}
+
+	// ClientSecret: ENV > file（環境変数推奨。file への記載は非推奨だが許容）
+	if env.OAuthClientSecret != "" {
+		r.OAuthClientSecret = env.OAuthClientSecret
+	} else if pb.OAuth.ClientSecret != "" {
+		r.OAuthClientSecret = pb.OAuth.ClientSecret
+	}
+
+	// RedirectURL: ENV > file
+	if env.OAuthRedirectURL != "" {
+		r.OAuthRedirectURL = env.OAuthRedirectURL
+	} else if pb.OAuth.RedirectURL != "" {
+		r.OAuthRedirectURL = pb.OAuth.RedirectURL
+	}
+
+	// Scopes: ENV（スペース区切り文字列を []string に変換） > file > デフォルト
+	switch {
+	case env.OAuthScopes != "":
+		r.OAuthScopes = splitScopes(env.OAuthScopes)
+	case len(pb.OAuth.Scopes) > 0:
+		r.OAuthScopes = pb.OAuth.Scopes
+	}
+
 	return r, nil
+}
+
+// splitScopes はスペース区切りのスコープ文字列を []string に変換する。
+// 空白のみのエントリは除去する。
+func splitScopes(s string) []string {
+	parts := strings.Fields(s)
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 // ProfileNotFoundError は明示指定（--profile / KINTONE_PROFILE）された profile が
