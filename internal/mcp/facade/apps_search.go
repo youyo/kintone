@@ -78,7 +78,11 @@ func appsSearchHandler(deps ToolDeps) func(context.Context, mcp.CallToolRequest)
 			return invalidParams(err.Error())
 		}
 
-		resp, err := deps.API.ListApps(ctx, kintoneapi.ListAppsRequest{
+		api, err := resolveAPI(ctx, deps)
+		if err != nil {
+			return errorResult(err)
+		}
+		resp, err := api.ListApps(ctx, kintoneapi.ListAppsRequest{
 			IDs:      ids,
 			Codes:    codes,
 			Name:     name,

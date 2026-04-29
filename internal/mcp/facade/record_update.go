@@ -95,8 +95,12 @@ func recordUpdateHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 		if err != nil {
 			return invalidParams(err.Error())
 		}
-		r := resolver.New(deps.API)
-		out, err := operations.RecordUpdate(ctx, deps.API, r, operations.RecordUpdateInput{
+		api, err := resolveAPI(ctx, deps)
+		if err != nil {
+			return errorResult(err)
+		}
+		r := resolver.New(api)
+		out, err := operations.RecordUpdate(ctx, api, r, operations.RecordUpdateInput{
 			App:               app,
 			AppRef:            appRef,
 			ID:                id,

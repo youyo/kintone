@@ -3,11 +3,13 @@ package facade_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"testing"
 
 	"github.com/youyo/kintone/internal/kintoneapi"
 	"github.com/youyo/kintone/internal/mcp/facade"
+	serviceapi "github.com/youyo/kintone/internal/service/api"
 	"github.com/youyo/kintone/internal/service/operations"
 )
 
@@ -40,6 +42,8 @@ func TestMapError(t *testing.T) {
 		{"FE-10f 500", &kintoneapi.APIError{HTTPStatus: 500, Category: kintoneapi.CategoryServerError}, "KINTONE_INTERNAL"},
 		{"FE-13 context.DeadlineExceeded", context.DeadlineExceeded, "KINTONE_NETWORK"},
 		{"FE-13b context.Canceled", context.Canceled, "KINTONE_NETWORK"},
+		{"FE-15 ErrAuthRequired", serviceapi.ErrAuthRequired, "AUTH_REQUIRED"},
+		{"FE-15b ErrAuthRequired wrapped", fmt.Errorf("wrap: %w", serviceapi.ErrAuthRequired), "AUTH_REQUIRED"},
 		{"FE-14 unknown", errors.New("boom"), "INTERNAL"},
 	}
 	for _, tc := range tests {

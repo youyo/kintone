@@ -58,8 +58,12 @@ func recordCreateHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 		if err != nil {
 			return invalidParams(err.Error())
 		}
-		r := resolver.New(deps.API)
-		out, err := operations.RecordCreate(ctx, deps.API, r, operations.RecordCreateInput{
+		api, err := resolveAPI(ctx, deps)
+		if err != nil {
+			return errorResult(err)
+		}
+		r := resolver.New(api)
+		out, err := operations.RecordCreate(ctx, api, r, operations.RecordCreateInput{
 			App:     app,
 			AppRef:  appRef,
 			Record:  record,

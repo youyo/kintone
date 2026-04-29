@@ -16,6 +16,7 @@ import (
 	"github.com/youyo/kintone/internal/kintoneapi"
 	"github.com/youyo/kintone/internal/output"
 	"github.com/youyo/kintone/internal/resolver"
+	serviceapi "github.com/youyo/kintone/internal/service/api"
 	"github.com/youyo/kintone/internal/service/operations"
 )
 
@@ -30,6 +31,11 @@ import (
 func MapError(err error) *output.Error {
 	if err == nil {
 		return nil
+	}
+
+	// PrincipalAPIFactory が Principal 不在で返す ErrAuthRequired → AUTH_REQUIRED（M11）
+	if errors.Is(err, serviceapi.ErrAuthRequired) {
+		return &output.Error{Code: "AUTH_REQUIRED", Message: err.Error()}
 	}
 
 	// resolver の AmbiguousError → RESOLVER_*_AMBIGUOUS（M08）

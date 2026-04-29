@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト現状
 
-**M10 完了済み**。M11（completion + Docker + GoReleaser リリース）が次のマイルストーン。
+**全 11 マイルストーン完了済み**。リリース準備完了（タグ push で GoReleaser ワークフロー起動）。
 
 - Go 1.26、module: `github.com/youyo/kintone`
-- 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...` / `ops {record create|update|delete, app describe}` / `mcp serve`（M06）/ `cache clear|stats`（M07）/ 全コマンドに `--app-ref` / `--update-key-field-ref` で名前解決（M08）/ **`auth login --oauth` / `auth status` / `auth logout`（M09）**
+- 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...` / `ops {record create|update|delete, app describe}` / `mcp serve`（M06、M10 で HTTP/Streamable + OIDC + multi-user）/ `cache clear|stats`（M07）/ 全コマンドに `--app-ref` / `--update-key-field-ref` で名前解決（M08）/ `auth login --oauth` / `auth status` / `auth logout`（M09）/ **`completion {bash|zsh|fish|powershell}`（M11）**
 - 実装済みパッケージ:
   - `internal/output` — JSON 出力規約（CLI / MCP 共通）
   - `internal/cli` + `internal/cli/api` + `internal/cli/ops` + `internal/cli/mcp` + `internal/cli/clierr`（共通 UsageError）+ `internal/cli/cache`（M07）+ **`internal/cli/auth`（M09）**
@@ -59,8 +59,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `--principal-id` を CLI フラグで必須化（M10 OIDC 対応まで自動取得なし）。形式: `oauth:<任意文字列>` を推奨
   - `auth status` の access_token は先頭 4 + `...` + 末尾 4 にマスク。`config show` の `oauth_client_secret` は `***` にマスク
   - `KINTONE_OAUTH_PKCE_DISABLE=1` で PKCE 無効化（kintone OAuth が PKCE を拒否した場合の escape hatch、M11 本番確認予定）
-- `go test -race -cover ./...` 全 pass（auth/oauth 88.3% / cli/auth 74.1% / cli 86.7% / それ以外は M08 と同等）
-- ブランチ: `feat/m09-oauth-auth`（main への merge 待ち）
+- **設計判断（M11）**:
+  - `internal/cli/completion` を独立パッケージで配置。`NewCmd(root)` がルートコマンドを受け取り cobra の `GenXxxCompletion` を呼ぶ
+  - completion 出力は **JSON envelope の例外**として明示（プレーンスクリプトを stdout に書く）。`version --short` と同列
+  - `internal/mcp/facade.ToolDeps` に `APIResolver` interface 型 `Factory` フィールドを追加（オプショナル）。`Factory != nil` で per-request の per-user API 解決、`Factory == nil` で従来の `deps.API` を使う後方互換
+  - `service/api.PrincipalAPIFactory` は `ForContext(ctx)` メソッドで `APIResolver` を満たすため、上位レイヤから直接代入可能
+  - `facade.MapError` は `errors.Is(err, serviceapi.ErrAuthRequired)` を最優先で判定し `AUTH_REQUIRED` envelope を返す
+  - `kintoneapi/transport.go` の `defer resp.Body.Close()` を IIFE 形式 `defer func() { _ = resp.Body.Close() }()` に書き換え、errcheck 違反を解消
+  - 配布: GoReleaser v2 系で linux/{amd64,arm64} + darwin/{amd64,arm64} + windows/amd64 を cross build。Homebrew Tap (`youyo/homebrew-tap`) と ghcr.io multi-arch への自動配布
+  - Dockerfile: `golang:1.26-alpine` → `gcr.io/distroless/static-debian12:nonroot`（uid 65532）。CGO_ENABLED=0（modernc.org/sqlite は pure Go）
+- `go test -race -cover ./...` 全 22 パッケージ pass、`golangci-lint run` 違反 0（既存 transport.go errcheck 2 件も解消済み）
+- ブランチ: `feat/m11-completion-docker-release`（main への merge 待ち）
 
 ## 開発ワークフロー
 

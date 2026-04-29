@@ -122,7 +122,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 
 		// 2xx: 成功
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if out == nil {
 				_, _ = io.Copy(io.Discard, resp.Body)
 				return nil
@@ -276,7 +276,7 @@ func (c *Client) doJSONWithBodyWithPolicy(ctx context.Context, method, path stri
 		}
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if out == nil {
 				_, _ = io.Copy(io.Discard, resp.Body)
 				return nil

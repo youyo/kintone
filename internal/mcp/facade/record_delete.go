@@ -61,8 +61,12 @@ func recordDeleteHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 		if err != nil {
 			return invalidParams(err.Error())
 		}
-		r := resolver.New(deps.API)
-		out, err := operations.RecordDelete(ctx, deps.API, r, operations.RecordDeleteInput{
+		api, err := resolveAPI(ctx, deps)
+		if err != nil {
+			return errorResult(err)
+		}
+		r := resolver.New(api)
+		out, err := operations.RecordDelete(ctx, api, r, operations.RecordDeleteInput{
 			App:       app,
 			AppRef:    appRef,
 			IDs:       ids,
