@@ -172,6 +172,106 @@ $ kintone api app describe --app 1 --lang ja
 
 LLM がアプリ全体像を 1 回の呼び出しで把握できるよう、`app.json` と `app/form/fields.json` を合成して返します。
 
+## Ops サブコマンド（`kintone ops ...`）
+
+LLM 向けの意味付けされたレコード CRUD と app 記述。書き込み系は `--dry-run` で送信予定リクエスト body を検証できます。
+
+> 内部構造: `service/operations` 層が `service/api` 越しに kintoneapi を呼びます。
+> CLI は `kintoneapi` を直接 import せず、必ず service 層を経由します。
+> 書き込み系（POST/PUT/DELETE）はデフォルトで **リトライ無効**（多重作成リスク回避）です。
+
+### レコード新規登録
+
+単件:
+```bash
+$ kintone ops record create --app 1 --record-json '{"name":{"value":"foo"}}'
+{"ok":true,"data":{"ids":[100],"revisions":[1]}}
+```
+
+複数件:
+```bash
+$ kintone ops record create --app 1 --records-json '[{"name":{"value":"a"}},{"name":{"value":"b"}}]'
+{"ok":true,"data":{"ids":[101,102],"revisions":[1,1]}}
+```
+
+dry-run（API を呼ばずリクエスト body のみ確認）:
+```bash
+$ kintone ops record create --app 1 --record-json '{"name":{"value":"foo"}}' --dry-run
+{"ok":true,"data":{"dry_run":true,"method":"POST","path":"/k/v1/records.json","body":{"app":1,"records":[{"name":{"value":"foo"}}]}}}
+```
+
+| フラグ | 型 | 必須 | 説明 |
+|--------|---|------|------|
+| `--app` | int64 | ◎ | kintone アプリ ID |
+| `--record-json` | string | △ | 単件レコード JSON |
+| `--records-json` | string | △ | 複数件レコード JSON 配列 |
+| `--dry-run` | bool | - | true で API を呼ばず送信予定 body を出力 |
+
+`--record-json` と `--records-json` は **どちらか必須・両方指定は USAGE エラー** です。
+
+### レコード単件更新
+
+ID 指定:
+```bash
+$ kintone ops record update --app 1 --id 7 --record-json '{"name":{"value":"updated"}}'
+{"ok":true,"data":{"revision":3}}
+```
+
+updateKey（ユニークフィールド）指定:
+```bash
+$ kintone ops record update --app 1 --update-key-field code --update-key-value A1 --record-json '{"name":{"value":"updated"}}'
+```
+
+楽観ロック（`--revision`）:
+```bash
+$ kintone ops record update --app 1 --id 7 --revision 2 --record-json '{"name":{"value":"x"}}'
+```
+
+| フラグ | 型 | 必須 | 説明 |
+|--------|---|------|------|
+| `--app` | int64 | ◎ | kintone アプリ ID |
+| `--id` | int64 | △ | 更新対象レコード ID |
+| `--update-key-field` / `--update-key-value` | string | △ | updateKey 指定（id と排他） |
+| `--record-json` | string | ◎ | 更新内容 JSON |
+| `--revision` | int64 | - | 楽観ロック用 revision |
+| `--dry-run` | bool | - | 送信予定 body のみ出力 |
+
+`--id` と `--update-key-*` は **排他**。どちらかが必須です。
+
+### レコード削除
+
+```bash
+$ kintone ops record delete --app 1 --id 7 --id 8
+{"ok":true,"data":{"deleted":2}}
+```
+
+revisions 付き（楽観ロック）:
+```bash
+$ kintone ops record delete --app 1 --id 7 --id 8 --revision 3 --revision 4
+```
+
+dry-run:
+```bash
+$ kintone ops record delete --app 1 --id 7 --id 8 --dry-run
+{"ok":true,"data":{"dry_run":true,"method":"DELETE","path":"/k/v1/records.json","body":{"app":1,"ids":[7,8]}}}
+```
+
+| フラグ | 型 | 必須 | 説明 |
+|--------|---|------|------|
+| `--app` | int64 | ◎ | kintone アプリ ID |
+| `--id` | int64（複数指定可） | ◎ | 削除対象レコード ID（`--id 1 --id 2`） |
+| `--revision` | int64（複数指定可） | - | 楽観ロック用 revision（`--id` と同要素数） |
+| `--dry-run` | bool | - | 送信予定 body のみ出力 |
+
+### アプリ記述（ops 配下にも公開）
+
+`kintone api app describe` と等価です。LLM が `ops` 名前空間下から発見できるよう同一 operations を再公開しています。
+
+```bash
+$ kintone ops app describe --app 1 --lang ja
+{"ok":true,"data":{"app":{"app_id":"1","name":"テスト",...},"fields":{...},"revision":"5"}}
+```
+
 ## JSON 出力規約
 
 全コマンドは以下の形式で stdout に出力します。
