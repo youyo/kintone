@@ -4,16 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト現状
 
-**M03 完了済み**。M04（service 層 + CLI api コマンド）が次のマイルストーン。
+**M04 完了済み**。M05（write 系 operations + CLI ops コマンド）が次のマイルストーン。
 
 - Go 1.26、module: `github.com/youyo/kintone`
-- `kintone version` が `{"ok":true,"data":{"version":"0.1.0"}}` を JSON 出力
-- `kintone config show` / `kintone config init` で TOML + env + profile の設定解決を提供
-- `internal/auth/apitoken`（X-Cybozu-API-Token ヘッダ付与）を実装済み
-- `internal/kintoneapi`（net/http 薄ラッパー: Client / Transport / APIError / records / record / app / fields）を実装済み
-- `internal/cli/errors.go` の `MapToOutputError` に kintoneapi エラー判定（KINTONE_UNAUTHORIZED / FORBIDDEN / NOT_FOUND / RATE_LIMITED / VALIDATION / INTERNAL / NETWORK）を追加
-- `go test -race -cover ./...` 全 pass（auth 100% / kintoneapi 86.2% / cli 87.4% / config 92.7% / output 85.0%）、golangci-lint クリーン
-- ブランチ: `feat/m03-kintoneapi-client`（main への merge 待ち）
+- 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...`
+- 実装済みパッケージ:
+  - `internal/output` — JSON 出力規約
+  - `internal/cli` + `internal/cli/api` — cobra コマンドツリー
+  - `internal/config` — CLI > ENV > toml の優先解決
+  - `internal/auth/apitoken` — `X-Cybozu-API-Token` ヘッダ付与
+  - `internal/kintoneapi` — net/http 薄ラッパー REST クライアント（read 系エンドポイント完備）
+  - `internal/service/api` — `kintoneapi` の薄い透過層（interface でモック容易化、M07 cache 挿入点）
+  - `internal/service/operations` — LLM 向け抽象化: `RecordsQuery`（totalCount を int64 化）/ `AppDescribe`（app + fields 合成）
+- 依存方向: `cli/api → service/operations → service/api → kintoneapi → auth`
+- **設計原則**: CLI から `internal/kintoneapi` 直 import 禁止。必ず `service/api` または `service/operations` を経由する
+- `go test -race -cover ./...` 全 pass（service/api 100% / service/operations 100% / cli/api 82% / cli 87.5% / config 92.7% / kintoneapi 86.2% / auth 100% / output 85.0%）、M04 新規 lint 違反 0
+- ブランチ: `feat/m04-service-read-cli-api`（main への merge 待ち）
 
 ## 開発ワークフロー
 
@@ -97,4 +103,5 @@ go run ./cmd/kintone version       # JSON 出力で動作確認
 - M01 詳細計画: `plans/kintone-m01-project-skeleton.md`
 - M02 詳細計画: `plans/kintone-m02-config-layer.md`
 - M03 詳細計画: `plans/kintone-m03-kintoneapi-client.md`
-- M04 以降の詳細計画は着手時に `/devflow:plan` で生成する
+- M04 詳細計画: `plans/kintone-m04-service-read-cli-api.md`
+- M05 以降の詳細計画は着手時に `/devflow:plan` で生成する

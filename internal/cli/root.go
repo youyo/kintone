@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	cliapi "github.com/youyo/kintone/internal/cli/api"
 	"github.com/youyo/kintone/internal/output"
 )
 
@@ -37,6 +38,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().Bool("no-color", false, "カラー出力を無効化（後続マイルストーンで利用予定）")
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newConfigCmd())
+	cmd.AddCommand(cliapi.NewCmd())
 	return cmd
 }
 
