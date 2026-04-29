@@ -4,10 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト現状
 
-**計画フェーズ**：ソースコードはまだ存在しない。`docs/specs/kintone_spec.md`（超詳細仕様書）と `plans/kintone-roadmap.md`（M01〜M11 のマイルストーン分割）のみ確定済み。実装は M01 から順次行う。
+**M01 完了済み**。M02（config パッケージ）が次のマイルストーン。
 
-- Go 1.26（`mise.toml` で固定。`mise install` で導入）
-- `go.mod` 未作成。M01 で `go mod init github.com/youyo/kintone` 予定
+- Go 1.26、module: `github.com/youyo/kintone`
+- `kintone version` が `{"ok":true,"data":{"version":"0.1.0"}}` を JSON 出力
+- `internal/output`（JSON 出力規約）と `internal/cli`（cobra root/version/errors）を実装済み
+- `go test -race -cover ./...` 全 pass、golangci-lint クリーン
+- ブランチ: `feat/m01-project-skeleton`（main への merge 待ち）
 
 ## 開発ワークフロー
 
