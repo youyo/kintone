@@ -4,26 +4,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト現状
 
-**M05 完了済み**。M06（MCP サーバー雛形 + Facade 層）が次のマイルストーン。
+**M06 完了済み**。M07（SQLite キャッシュ + TokenStore）が次のマイルストーン。
 
 - Go 1.26、module: `github.com/youyo/kintone`
-- 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...` / **`ops {record create|update|delete, app describe}`**（M05）
+- 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...` / `ops {record create|update|delete, app describe}` / **`mcp serve`**（M06）
 - 実装済みパッケージ:
-  - `internal/output` — JSON 出力規約
-  - `internal/cli` + `internal/cli/api` + **`internal/cli/ops`** + **`internal/cli/clierr`**（共通 UsageError） — cobra コマンドツリー
+  - `internal/output` — JSON 出力規約（CLI / MCP 共通）
+  - `internal/cli` + `internal/cli/api` + `internal/cli/ops` + **`internal/cli/mcp`** + `internal/cli/clierr`（共通 UsageError）
   - `internal/config` — CLI > ENV > toml の優先解決
   - `internal/auth/apitoken` — `X-Cybozu-API-Token` ヘッダ付与
-  - `internal/kintoneapi` — net/http 薄ラッパー REST クライアント（read 系 + write 系 POST/PUT/DELETE 完備、書き込みは MaxAttempts=1 デフォルト）
+  - `internal/kintoneapi` — net/http 薄ラッパー REST クライアント（read 系 + write 系 + **`ListApps`**（apps_search 用））
   - `internal/service/api` — `kintoneapi` の薄い透過層（interface でモック容易化、M07 cache 挿入点）
-  - `internal/service/operations` — LLM 向け抽象化: `RecordsQuery` / `AppDescribe` / **`RecordCreate` / `RecordUpdate` / `RecordDelete`**
-- 依存方向: `cli/{api,ops} → service/operations → service/api → kintoneapi → auth`
-- **設計原則**: CLI から `internal/kintoneapi` 直 import 禁止。必ず `service/api` または `service/operations` を経由する
+  - `internal/service/operations` — LLM 向け抽象化: `RecordsQuery` / `AppDescribe` / `RecordCreate` / `RecordUpdate` / `RecordDelete`
+  - **`internal/mcp/server`** — mark3labs/mcp-go v0.49.0 の薄いラッパー（stdio 起動）
+  - **`internal/mcp/facade`** — 6 つの MCP tools ハンドラ（apps_search / app_describe / records_query / record_create / record_update / record_delete）と `MapError`（`cli.MapToOutputError` と同等の error→code マッパー）
+- 依存方向: `cli/{api,ops,mcp} → service/operations → service/api → kintoneapi → auth` / `cli/mcp → mcp/server → mcp/facade → service/operations`
+- **設計原則**: CLI / MCP から `internal/kintoneapi` 直 import 禁止。必ず `service/api` または `service/operations` を経由する
 - **設計判断（M05）**:
   - `clierr.UsageError` 型 sentinel + `MapToOutputError` `errors.As` 分岐で USAGE 分類を堅牢化（文字列 prefix 依存を排除）。配置は中立パッケージ `internal/cli/clierr` で循環なし
   - `--dry-run` フラグで送信予定 body を JSON 出力（実 API 送信時と byte 完全一致を担保するため、`kintoneapi.BuildXxxBody` を共通化。テストで equivalence を検証）
   - 書き込み系（POST/PUT/DELETE）は `doJSONWithBody` 内部で `MaxAttempts=1` 強制（多重作成リスク回避）
-- `go test -race -cover ./...` 全 pass（service/api 100% / service/operations 98.8% / cli/ops 87.5% / cli/api 82.0% / cli 87.2% / config 92.7% / kintoneapi 85.5% / auth 100% / output 85.0%）
-- ブランチ: `feat/m05-cli-ops-write`（main への merge 待ち）
+- **設計判断（M06）**:
+  - MCP の出力は CLI と同じ `output.Success` / `output.Failure` envelope を `CallToolResult.Content[0].Text` に格納する。CLI と MCP で JSON 契約を共有
+  - `facade.MapError` は `errors.Is`（operations の Err\*）→ `errors.As`（`*kintoneapi.APIError`、`*url.Error`）→ context error の優先順で分類し、`INVALID_PARAMS` / `KINTONE_*` / `KINTONE_NETWORK` / `INTERNAL` に振り分ける
+  - dry-run は MCP には露出しない（LLM ツール選択のセマンティクスに不適）
+  - `internal/cli/mcp/helpers.go` は `cli/api` と同型の `NewAPIBuilder` hook を持ち、テストで stub を注入可能（並列テスト禁止）
+- `go test -race -cover ./...` 全 pass（mcp/facade 80.3% / mcp/server 75.0% / cli/mcp 57.1% / それ以外は M05 と同等以上）
+- ブランチ: `feat/m06-mcp-server-facade`（main への merge 待ち）
 
 ## 開発ワークフロー
 
@@ -109,4 +116,5 @@ go run ./cmd/kintone version       # JSON 出力で動作確認
 - M03 詳細計画: `plans/kintone-m03-kintoneapi-client.md`
 - M04 詳細計画: `plans/kintone-m04-service-read-cli-api.md`
 - M05 詳細計画: `plans/kintone-m05-cli-ops-write.md`
-- M06 以降の詳細計画は着手時に `/devflow:plan` で生成する
+- M06 詳細計画: `plans/kintone-m06-mcp-server-facade.md`
+- M07 以降の詳細計画は着手時に `/devflow:plan` で生成する
