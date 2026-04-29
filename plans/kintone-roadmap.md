@@ -8,13 +8,13 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-04-29 13:55 |
-| ステータス | 進行中（M06 完了） |
+| 最終更新 | 2026-04-29 18:10 |
+| ステータス | 進行中（M07 完了） |
 
 ## Current Focus
-- **マイルストーン**: M7: SQLite キャッシュ + TokenStore
-- **直近の完了**: M06 — MCP サーバー雛形 + Facade 層（feat/m06-mcp-server-facade ブランチ）
-- **次のアクション**: M07 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
+- **マイルストーン**: M8: Resolver（名前解決）
+- **直近の完了**: M07 — SQLite キャッシュ + TokenStore（feat/m07-sqlite-cache-tokenstore ブランチ）
+- **次のアクション**: M08 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
 
 ## Progress
 
@@ -88,13 +88,18 @@
 - 詳細: plans/kintone-m06-mcp-server-facade.md
 - ブランチ: feat/m06-mcp-server-facade（main への merge 待ち）
 
-### M7: SQLite キャッシュ + TokenStore
-- [ ] internal/cache/{sqlite.go, schema.sql, ttl.go, *_test.go}（modernc.org/sqlite または mattn/go-sqlite3）
-- [ ] internal/tokenstore/{store.go, sqlite.go, *_test.go}（Get/Put/Delete, Key=Domain+PrincipalID+AuthType）
-- [ ] CLI: `kintone cache clear` / `kintone cache stats`
-- [ ] TTL: apps/fields/resolver=1 年
-- [ ] パス: ~/.cache/kintone/cache.db (host) / /data/kintone/cache.db (container)
-- 詳細: 着手時生成
+### M7: SQLite キャッシュ + TokenStore ✅ 完了
+- [x] internal/cache/{path.go, sqlite.go, ttl.go, store.go, schema.sql, *_test.go}（modernc.org/sqlite v1.50.0）
+- [x] internal/tokenstore/{store.go, sqlite.go, schema.sql, *_test.go}（Get/Put/Delete, Key=Domain+PrincipalID+AuthType）
+- [x] CLI: `kintone cache clear` / `kintone cache stats`（internal/cli/cache）
+- [x] TTL: apps/fields=1 年（TTL 管理 + 自動 expired 削除）
+- [x] パス: `~/.cache/kintone/cache.db` (host) / `KINTONE_CACHE_PATH` 環境変数で上書き
+- [x] `CachingAPI` decorator（service/api）: `GetApp` / `GetAppFormFields` / `ListApps` をキャッシュ
+- [x] `KINTONE_CACHE_DISABLE=1` でキャッシュ無効化（cli/{api,ops,mcp}/helpers.go に注入）
+- [x] 全テスト pass（cache 76.2% / cli/cache 73.6% / tokenstore 79.0% / service/api 88.9%）
+- [x] golangci-lint run 新規違反 0、go vet クリア、gofmt クリア
+- 詳細: plans/kintone-m07-sqlite-cache-tokenstore.md
+- ブランチ: feat/m07-sqlite-cache-tokenstore（main への merge 待ち）
 
 ### M8: Resolver（名前解決）
 - [ ] internal/resolver/{app.go, field.go, *_test.go}
@@ -154,3 +159,4 @@
 | 2026-04-29 13:14 | 進捗 | M04 完了（feat/m04-service-read-cli-api ブランチ）。internal/service/api（100%）・internal/service/operations（100%）・internal/cli/api（82%）を TDD で実装。`kintone api {records,record,app} ...` で kintone REST を JSON で叩けるように。CLI から kintoneapi 直 import 禁止のレイヤー分離を確立。全テスト pass、M04 新規 lint 違反 0。Current Focus を M05 に更新 |
 | 2026-04-29 13:40 | 進捗 | M05 完了（feat/m05-cli-ops-write ブランチ）。kintoneapi に write 系（POST/PUT/DELETE）を追加し、service/api interface 拡張、operations.{RecordCreate, RecordUpdate, RecordDelete} を実装。CLI に `ops record {create,update,delete}` と `ops app describe` を追加。`--dry-run` で送信予定 body を JSON 出力（実 API と byte 一致）、書き込み系は MaxAttempts=1 デフォルト、`UsageError` 型 sentinel で USAGE 分類を堅牢化（advisor 6 件指摘反映済）。全テスト pass、カバレッジ目標達成。Current Focus を M06 に更新 |
 | 2026-04-29 13:55 | 進捗 | M06 完了（feat/m06-mcp-server-facade ブランチ）。mark3labs/mcp-go v0.49.0 を採用、`internal/mcp/{server,facade}` と `internal/cli/mcp` を実装。kintoneapi に `ListApps`（GET /k/v1/apps.json）を新規追加、service/api interface 拡張。MCP 6 tools（apps_search / app_describe / records_query / record_create / record_update / record_delete）が完成し、`kintone mcp serve` で stdio 起動可能。`facade.MapError` で operations.Err\* / kintoneapi.APIError / network → MCP code をマップ（M05 ハンドオフ最重要事項対応）。出力は CLI と同じ `output.Success/Failure` envelope を `CallToolResult.Content[0].Text` に格納、契約共有を実現。in-process client で 6 tools 往復テストを網羅。全テスト pass、新規 lint 違反 0。Current Focus を M07 に更新 |
+| 2026-04-29 18:10 | 進捗 | M07 完了（feat/m07-sqlite-cache-tokenstore ブランチ）。modernc.org/sqlite v1.50.0 を採用、`internal/cache`（SQLite キャッシュ層・TTL・パス解決）と `internal/tokenstore`（OAuth トークン保存）を TDD で実装。`CachingAPI` decorator（service/api）で `GetApp` / `GetAppFormFields` / `ListApps` にキャッシュを注入。CLI に `kintone cache clear / stats` サブコマンドを追加。`KINTONE_CACHE_DISABLE=1` で無効化対応。全テスト pass（cache 76.2% / tokenstore 79.0% / service/api 88.9%）、新規 lint 違反 0。Current Focus を M08 に更新 |

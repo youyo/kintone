@@ -8,8 +8,11 @@
 package mcp
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 
+	"github.com/youyo/kintone/internal/cache"
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/kintoneapi"
 	serviceapi "github.com/youyo/kintone/internal/service/api"
@@ -31,6 +34,7 @@ var NewAPIBuilder = defaultNewAPI
 
 // defaultNewAPI は本番用ローダー。
 // CLIConfig → config.Load → kintoneapi.NewFromResolved → service/api.NewFromKintone。
+// KINTONE_CACHE_DISABLE=1 でない限り、CachingAPI で upstream をラップする。
 func defaultNewAPI(in LoaderInput) (serviceapi.API, error) {
 	r, err := config.Load(config.LoadOptions{CLI: in.CLI})
 	if err != nil {
@@ -40,7 +44,22 @@ func defaultNewAPI(in LoaderInput) (serviceapi.API, error) {
 	if err != nil {
 		return nil, err
 	}
-	return serviceapi.NewFromKintone(kc)
+	upstream, err := serviceapi.NewFromKintone(kc)
+	if err != nil {
+		return nil, err
+	}
+	if os.Getenv("KINTONE_CACHE_DISABLE") == "1" {
+		return upstream, nil
+	}
+	cachePath, err := cache.DefaultCachePath(nil, nil)
+	if err != nil {
+		return upstream, nil
+	}
+	store, err := cache.Open(cachePath)
+	if err != nil {
+		return upstream, nil
+	}
+	return serviceapi.NewCachingAPI(upstream, store, r.Domain), nil
 }
 
 // readCLIConfig は cobra 親コマンドの PersistentFlags から CLIConfig を構築する。
