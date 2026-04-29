@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/youyo/kintone/internal/kintoneapi"
 	"github.com/youyo/kintone/internal/output"
+	"github.com/youyo/kintone/internal/resolver"
 	"github.com/youyo/kintone/internal/service/operations"
 )
 
@@ -47,6 +48,7 @@ func newRecordCmd() *cobra.Command {
 func newRecordCreateCmd() *cobra.Command {
 	var (
 		app         int64
+		appRef      string
 		recordJSON  string
 		recordsJSON string
 		dryRun      bool
@@ -56,16 +58,37 @@ func newRecordCreateCmd() *cobra.Command {
 		Short: "レコードを新規登録する（複数件可・dry-run 対応）",
 		Long: `POST /k/v1/records.json を呼び、--record-json または --records-json で渡したレコードを登録します。
 
+--app と --app-ref はどちらか一方を指定してください。
+
 --dry-run を付けると API を呼ばず、送信予定の HTTP body を JSON で表示します。
-（実 API 送信時と body は byte 完全一致します。）`,
+（実 API 送信時と body は byte 完全一致します。--app-ref 利用時は --dry-run でも resolver で App ID 解決が走ります。）`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if app > 0 && appRef != "" {
+				return newUsageError("--app and --app-ref are mutually exclusive")
+			}
+			if app == 0 && appRef == "" {
+				return newUsageError("either --app or --app-ref is required")
+			}
 			records, err := normalizeRecords(recordJSON, recordsJSON)
 			if err != nil {
 				return err
 			}
-			req := kintoneapi.InsertRecordsRequest{App: app, Records: records}
 
 			if dryRun {
+				appID := app
+				if appRef != "" {
+					a, err := buildAPI(cmd)
+					if err != nil {
+						return err
+					}
+					r := resolver.New(a)
+					resolved, err := r.ResolveApp(cmd.Context(), appRef)
+					if err != nil {
+						return err
+					}
+					appID = resolved
+				}
+				req := kintoneapi.InsertRecordsRequest{App: appID, Records: records}
 				return writeDryRun(cmd, http.MethodPost, "/k/v1/records.json",
 					kintoneapi.BuildInsertRecordsBody(req))
 			}
@@ -74,8 +97,9 @@ func newRecordCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			out, err := operations.RecordCreate(cmd.Context(), a, operations.RecordCreateInput{
-				App: app, Records: records,
+			r := resolver.New(a)
+			out, err := operations.RecordCreate(cmd.Context(), a, r, operations.RecordCreateInput{
+				App: app, AppRef: appRef, Records: records,
 			})
 			if err != nil {
 				return err
@@ -83,11 +107,11 @@ func newRecordCreateCmd() *cobra.Command {
 			return writeJSON(cmd, out)
 		},
 	}
-	cmd.Flags().Int64Var(&app, "app", 0, "kintone アプリ ID（必須）")
+	cmd.Flags().Int64Var(&app, "app", 0, "kintone アプリ ID（数値直指定、--app-ref と排他）")
+	cmd.Flags().StringVar(&appRef, "app-ref", "", "kintone アプリ参照（--app と排他）")
 	cmd.Flags().StringVar(&recordJSON, "record-json", "", "単件レコード JSON")
 	cmd.Flags().StringVar(&recordsJSON, "records-json", "", "複数件レコード JSON 配列")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "送信せずリクエスト body を JSON 出力")
-	_ = cmd.MarkFlagRequired("app")
 	return cmd
 }
 
@@ -124,13 +148,15 @@ func normalizeRecords(single, multi string) ([]map[string]any, error) {
 //	--dry-run            bool
 func newRecordUpdateCmd() *cobra.Command {
 	var (
-		app            int64
-		id             int64
-		updateKeyField string
-		updateKeyValue string
-		recordJSON     string
-		revision       int64
-		dryRun         bool
+		app               int64
+		appRef            string
+		id                int64
+		updateKeyField    string
+		updateKeyFieldRef string
+		updateKeyValue    string
+		recordJSON        string
+		revision          int64
+		dryRun            bool
 	)
 	cmd := &cobra.Command{
 		Use:   "update",
@@ -138,10 +164,24 @@ func newRecordUpdateCmd() *cobra.Command {
 		Long: `PUT /k/v1/record.json を呼び、--id または --update-key-field/--update-key-value で
 特定したレコードを --record-json の内容で更新します。--revision を指定すると楽観ロックを行います。
 
---dry-run を付けると API を呼ばず、送信予定の HTTP body を JSON で表示します。`,
+--app と --app-ref はどちらか一方を指定してください。
+--update-key-field と --update-key-field-ref はどちらか一方（updateKey 経路のとき）。
+
+--dry-run を付けると API を呼ばず、送信予定の HTTP body を JSON で表示します。
+（--app-ref / --update-key-field-ref 利用時は --dry-run でも resolver による解決が走ります。）`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if app > 0 && appRef != "" {
+				return newUsageError("--app and --app-ref are mutually exclusive")
+			}
+			if app == 0 && appRef == "" {
+				return newUsageError("either --app or --app-ref is required")
+			}
+			if updateKeyField != "" && updateKeyFieldRef != "" {
+				return newUsageError("--update-key-field and --update-key-field-ref are mutually exclusive")
+			}
+
 			hasID := id > 0
-			hasKeyField := updateKeyField != ""
+			hasKeyField := updateKeyField != "" || updateKeyFieldRef != ""
 			hasKeyValue := updateKeyValue != ""
 			hasKey := hasKeyField || hasKeyValue
 			if hasID && hasKey {
@@ -149,7 +189,7 @@ func newRecordUpdateCmd() *cobra.Command {
 			}
 			if !hasID {
 				if !hasKeyField || !hasKeyValue {
-					return newUsageError("either --id or both --update-key-field and --update-key-value are required")
+					return newUsageError("either --id or both --update-key-field/--update-key-field-ref and --update-key-value are required")
 				}
 			}
 			rec, err := parseRecordJSON(recordJSON)
@@ -157,25 +197,43 @@ func newRecordUpdateCmd() *cobra.Command {
 				return err
 			}
 
-			req := kintoneapi.UpdateRecordRequest{
-				App:    app,
-				Record: rec,
-			}
-			if hasID {
-				req.ID = id
-			} else {
-				req.UpdateKey = &kintoneapi.UpdateKey{
-					Field: updateKeyField,
-					Value: updateKeyValue,
-				}
-			}
-			// --revision はフラグが明示的に変更されたときのみ送る（0 と未指定の区別）。
-			if cmd.Flags().Changed("revision") {
-				rv := revision
-				req.Revision = &rv
-			}
-
 			if dryRun {
+				appID := app
+				resolvedKeyField := updateKeyField
+				if appRef != "" || updateKeyFieldRef != "" {
+					a, err := buildAPI(cmd)
+					if err != nil {
+						return err
+					}
+					r := resolver.New(a)
+					if appRef != "" {
+						resolved, err := r.ResolveApp(cmd.Context(), appRef)
+						if err != nil {
+							return err
+						}
+						appID = resolved
+					}
+					if updateKeyFieldRef != "" {
+						resolved, err := r.ResolveField(cmd.Context(), appID, updateKeyFieldRef)
+						if err != nil {
+							return err
+						}
+						resolvedKeyField = resolved
+					}
+				}
+				req := kintoneapi.UpdateRecordRequest{App: appID, Record: rec}
+				if hasID {
+					req.ID = id
+				} else {
+					req.UpdateKey = &kintoneapi.UpdateKey{
+						Field: resolvedKeyField,
+						Value: updateKeyValue,
+					}
+				}
+				if cmd.Flags().Changed("revision") {
+					rv := revision
+					req.Revision = &rv
+				}
 				return writeDryRun(cmd, http.MethodPut, "/k/v1/record.json",
 					kintoneapi.BuildUpdateRecordBody(req))
 			}
@@ -184,32 +242,36 @@ func newRecordUpdateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			r := resolver.New(a)
 			opIn := operations.RecordUpdateInput{
-				App:            app,
-				ID:             id,
-				UpdateKeyField: updateKeyField,
-				UpdateKeyValue: updateKeyValue,
-				Record:         rec,
+				App:               app,
+				AppRef:            appRef,
+				ID:                id,
+				UpdateKeyField:    updateKeyField,
+				UpdateKeyFieldRef: updateKeyFieldRef,
+				UpdateKeyValue:    updateKeyValue,
+				Record:            rec,
 			}
 			if cmd.Flags().Changed("revision") {
 				rv := revision
 				opIn.Revision = &rv
 			}
-			out, err := operations.RecordUpdate(cmd.Context(), a, opIn)
+			out, err := operations.RecordUpdate(cmd.Context(), a, r, opIn)
 			if err != nil {
 				return err
 			}
 			return writeJSON(cmd, out)
 		},
 	}
-	cmd.Flags().Int64Var(&app, "app", 0, "kintone アプリ ID（必須）")
+	cmd.Flags().Int64Var(&app, "app", 0, "kintone アプリ ID（数値直指定、--app-ref と排他）")
+	cmd.Flags().StringVar(&appRef, "app-ref", "", "kintone アプリ参照（--app と排他）")
 	cmd.Flags().Int64Var(&id, "id", 0, "更新対象レコード ID（updateKey と排他）")
 	cmd.Flags().StringVar(&updateKeyField, "update-key-field", "", "updateKey: フィールドコード")
+	cmd.Flags().StringVar(&updateKeyFieldRef, "update-key-field-ref", "", "updateKey: フィールド参照（label / partial、--update-key-field と排他）")
 	cmd.Flags().StringVar(&updateKeyValue, "update-key-value", "", "updateKey: 値")
 	cmd.Flags().StringVar(&recordJSON, "record-json", "", "更新内容 JSON（必須）")
 	cmd.Flags().Int64Var(&revision, "revision", 0, "楽観ロック用 revision（フラグ未指定なら送信しない）")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "送信せずリクエスト body を JSON 出力")
-	_ = cmd.MarkFlagRequired("app")
 	_ = cmd.MarkFlagRequired("record-json")
 	return cmd
 }
@@ -225,6 +287,7 @@ func newRecordUpdateCmd() *cobra.Command {
 func newRecordDeleteCmd() *cobra.Command {
 	var (
 		app       int64
+		appRef    string
 		ids       []int64
 		revisions []int64
 		dryRun    bool
@@ -235,8 +298,17 @@ func newRecordDeleteCmd() *cobra.Command {
 		Long: `DELETE /k/v1/records.json を呼び、--id で指定したレコードを削除します。
 --revision を指定すると楽観ロックを行います（--id と同じ個数を指定）。
 
---dry-run を付けると API を呼ばず、送信予定の HTTP body を JSON で表示します。`,
+--app と --app-ref はどちらか一方を指定してください。
+
+--dry-run を付けると API を呼ばず、送信予定の HTTP body を JSON で表示します。
+（--app-ref 利用時は --dry-run でも resolver で App ID 解決が走ります。）`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if app > 0 && appRef != "" {
+				return newUsageError("--app and --app-ref are mutually exclusive")
+			}
+			if app == 0 && appRef == "" {
+				return newUsageError("either --app or --app-ref is required")
+			}
 			// advisor 指摘 #6: cobra の Int64SliceVar + MarkFlagRequired の挙動は version 依存。
 			// 確実に空 array を弾くため RunE 冒頭で明示判定する。
 			if len(ids) == 0 {
@@ -245,9 +317,22 @@ func newRecordDeleteCmd() *cobra.Command {
 			if len(revisions) > 0 && len(revisions) != len(ids) {
 				return newUsageError("--revision count (%d) must match --id count (%d)", len(revisions), len(ids))
 			}
-			req := kintoneapi.DeleteRecordsRequest{App: app, IDs: ids, Revisions: revisions}
 
 			if dryRun {
+				appID := app
+				if appRef != "" {
+					a, err := buildAPI(cmd)
+					if err != nil {
+						return err
+					}
+					r := resolver.New(a)
+					resolved, err := r.ResolveApp(cmd.Context(), appRef)
+					if err != nil {
+						return err
+					}
+					appID = resolved
+				}
+				req := kintoneapi.DeleteRecordsRequest{App: appID, IDs: ids, Revisions: revisions}
 				return writeDryRun(cmd, http.MethodDelete, "/k/v1/records.json",
 					kintoneapi.BuildDeleteRecordsBody(req))
 			}
@@ -256,8 +341,9 @@ func newRecordDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			out, err := operations.RecordDelete(cmd.Context(), a, operations.RecordDeleteInput{
-				App: app, IDs: ids, Revisions: revisions,
+			r := resolver.New(a)
+			out, err := operations.RecordDelete(cmd.Context(), a, r, operations.RecordDeleteInput{
+				App: app, AppRef: appRef, IDs: ids, Revisions: revisions,
 			})
 			if err != nil {
 				return err
@@ -265,11 +351,11 @@ func newRecordDeleteCmd() *cobra.Command {
 			return writeJSON(cmd, out)
 		},
 	}
-	cmd.Flags().Int64Var(&app, "app", 0, "kintone アプリ ID（必須）")
+	cmd.Flags().Int64Var(&app, "app", 0, "kintone アプリ ID（数値直指定、--app-ref と排他）")
+	cmd.Flags().StringVar(&appRef, "app-ref", "", "kintone アプリ参照（--app と排他）")
 	cmd.Flags().Int64SliceVar(&ids, "id", nil, "削除対象レコード ID（必須・複数指定可: --id 1 --id 2）")
 	cmd.Flags().Int64SliceVar(&revisions, "revision", nil, "楽観ロック用 revision（任意・--id と同要素数）")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "送信せずリクエスト body を JSON 出力")
-	_ = cmd.MarkFlagRequired("app")
 	return cmd
 }
 
