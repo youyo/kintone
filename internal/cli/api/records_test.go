@@ -62,6 +62,12 @@ func (s *stubAPI) DeleteRecords(ctx context.Context, req kintoneapi.DeleteRecord
 	return nil
 }
 
+// M06 で interface が拡張されたため、cli/api 既存テストの stub にも空実装を追加。
+// cli/api テストでは ListApps を呼ばない（apps_search は MCP facade 専用）が、interface 互換のため必要。
+func (s *stubAPI) ListApps(ctx context.Context, req kintoneapi.ListAppsRequest) (*kintoneapi.ListAppsResponse, error) {
+	return &kintoneapi.ListAppsResponse{}, nil
+}
+
 // withStubAPI は cliapi.NewAPIBuilder hook を stub 実装に差し替えて test 終了時に元に戻す。
 func withStubAPI(t *testing.T, s serviceapi.API) {
 	t.Helper()

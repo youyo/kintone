@@ -8,13 +8,13 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-04-29 13:40 |
-| ステータス | 進行中（M05 完了） |
+| 最終更新 | 2026-04-29 13:55 |
+| ステータス | 進行中（M06 完了） |
 
 ## Current Focus
-- **マイルストーン**: M6: MCP サーバー雛形 + Facade 層
-- **直近の完了**: M05 — CLI ops コマンド（write 系 + describe）（feat/m05-cli-ops-write ブランチ）
-- **次のアクション**: M06 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
+- **マイルストーン**: M7: SQLite キャッシュ + TokenStore
+- **直近の完了**: M06 — MCP サーバー雛形 + Facade 層（feat/m06-mcp-server-facade ブランチ）
+- **次のアクション**: M07 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
 
 ## Progress
 
@@ -74,13 +74,19 @@
 - 詳細: plans/kintone-m05-cli-ops-write.md
 - ブランチ: feat/m05-cli-ops-write（main への merge 待ち）
 
-### M6: MCP サーバー雛形 + Facade 層
-- [ ] internal/mcp/server/{stdio.go, *_test.go}（mark3labs/mcp-go）
-- [ ] internal/mcp/facade/{tools.go, apps_search.go, app_describe.go, records_*.go}
-- [ ] CLI: `kintone mcp serve` (stdio mode)
-- [ ] 6 つの MCP tools 実装: apps_search, app_describe, records_query, record_create/update/delete
-- [ ] 動作確認: Claude Desktop からの接続テスト
-- 詳細: 着手時生成
+### M6: MCP サーバー雛形 + Facade 層 ✅ 完了
+- [x] internal/kintoneapi/apps.go（GET /k/v1/apps.json = ListApps を新規追加）
+- [x] internal/service/api: API interface に ListApps を拡張
+- [x] internal/mcp/server/{server.go, server_test.go}（mark3labs/mcp-go v0.49.0 stdio）
+- [x] internal/mcp/facade/{facade.go, errors.go, result.go, apps_search.go, app_describe.go, records_query.go, record_create.go, record_update.go, record_delete.go, *_test.go}
+- [x] CLI: `kintone mcp serve` (stdio mode) + helpers (NewAPIBuilder hook)
+- [x] 6 つの MCP tools 実装: apps_search, app_describe, records_query, record_create/update/delete
+- [x] facade.MapError で operations.Err\* / kintoneapi.APIError / network エラーを output.Error コードへマップ
+- [x] in-process client で 6 tools 全て往復テスト（panic 防止 + envelope 検証）
+- [x] 全テスト pass（mcp/facade 80.3% / mcp/server 75.0% / cli/mcp 57.1% カバレッジ）
+- [x] golangci-lint run 新規違反 0、go vet クリア、gofmt クリア
+- 詳細: plans/kintone-m06-mcp-server-facade.md
+- ブランチ: feat/m06-mcp-server-facade（main への merge 待ち）
 
 ### M7: SQLite キャッシュ + TokenStore
 - [ ] internal/cache/{sqlite.go, schema.sql, ttl.go, *_test.go}（modernc.org/sqlite または mattn/go-sqlite3）
@@ -147,3 +153,4 @@
 | 2026-04-29 12:58 | 進捗 | M03 完了（feat/m03-kintoneapi-client ブランチ）。internal/auth/apitoken（100%）・internal/kintoneapi（86.2%）・cli エラーマッピング（87.4%）を TDD で実装。全テスト pass、golangci-lint クリーン。Current Focus を M04 に更新 |
 | 2026-04-29 13:14 | 進捗 | M04 完了（feat/m04-service-read-cli-api ブランチ）。internal/service/api（100%）・internal/service/operations（100%）・internal/cli/api（82%）を TDD で実装。`kintone api {records,record,app} ...` で kintone REST を JSON で叩けるように。CLI から kintoneapi 直 import 禁止のレイヤー分離を確立。全テスト pass、M04 新規 lint 違反 0。Current Focus を M05 に更新 |
 | 2026-04-29 13:40 | 進捗 | M05 完了（feat/m05-cli-ops-write ブランチ）。kintoneapi に write 系（POST/PUT/DELETE）を追加し、service/api interface 拡張、operations.{RecordCreate, RecordUpdate, RecordDelete} を実装。CLI に `ops record {create,update,delete}` と `ops app describe` を追加。`--dry-run` で送信予定 body を JSON 出力（実 API と byte 一致）、書き込み系は MaxAttempts=1 デフォルト、`UsageError` 型 sentinel で USAGE 分類を堅牢化（advisor 6 件指摘反映済）。全テスト pass、カバレッジ目標達成。Current Focus を M06 に更新 |
+| 2026-04-29 13:55 | 進捗 | M06 完了（feat/m06-mcp-server-facade ブランチ）。mark3labs/mcp-go v0.49.0 を採用、`internal/mcp/{server,facade}` と `internal/cli/mcp` を実装。kintoneapi に `ListApps`（GET /k/v1/apps.json）を新規追加、service/api interface 拡張。MCP 6 tools（apps_search / app_describe / records_query / record_create / record_update / record_delete）が完成し、`kintone mcp serve` で stdio 起動可能。`facade.MapError` で operations.Err\* / kintoneapi.APIError / network → MCP code をマップ（M05 ハンドオフ最重要事項対応）。出力は CLI と同じ `output.Success/Failure` envelope を `CallToolResult.Content[0].Text` に格納、契約共有を実現。in-process client で 6 tools 往復テストを網羅。全テスト pass、新規 lint 違反 0。Current Focus を M07 に更新 |

@@ -83,6 +83,12 @@ func (s *stubAPI) DeleteRecords(ctx context.Context, req kintoneapi.DeleteRecord
 	return s.deleteRecordsFn(ctx, req)
 }
 
+// ListApps は M06 で interface に追加された。本テストファイル群では呼ばれないが、
+// interface 互換のため空実装を提供する。
+func (s *stubAPI) ListApps(ctx context.Context, req kintoneapi.ListAppsRequest) (*kintoneapi.ListAppsResponse, error) {
+	return &kintoneapi.ListAppsResponse{}, nil
+}
+
 // strPtr は文字列ポインタを生成する。
 func strPtr(s string) *string { return &s }
 

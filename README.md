@@ -272,6 +272,56 @@ $ kintone ops app describe --app 1 --lang ja
 {"ok":true,"data":{"app":{"app_id":"1","name":"テスト",...},"fields":{...},"revision":"5"}}
 ```
 
+## MCP サーバー（`kintone mcp serve`）
+
+LLM クライアント（Claude Desktop など）から kintone を操作するための
+MCP（Model Context Protocol）サーバーを stdio JSON-RPC モードで起動します。
+
+```bash
+$ KINTONE_DOMAIN=example.cybozu.com \
+  KINTONE_AUTH=api-token \
+  KINTONE_API_TOKEN=xxxx \
+  kintone mcp serve
+```
+
+提供する 6 つの tools:
+
+| ツール名 | 説明 |
+|---------|------|
+| `apps_search` | アプリを ids/codes/name/space_ids/limit/offset で検索 |
+| `app_describe` | 単一アプリの基本情報 + フォームのフィールド定義を取得 |
+| `records_query` | kintone クエリでレコード一覧を取得（query / fields / total_count） |
+| `record_create` | レコード新規登録（record / records 排他、最大 100 件） |
+| `record_update` | レコード単件更新（id / update_key_* 排他、楽観ロック対応） |
+| `record_delete` | レコード複数件削除（revisions 任意） |
+
+各 tool の出力は CLI と同じ JSON envelope（`{"ok":true,"data":{...}}` /
+`{"ok":false,"error":{...}}`）を `CallToolResult.Content[0].Text` に格納します。
+LLM 側から `JSON.parse` するだけで CLI と同じ意味論で結果を扱えます。
+
+### Claude Desktop での設定例（macOS）
+
+`~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "kintone": {
+      "command": "kintone",
+      "args": ["mcp", "serve"],
+      "env": {
+        "KINTONE_DOMAIN": "example.cybozu.com",
+        "KINTONE_AUTH": "api-token",
+        "KINTONE_API_TOKEN": "xxxxxxxxxxxxxxxxxxxx"
+      }
+    }
+  }
+}
+```
+
+> 認証モードは現在 `api-token` のみ対応。OAuth / multi-user remote
+> サーバーは M09 以降で対応予定です。
+
 ## JSON 出力規約
 
 全コマンドは以下の形式で stdout に出力します。
