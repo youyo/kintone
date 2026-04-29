@@ -1,12 +1,16 @@
 package cli_test
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
+	"net/url"
 	"testing"
+	"time"
 
 	"github.com/youyo/kintone/internal/cli"
 	"github.com/youyo/kintone/internal/config"
+	"github.com/youyo/kintone/internal/kintoneapi"
 )
 
 // E-1: cobra の unknown command エラーが USAGE にマップされる
@@ -122,5 +126,88 @@ func TestMapToOutputError_WrappedConfigError(t *testing.T) {
 	oe := cli.MapToOutputError(wrapped)
 	if oe.Code != "CONFIG_PARSE_ERROR" {
 		t.Errorf("expected CONFIG_PARSE_ERROR for wrapped error, got %q", oe.Code)
+	}
+}
+
+// E-10〜15: kintoneapi.APIError → KINTONE_* マッピング
+func TestMapToOutputError_KintoneAPIError(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      *kintoneapi.APIError
+		wantCode string
+	}{
+		{"E-10 401", &kintoneapi.APIError{HTTPStatus: 401, Code: "CB_AU01", Message: "auth", Category: kintoneapi.CategoryUnauthorized}, "KINTONE_UNAUTHORIZED"},
+		{"E-11 403", &kintoneapi.APIError{HTTPStatus: 403, Category: kintoneapi.CategoryForbidden}, "KINTONE_FORBIDDEN"},
+		{"E-12 404", &kintoneapi.APIError{HTTPStatus: 404, Category: kintoneapi.CategoryNotFound}, "KINTONE_NOT_FOUND"},
+		{"E-13 429", &kintoneapi.APIError{HTTPStatus: 429, Category: kintoneapi.CategoryRateLimited, RetryAfter: 2 * time.Second}, "KINTONE_RATE_LIMITED"},
+		{"E-14 422", &kintoneapi.APIError{HTTPStatus: 422, Category: kintoneapi.CategoryValidation}, "KINTONE_VALIDATION"},
+		{"E-15 500", &kintoneapi.APIError{HTTPStatus: 500, Category: kintoneapi.CategoryServerError}, "KINTONE_INTERNAL"},
+		{"client error fallback", &kintoneapi.APIError{HTTPStatus: 418, Category: kintoneapi.CategoryClientError}, "KINTONE_VALIDATION"},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			oe := cli.MapToOutputError(c.err)
+			if oe == nil {
+				t.Fatalf("nil")
+			}
+			if oe.Code != c.wantCode {
+				t.Errorf("Code=%q want %q", oe.Code, c.wantCode)
+			}
+			if got, _ := oe.Details["http_status"].(int); got != c.err.HTTPStatus {
+				t.Errorf("http_status=%v", oe.Details["http_status"])
+			}
+		})
+	}
+}
+
+// E-13 補強: Retry-After が details に入る
+func TestMapToOutputError_KintoneRetryAfter(t *testing.T) {
+	err := &kintoneapi.APIError{HTTPStatus: 429, Category: kintoneapi.CategoryRateLimited, RetryAfter: 2 * time.Second}
+	oe := cli.MapToOutputError(err)
+	if got, _ := oe.Details["retry_after_sec"].(int); got != 2 {
+		t.Errorf("retry_after_sec=%v want 2", oe.Details["retry_after_sec"])
+	}
+}
+
+// E-10 補強: kintone_code / kintone_id が details に入る
+func TestMapToOutputError_KintoneCodeID(t *testing.T) {
+	err := &kintoneapi.APIError{HTTPStatus: 401, Code: "CB_AU01", ID: "req-123", Category: kintoneapi.CategoryUnauthorized}
+	oe := cli.MapToOutputError(err)
+	if got, _ := oe.Details["kintone_code"].(string); got != "CB_AU01" {
+		t.Errorf("kintone_code=%v", oe.Details["kintone_code"])
+	}
+	if got, _ := oe.Details["kintone_id"].(string); got != "req-123" {
+		t.Errorf("kintone_id=%v", oe.Details["kintone_id"])
+	}
+}
+
+// E-16: url.Error timeout → KINTONE_NETWORK
+func TestMapToOutputError_URLErrorTimeout(t *testing.T) {
+	urlErr := &url.Error{Op: "Get", URL: "https://x.cybozu.com/", Err: context.DeadlineExceeded}
+	oe := cli.MapToOutputError(urlErr)
+	if oe.Code != "KINTONE_NETWORK" {
+		t.Errorf("Code=%q want KINTONE_NETWORK", oe.Code)
+	}
+	if got, _ := oe.Details["timeout"].(bool); !got {
+		t.Errorf("timeout=%v", oe.Details["timeout"])
+	}
+}
+
+// E-16 補強: context.DeadlineExceeded 単体
+func TestMapToOutputError_ContextDeadline(t *testing.T) {
+	oe := cli.MapToOutputError(context.DeadlineExceeded)
+	if oe.Code != "KINTONE_NETWORK" {
+		t.Errorf("Code=%q want KINTONE_NETWORK", oe.Code)
+	}
+}
+
+// E-17: wrap された APIError も errors.As で検出
+func TestMapToOutputError_WrappedAPIError(t *testing.T) {
+	inner := &kintoneapi.APIError{HTTPStatus: 401, Category: kintoneapi.CategoryUnauthorized}
+	wrapped := fmt.Errorf("getApp: %w", inner)
+	oe := cli.MapToOutputError(wrapped)
+	if oe.Code != "KINTONE_UNAUTHORIZED" {
+		t.Errorf("Code=%q want KINTONE_UNAUTHORIZED", oe.Code)
 	}
 }
