@@ -97,11 +97,96 @@ $ kintone config show --profile dev
 | `KINTONE_DOMAIN` | kintone ドメイン（例: `example.cybozu.com`） |
 | `KINTONE_AUTH` | 認証モード（`api-token` / `oauth`） |
 | `KINTONE_API_TOKEN` | API Token |
+| `KINTONE_OAUTH_CLIENT_ID` | OAuth クライアント ID |
+| `KINTONE_OAUTH_CLIENT_SECRET` | OAuth クライアントシークレット（config.toml より環境変数推奨） |
+| `KINTONE_OAUTH_REDIRECT_URL` | OAuth redirect URI（例: `http://127.0.0.1:18080/callback`）。kintone OAuth クライアント登録と完全一致させること |
+| `KINTONE_OAUTH_SCOPES` | OAuth スコープ（スペース区切り。省略時: `k:app_record:read k:app_record:write k:app_settings:read k:app_settings:write k:file:read k:file:write`） |
 
 ## API Token 認証
 
 `KINTONE_API_TOKEN` 環境変数または config.toml の `api_token` フィールドで API Token を指定します。
 `internal/auth` パッケージが `X-Cybozu-API-Token` ヘッダを自動付与します。
+
+## OAuth 認証（M09）
+
+kintone の OAuth 2.0 Authorization Code Grant + PKCE フローに対応しています。
+`KINTONE_AUTH=oauth` に設定することで、API Token の代わりに OAuth アクセストークンが使用されます。
+アクセストークンの期限切れ（通常 1h）は自動検知し、リフレッシュトークンで透過的に更新します。
+
+### 事前設定
+
+1. kintone 管理画面で OAuth クライアントを登録し、redirect URI に `http://127.0.0.1:<ポート>/callback` を設定する
+2. クライアント ID / シークレット / redirect URI を環境変数に設定する:
+
+```bash
+export KINTONE_DOMAIN=example.cybozu.com
+export KINTONE_AUTH=oauth
+export KINTONE_OAUTH_CLIENT_ID=your-client-id
+export KINTONE_OAUTH_CLIENT_SECRET=your-client-secret
+export KINTONE_OAUTH_REDIRECT_URL=http://127.0.0.1:18080/callback
+```
+
+### ログイン（認可コードフロー）
+
+```bash
+$ kintone auth login --oauth --principal-id oauth:alice
+```
+
+- ブラウザが起動し kintone の認可画面が開きます
+- ユーザーが同意すると `http://127.0.0.1:<port>/callback` にリダイレクトされ、アクセストークンが取得されます
+- 取得されたトークンは `~/.cache/kintone/tokens.db` に保存されます（ファイル権限 0600）
+
+ブラウザが起動できない環境（SSH / CI）では `--no-browser` フラグで認可 URL を stderr に出力できます:
+
+```bash
+$ kintone auth login --oauth --principal-id oauth:alice --no-browser
+```
+
+複数ユーザーが同一ドメインを使う場合は `--principal-id` を個別に指定します:
+
+```bash
+$ kintone auth login --oauth --principal-id oauth:bob
+```
+
+> 注意: `--principal-id` は TokenStore のキーです。同一ドメインの別ユーザーは必ず異なる値を指定してください。
+> M10 (OIDC 対応) で自動取得に切り替わる予定です。
+
+### ログイン結果確認
+
+```bash
+$ kintone auth status
+{"ok":true,"data":{"entries":[{"principal_id":"oauth:alice","expires_at":"2026-04-29T10:00:00Z","has_refresh_token":true,"scope":"k:app_record:read k:app_record:write...","masked_token":"abcd...wxyz"}]}}
+```
+
+特定ユーザーを絞り込む場合:
+
+```bash
+$ kintone auth status --principal-id oauth:alice
+```
+
+### ログアウト
+
+特定ユーザーのトークン削除:
+
+```bash
+$ kintone auth logout --principal-id oauth:alice
+{"ok":true,"data":{"deleted":1}}
+```
+
+ドメイン内の全 OAuth トークン削除:
+
+```bash
+$ kintone auth logout --all
+{"ok":true,"data":{"deleted":3}}
+```
+
+### セキュリティ上の注意
+
+- `KINTONE_OAUTH_CLIENT_SECRET` は環境変数での管理を推奨します（config.toml への記載は非推奨）
+- `kintone config show` の出力で `oauth_client_secret` は `***` にマスクされます
+- `kintone auth status` の出力でアクセストークンは先頭 4 文字 + `...` + 末尾 4 文字にマスクされます
+- tokens.db はファイル権限 0600 で保存されますが、平文保存です（M11 で暗号化予定）
+- PKCE (S256) と CSRF state 検証を実施します（`crypto/rand` による生成、`subtle.ConstantTimeCompare` による検証）
 
 ## kintoneapi クライアント
 
@@ -419,8 +504,9 @@ LLM 側から `JSON.parse` するだけで CLI と同じ意味論で結果を扱
 }
 ```
 
-> 認証モードは現在 `api-token` のみ対応。OAuth / multi-user remote
-> サーバーは M09 以降で対応予定です。
+> 認証モードは現在 `api-token` のみ対応（MCP サーバーとして起動する場合）。
+> multi-user remote サーバーは M10 以降で対応予定です。
+> CLI / 単一ユーザーの OAuth 認証は `kintone auth login --oauth` で利用可能です（M09 以降）。
 
 ## JSON 出力規約
 

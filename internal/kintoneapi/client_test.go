@@ -147,3 +147,41 @@ func TestNewFromResolved(t *testing.T) {
 		}
 	})
 }
+
+// CK-1: NewFromResolvedWithAuth + AuthModeOAuth + Authenticator → Client 構築成功
+func TestNewFromResolvedWithAuth(t *testing.T) {
+	t.Parallel()
+
+	t.Run("CK-1 oauth 用拡張コンストラクタ", func(t *testing.T) {
+		t.Parallel()
+		r := &config.Resolved{
+			Domain: "x.cybozu.com",
+			Auth:   config.AuthModeOAuth,
+		}
+		a := newTestAuth(t)
+		c, err := NewFromResolvedWithAuth(r, a)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if c == nil {
+			t.Fatal("nil client")
+		}
+	})
+
+	t.Run("CK-2 nil Resolved", func(t *testing.T) {
+		t.Parallel()
+		_, err := NewFromResolvedWithAuth(nil, newTestAuth(t))
+		if err == nil {
+			t.Fatal("expected error for nil resolved")
+		}
+	})
+
+	t.Run("CK-3 nil Authenticator", func(t *testing.T) {
+		t.Parallel()
+		r := &config.Resolved{Domain: "x.cybozu.com", Auth: config.AuthModeOAuth}
+		_, err := NewFromResolvedWithAuth(r, nil)
+		if !errors.Is(err, ErrNilAuthenticator) {
+			t.Fatalf("expected ErrNilAuthenticator, got %v", err)
+		}
+	})
+}

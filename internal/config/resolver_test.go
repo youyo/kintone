@@ -172,6 +172,75 @@ func errorMessageContains(s, sub string) bool {
 	return false
 }
 
+// CR-1: KINTONE_OAUTH_CLIENT_ID が ENV から Resolved.OAuthClientID に反映されること。
+func TestResolve_OAuthClientIDFromEnv(t *testing.T) {
+	t.Parallel()
+	env := EnvConfig{OAuthClientID: "env-client-id"}
+	r, err := Resolve("default", CLIConfig{}, env, FileConfig{})
+	if err != nil {
+		t.Fatalf("Resolve error: %v", err)
+	}
+	if r.OAuthClientID != "env-client-id" {
+		t.Errorf("OAuthClientID = %q, want %q", r.OAuthClientID, "env-client-id")
+	}
+}
+
+// CR-2: toml profile の oauth セクションから Resolved に反映されること。
+func TestResolve_OAuthFromProfile(t *testing.T) {
+	t.Parallel()
+	file := FileConfig{
+		Profiles: map[string]ProfileBlock{
+			"default": {
+				Domain: "example.cybozu.com",
+				Auth:   "oauth",
+				OAuth: ProfileOAuthBlock{
+					ClientID:    "file-client-id",
+					RedirectURL: "http://127.0.0.1:8080/callback",
+				},
+			},
+		},
+	}
+	r, err := Resolve("default", CLIConfig{}, EnvConfig{}, file)
+	if err != nil {
+		t.Fatalf("Resolve error: %v", err)
+	}
+	if r.OAuthClientID != "file-client-id" {
+		t.Errorf("OAuthClientID = %q, want %q", r.OAuthClientID, "file-client-id")
+	}
+	if r.OAuthRedirectURL != "http://127.0.0.1:8080/callback" {
+		t.Errorf("OAuthRedirectURL = %q", r.OAuthRedirectURL)
+	}
+}
+
+// CR-3: ENV と toml 両方ある場合 ENV が優先されること。
+func TestResolve_OAuthEnvOverridesFile(t *testing.T) {
+	t.Parallel()
+	env := EnvConfig{
+		OAuthClientID:    "env-client-id",
+		OAuthRedirectURL: "http://127.0.0.1:9090/callback",
+	}
+	file := FileConfig{
+		Profiles: map[string]ProfileBlock{
+			"default": {
+				OAuth: ProfileOAuthBlock{
+					ClientID:    "file-client-id",
+					RedirectURL: "http://127.0.0.1:8080/callback",
+				},
+			},
+		},
+	}
+	r, err := Resolve("default", CLIConfig{}, env, file)
+	if err != nil {
+		t.Fatalf("Resolve error: %v", err)
+	}
+	if r.OAuthClientID != "env-client-id" {
+		t.Errorf("OAuthClientID = %q, want env-client-id", r.OAuthClientID)
+	}
+	if r.OAuthRedirectURL != "http://127.0.0.1:9090/callback" {
+		t.Errorf("OAuthRedirectURL = %q, want http://127.0.0.1:9090/callback", r.OAuthRedirectURL)
+	}
+}
+
 func TestResolve_CachePathPropagated(t *testing.T) {
 	t.Parallel()
 	env := EnvConfig{CachePath: "/tmp/cache.db"}

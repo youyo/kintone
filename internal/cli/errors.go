@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/youyo/kintone/internal/auth/oauth"
 	"github.com/youyo/kintone/internal/cli/clierr"
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/kintoneapi"
@@ -159,6 +160,44 @@ func MapToOutputError(err error) *output.Error {
 		return &output.Error{Code: "USAGE", Message: err.Error()}
 	case errors.Is(err, operations.ErrResolverUnavailable):
 		return &output.Error{Code: "INTERNAL", Message: err.Error()}
+	}
+
+	// OAuth エラーマッピング（M09）
+	// sentinel 順序: 具体的なもの → 汎用なもの
+	if errors.Is(err, oauth.ErrStateMismatch) {
+		return &output.Error{Code: "OAUTH_STATE_MISMATCH", Message: err.Error()}
+	}
+	if errors.Is(err, oauth.ErrCallbackTimeout) {
+		return &output.Error{Code: "OAUTH_CALLBACK_TIMEOUT", Message: err.Error()}
+	}
+	if errors.Is(err, oauth.ErrRefreshTokenRevoked) {
+		return &output.Error{Code: "OAUTH_REFRESH_REVOKED", Message: err.Error()}
+	}
+	if errors.Is(err, oauth.ErrTokenExpired) {
+		return &output.Error{Code: "KINTONE_UNAUTHORIZED", Message: err.Error()}
+	}
+	if errors.Is(err, oauth.ErrInvalidRedirectURL) {
+		return &output.Error{Code: "USAGE", Message: err.Error()}
+	}
+	if errors.Is(err, oauth.ErrMissingClientCredentials) {
+		return &output.Error{Code: "USAGE", Message: err.Error()}
+	}
+
+	// *OAuthError（provider からのエラーレスポンス）
+	var oauthErr *oauth.OAuthError
+	if errors.As(err, &oauthErr) {
+		details := map[string]any{
+			"provider_code": oauthErr.Code,
+			"http_status":   oauthErr.HTTPStatus,
+		}
+		if oauthErr.Description != "" {
+			details["description"] = oauthErr.Description
+		}
+		return &output.Error{
+			Code:    "OAUTH_PROVIDER_ERROR",
+			Message: oauthErr.Error(),
+			Details: details,
+		}
 	}
 
 	msg := err.Error()

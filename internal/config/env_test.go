@@ -70,6 +70,30 @@ func TestLoadEnv_APITokenSet(t *testing.T) {
 	}
 }
 
+// EC-1: KINTONE_OAUTH_CLIENT_ID / KINTONE_OAUTH_CLIENT_SECRET / KINTONE_OAUTH_REDIRECT_URL を読み取ること。
+func TestLoadEnv_OAuthFields(t *testing.T) {
+	t.Parallel()
+	getenv := mockGetenv(map[string]string{
+		"KINTONE_OAUTH_CLIENT_ID":     "my-client-id",
+		"KINTONE_OAUTH_CLIENT_SECRET": "my-client-secret",
+		"KINTONE_OAUTH_REDIRECT_URL":  "http://127.0.0.1:8080/callback",
+		"KINTONE_OAUTH_SCOPES":        "k:app_record:read k:app_record:write",
+	})
+	got := LoadEnv(getenv)
+	if got.OAuthClientID != "my-client-id" {
+		t.Errorf("OAuthClientID = %q, want %q", got.OAuthClientID, "my-client-id")
+	}
+	if got.OAuthClientSecret != "my-client-secret" {
+		t.Errorf("OAuthClientSecret = %q, want %q", got.OAuthClientSecret, "my-client-secret")
+	}
+	if got.OAuthRedirectURL != "http://127.0.0.1:8080/callback" {
+		t.Errorf("OAuthRedirectURL = %q", got.OAuthRedirectURL)
+	}
+	if got.OAuthScopes != "k:app_record:read k:app_record:write" {
+		t.Errorf("OAuthScopes = %q", got.OAuthScopes)
+	}
+}
+
 func TestLoadEnv_AuthInvalidValuePassedThrough(t *testing.T) {
 	t.Parallel()
 	// バリデーションは Resolve で行うため、env レイヤでは生値をそのまま格納する

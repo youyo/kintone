@@ -177,31 +177,43 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 }
 
 // shownConfig は config show の出力 data 部分。
-// Resolved の api_token をマスクし、それ以外はそのまま転写する。
+// Resolved の api_token / oauth_client_secret をマスクし、それ以外はそのまま転写する。
 type shownConfig struct {
-	Profile    string         `json:"profile"`
-	Domain     string         `json:"domain"`
-	Auth       string         `json:"auth"`
-	APIToken   string         `json:"api_token"`
-	ConfigPath string         `json:"config_path"`
-	CachePath  string         `json:"cache_path"`
-	Source     config.Sources `json:"source"`
+	Profile           string         `json:"profile"`
+	Domain            string         `json:"domain"`
+	Auth              string         `json:"auth"`
+	APIToken          string         `json:"api_token"`
+	ConfigPath        string         `json:"config_path"`
+	CachePath         string         `json:"cache_path"`
+	Source            config.Sources `json:"source"`
+	OAuthClientID     string         `json:"oauth_client_id,omitempty"`
+	OAuthClientSecret string         `json:"oauth_client_secret,omitempty"` // マスク
+	OAuthRedirectURL  string         `json:"oauth_redirect_url,omitempty"`
+	OAuthScopes       []string       `json:"oauth_scopes,omitempty"`
 }
 
 // maskedView は Resolved を機微情報マスク済みの shownConfig に変換する。
-// api_token が非空なら "***" に置換、空なら空文字のまま返す。
+// api_token / oauth_client_secret が非空なら "***" に置換、空なら空文字のまま返す。
 func maskedView(r *config.Resolved) shownConfig {
-	masked := r.APIToken
-	if masked != "" {
-		masked = "***"
+	maskedToken := r.APIToken
+	if maskedToken != "" {
+		maskedToken = "***"
+	}
+	maskedSecret := r.OAuthClientSecret
+	if maskedSecret != "" {
+		maskedSecret = "***"
 	}
 	return shownConfig{
-		Profile:    r.ProfileName,
-		Domain:     r.Domain,
-		Auth:       string(r.Auth),
-		APIToken:   masked,
-		ConfigPath: r.ConfigPath,
-		CachePath:  r.CachePath,
-		Source:     r.Source,
+		Profile:           r.ProfileName,
+		Domain:            r.Domain,
+		Auth:              string(r.Auth),
+		APIToken:          maskedToken,
+		ConfigPath:        r.ConfigPath,
+		CachePath:         r.CachePath,
+		Source:            r.Source,
+		OAuthClientID:     r.OAuthClientID,
+		OAuthClientSecret: maskedSecret,
+		OAuthRedirectURL:  r.OAuthRedirectURL,
+		OAuthScopes:       r.OAuthScopes,
 	}
 }

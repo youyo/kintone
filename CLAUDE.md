@@ -4,24 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト現状
 
-**M08 完了済み**。M09（OAuth 認証）が次のマイルストーン。
+**M09 完了済み**。M10（idproxy + multi-user MCP）が次のマイルストーン。
 
 - Go 1.26、module: `github.com/youyo/kintone`
-- 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...` / `ops {record create|update|delete, app describe}` / `mcp serve`（M06）/ `cache clear|stats`（M07）+ **全コマンドに `--app-ref` / `--update-key-field-ref` で名前解決**（M08）
+- 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...` / `ops {record create|update|delete, app describe}` / `mcp serve`（M06）/ `cache clear|stats`（M07）/ 全コマンドに `--app-ref` / `--update-key-field-ref` で名前解決（M08）/ **`auth login --oauth` / `auth status` / `auth logout`（M09）**
 - 実装済みパッケージ:
   - `internal/output` — JSON 出力規約（CLI / MCP 共通）
-  - `internal/cli` + `internal/cli/api` + `internal/cli/ops` + `internal/cli/mcp` + `internal/cli/clierr`（共通 UsageError）+ `internal/cli/cache`（M07）
-  - `internal/config` — CLI > ENV > toml の優先解決（`KINTONE_CACHE_PATH` 対応）
+  - `internal/cli` + `internal/cli/api` + `internal/cli/ops` + `internal/cli/mcp` + `internal/cli/clierr`（共通 UsageError）+ `internal/cli/cache`（M07）+ **`internal/cli/auth`（M09）**
+  - `internal/config` — CLI > ENV > toml の優先解決（`KINTONE_OAUTH_*` 環境変数追加 M09）
   - `internal/auth/apitoken` — `X-Cybozu-API-Token` ヘッダ付与
-  - `internal/kintoneapi` — net/http 薄ラッパー REST クライアント（read 系 + write 系 + `ListApps`）
+  - **`internal/auth/oauth`** — OAuth 2.0 Authorization Code + PKCE フロー / loopback callback サーバ / refresh_token 自動更新 / Authenticator（M09）
+  - `internal/kintoneapi` — net/http 薄ラッパー REST クライアント + **`NewFromResolvedWithAuth`**（M09）
   - `internal/service/api` — `kintoneapi` の薄い透過層 + `CachingAPI` decorator（M07）
-  - `internal/service/operations` — LLM 向け抽象化: `RecordsQuery` / `AppDescribe` / `RecordCreate` / `RecordUpdate` / `RecordDelete`（**M08 で `*Ref` フィールド + `resolver` 引数を追加**）
+  - `internal/service/operations` — LLM 向け抽象化（M08 で `*Ref` フィールド + `resolver` 引数追加）
   - `internal/mcp/server` — mark3labs/mcp-go v0.49.0 の薄いラッパー（stdio 起動）
-  - `internal/mcp/facade` — 6 つの MCP tools ハンドラと `MapError`（M08 で `app_ref` / `update_key_field_ref` 追加）
-  - `internal/cache` — SQLite ベースのキャッシュ層（modernc.org/sqlite v1.50.0 / TTL 管理 / パス解決）（M07）
-  - `internal/tokenstore` — OAuth アクセストークン保存（Key=Domain+PrincipalID+AuthType）（M07）
-  - **`internal/resolver`** — App / Field 名前解決（ID → code → name → partial / code → label → partial）（M08）
-- 依存方向: `cli/{api,ops,mcp} → service/api(CachingAPI) → kintoneapi → auth` / `cli/mcp → mcp/server → mcp/facade → service/operations` / `CachingAPI → cache` / **`resolver → service/api`（CachingAPI 経由でキャッシュ統合）**（M08）
+  - `internal/mcp/facade` — 6 つの MCP tools ハンドラと `MapError`
+  - `internal/cache` — SQLite ベースのキャッシュ層（modernc.org/sqlite v1.50.0 / TTL 管理）（M07）
+  - `internal/tokenstore` — OAuth アクセストークン保存（Key=Domain+PrincipalID+AuthType）（M07 / M09 で本格利用）
+  - `internal/resolver` — App / Field 名前解決（M08）
+- 依存方向: `cli/{api,ops,mcp} → service/api(CachingAPI) → kintoneapi → auth` / `cli/auth → auth/oauth → tokenstore` / **`cli/auth/helpers → oauth.Authenticator → kintoneapi`（OAuth 用 NewFromResolvedWithAuth 経由）**（M09）
 - **設計原則**: CLI / MCP から `internal/kintoneapi` 直 import 禁止。必ず `service/api` または `service/operations` を経由する
 - **設計判断（M05）**:
   - `clierr.UsageError` 型 sentinel + `MapToOutputError` `errors.As` 分岐で USAGE 分類を堅牢化（文字列 prefix 依存を排除）。配置は中立パッケージ `internal/cli/clierr` で循環なし
@@ -48,8 +49,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - 各段階でヒットしたら即 return（fallback しない / predictability 優先）
   - エラーコード: `RESOLVER_APP_NOT_FOUND` / `RESOLVER_APP_AMBIGUOUS` / `RESOLVER_FIELD_NOT_FOUND` / `RESOLVER_FIELD_AMBIGUOUS` / `RESOLVER_APP_LIST_TOO_LARGE`。`details.candidates` に候補配列を含める（CLI / facade 双方ミラー）
   - apps_search ページング: 最大 100 ページ × 100 件 = 10,000 アプリで打ち切り（`ErrAppListTooLarge`）
-- `go test -race -cover ./...` 全 pass（resolver 97.8% / operations 98.2% / cli 85.2% / cli/api 72.1% / cli/ops 70.9% / facade 79.6% / それ以外は M07 と同等）
-- ブランチ: `feat/m08-resolver`（main への merge 待ち）
+- **設計判断（M09）**:
+  - `kintoneapi.NewFromResolvedWithAuth` を新設。`NewFromResolved` のシグネチャと既存テストを変更せず OAuth 用 Authenticator を外注できる設計
+  - `internal/cli/auth/helpers.go` が TokenStore + Refresher + Authenticator の構築を担い、`kintoneapi` パッケージは `auth/oauth` / `tokenstore` を知らない（依存方向維持）
+  - PKCE (S256) と state は `crypto/rand` で生成。callback の state 検証は `subtle.ConstantTimeCompare` でタイミング攻撃対策
+  - loopback サーバは `net.Listen("tcp", "127.0.0.1:<port>")` で bind を loopback 限定。`sync.Once` で callback を 1 度のみ受理
+  - `--principal-id` を CLI フラグで必須化（M10 OIDC 対応まで自動取得なし）。形式: `oauth:<任意文字列>` を推奨
+  - `auth status` の access_token は先頭 4 + `...` + 末尾 4 にマスク。`config show` の `oauth_client_secret` は `***` にマスク
+  - `KINTONE_OAUTH_PKCE_DISABLE=1` で PKCE 無効化（kintone OAuth が PKCE を拒否した場合の escape hatch、M11 本番確認予定）
+- `go test -race -cover ./...` 全 pass（auth/oauth 88.3% / cli/auth 74.1% / cli 86.7% / それ以外は M08 と同等）
+- ブランチ: `feat/m09-oauth-auth`（main への merge 待ち）
 
 ## 開発ワークフロー
 
