@@ -1,0 +1,139 @@
+# GoReleaser configuration for kintone CLI
+# See https://goreleaser.com/customization/ for full reference.
+version: 2
+
+project_name: kintone
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: kintone
+    main: ./cmd/kintone
+    binary: kintone
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/youyo/kintone/internal/cli.Version={{.Version}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: default
+    ids:
+      - kintone
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    formats: ["tar.gz"]
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: Bug fixes
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "merge"
+
+release:
+  github:
+    owner: youyo
+    name: kintone
+  draft: false
+  prerelease: auto
+
+# Homebrew Tap publishing.
+# 事前に youyo/homebrew-tap リポジトリを作成しておくこと。
+# 認証は HOMEBREW_TAP_GITHUB_TOKEN（Settings > Secrets）を使う。
+brews:
+  - name: kintone
+    repository:
+      owner: youyo
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/youyo/kintone
+    description: "kintone CLI / MCP server"
+    license: MIT
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    test: |
+      system "#{bin}/kintone version"
+    install: |
+      bin.install "kintone"
+
+# Docker images: ghcr.io 公開（multi-arch）
+# permissions: packages: write が必要。
+dockers:
+  - image_templates:
+      - "ghcr.io/youyo/kintone:{{ .Version }}-amd64"
+    use: buildx
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.source=https://github.com/youyo/kintone"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+      - "--build-arg=VERSION={{ .Version }}"
+  - image_templates:
+      - "ghcr.io/youyo/kintone:{{ .Version }}-arm64"
+    use: buildx
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.source=https://github.com/youyo/kintone"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+      - "--build-arg=VERSION={{ .Version }}"
+
+docker_manifests:
+  - name_template: "ghcr.io/youyo/kintone:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/youyo/kintone:{{ .Version }}-amd64"
+      - "ghcr.io/youyo/kintone:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/youyo/kintone:latest"
+    image_templates:
+      - "ghcr.io/youyo/kintone:{{ .Version }}-amd64"
+      - "ghcr.io/youyo/kintone:{{ .Version }}-arm64"
