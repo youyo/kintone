@@ -17,11 +17,18 @@ type stubAPI struct {
 	getRecordFn     func(ctx context.Context, req kintoneapi.GetRecordRequest) (*kintoneapi.GetRecordResponse, error)
 	getAppFn        func(ctx context.Context, req kintoneapi.GetAppRequest) (*kintoneapi.GetAppResponse, error)
 	getFormFieldsFn func(ctx context.Context, req kintoneapi.GetFormFieldsRequest) (*kintoneapi.GetFormFieldsResponse, error)
+	// Write 系（M05）
+	insertRecordsFn func(ctx context.Context, req kintoneapi.InsertRecordsRequest) (*kintoneapi.InsertRecordsResponse, error)
+	updateRecordFn  func(ctx context.Context, req kintoneapi.UpdateRecordRequest) (*kintoneapi.UpdateRecordResponse, error)
+	deleteRecordsFn func(ctx context.Context, req kintoneapi.DeleteRecordsRequest) error
 
 	// 記録
 	gotRecordsReq    *kintoneapi.GetRecordsRequest
 	gotAppReq        *kintoneapi.GetAppRequest
 	gotFormFieldsReq *kintoneapi.GetFormFieldsRequest
+	gotInsertReq     *kintoneapi.InsertRecordsRequest
+	gotUpdateReq     *kintoneapi.UpdateRecordRequest
+	gotDeleteReq     *kintoneapi.DeleteRecordsRequest
 }
 
 func (s *stubAPI) GetRecords(ctx context.Context, req kintoneapi.GetRecordsRequest) (*kintoneapi.GetRecordsResponse, error) {
@@ -50,6 +57,30 @@ func (s *stubAPI) GetFormFields(ctx context.Context, req kintoneapi.GetFormField
 		return &kintoneapi.GetFormFieldsResponse{}, nil
 	}
 	return s.getFormFieldsFn(ctx, req)
+}
+
+// Write 系（M05）。下位テストファイル（record_create_test.go 等）から再利用するため
+// ハンドラと記録フィールドを追加する。
+func (s *stubAPI) InsertRecords(ctx context.Context, req kintoneapi.InsertRecordsRequest) (*kintoneapi.InsertRecordsResponse, error) {
+	s.gotInsertReq = &req
+	if s.insertRecordsFn == nil {
+		return &kintoneapi.InsertRecordsResponse{}, nil
+	}
+	return s.insertRecordsFn(ctx, req)
+}
+func (s *stubAPI) UpdateRecord(ctx context.Context, req kintoneapi.UpdateRecordRequest) (*kintoneapi.UpdateRecordResponse, error) {
+	s.gotUpdateReq = &req
+	if s.updateRecordFn == nil {
+		return &kintoneapi.UpdateRecordResponse{}, nil
+	}
+	return s.updateRecordFn(ctx, req)
+}
+func (s *stubAPI) DeleteRecords(ctx context.Context, req kintoneapi.DeleteRecordsRequest) error {
+	s.gotDeleteReq = &req
+	if s.deleteRecordsFn == nil {
+		return nil
+	}
+	return s.deleteRecordsFn(ctx, req)
 }
 
 // strPtr は文字列ポインタを生成する。

@@ -50,6 +50,18 @@ func (s *stubAPI) GetFormFields(ctx context.Context, req kintoneapi.GetFormField
 	return &kintoneapi.GetFormFieldsResponse{}, nil
 }
 
+// M05 で interface が拡張されたため、cli/api 既存テストの stub にも空実装を追加。
+// これらは cli/api テストでは呼ばれない（read 系のみ実行する）が、interface 互換のため必要。
+func (s *stubAPI) InsertRecords(ctx context.Context, req kintoneapi.InsertRecordsRequest) (*kintoneapi.InsertRecordsResponse, error) {
+	return &kintoneapi.InsertRecordsResponse{}, nil
+}
+func (s *stubAPI) UpdateRecord(ctx context.Context, req kintoneapi.UpdateRecordRequest) (*kintoneapi.UpdateRecordResponse, error) {
+	return &kintoneapi.UpdateRecordResponse{}, nil
+}
+func (s *stubAPI) DeleteRecords(ctx context.Context, req kintoneapi.DeleteRecordsRequest) error {
+	return nil
+}
+
 // withStubAPI は cliapi.NewAPIBuilder hook を stub 実装に差し替えて test 終了時に元に戻す。
 func withStubAPI(t *testing.T, s serviceapi.API) {
 	t.Helper()

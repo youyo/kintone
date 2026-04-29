@@ -12,16 +12,20 @@ var ErrNilClient = errors.New("service/api: kintoneapi.Client is nil")
 
 // API は kintone REST API への薄い透過層インターフェイス。
 //
-// このインターフェイスは read/write 全エンドポイントを将来的に持つが、
-// M04 では read 系のみ実装する。M05 で write 系（Insert/Update/Delete）を追加する。
+// M04 で read 系（Get*）、M05 で write 系（InsertRecords / UpdateRecord / DeleteRecords）を追加。
 //
 // operations / facade / cli はこのインターフェイス越しに依存することで、
 // M07 のキャッシュ層・テスト時の mock を容易にする。
 type API interface {
+	// Read 系（M04）
 	GetRecords(ctx context.Context, req kintoneapi.GetRecordsRequest) (*kintoneapi.GetRecordsResponse, error)
 	GetRecord(ctx context.Context, req kintoneapi.GetRecordRequest) (*kintoneapi.GetRecordResponse, error)
 	GetApp(ctx context.Context, req kintoneapi.GetAppRequest) (*kintoneapi.GetAppResponse, error)
 	GetFormFields(ctx context.Context, req kintoneapi.GetFormFieldsRequest) (*kintoneapi.GetFormFieldsResponse, error)
+	// Write 系（M05）
+	InsertRecords(ctx context.Context, req kintoneapi.InsertRecordsRequest) (*kintoneapi.InsertRecordsResponse, error)
+	UpdateRecord(ctx context.Context, req kintoneapi.UpdateRecordRequest) (*kintoneapi.UpdateRecordResponse, error)
+	DeleteRecords(ctx context.Context, req kintoneapi.DeleteRecordsRequest) error
 }
 
 // Client は API インターフェイスの kintoneapi.Client ベース実装。
@@ -57,4 +61,19 @@ func (c *Client) GetApp(ctx context.Context, req kintoneapi.GetAppRequest) (*kin
 // GetFormFields は GET /k/v1/app/form/fields.json を呼ぶ。
 func (c *Client) GetFormFields(ctx context.Context, req kintoneapi.GetFormFieldsRequest) (*kintoneapi.GetFormFieldsResponse, error) {
 	return c.k.GetFormFields(ctx, req)
+}
+
+// InsertRecords は POST /k/v1/records.json を呼ぶ（M05）。
+func (c *Client) InsertRecords(ctx context.Context, req kintoneapi.InsertRecordsRequest) (*kintoneapi.InsertRecordsResponse, error) {
+	return c.k.InsertRecords(ctx, req)
+}
+
+// UpdateRecord は PUT /k/v1/record.json を呼ぶ（M05）。
+func (c *Client) UpdateRecord(ctx context.Context, req kintoneapi.UpdateRecordRequest) (*kintoneapi.UpdateRecordResponse, error) {
+	return c.k.UpdateRecord(ctx, req)
+}
+
+// DeleteRecords は DELETE /k/v1/records.json を呼ぶ（M05）。
+func (c *Client) DeleteRecords(ctx context.Context, req kintoneapi.DeleteRecordsRequest) error {
+	return c.k.DeleteRecords(ctx, req)
 }
