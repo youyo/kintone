@@ -1,30 +1,32 @@
+English | [日本語](README.ja.md)
+
 # kintone CLI
 
-kintone API を操作するための CLI ツール / MCP サーバーです。
-全コマンドは LLM・パイプ処理に適した JSON 形式で結果を出力します。
+A CLI tool / MCP server for interacting with the kintone API.
+All commands output results in JSON format, suitable for LLM pipelines and shell scripting.
 
-> **Status**: 全 11 マイルストーン完了。リリース準備済み（タグ push で GitHub Releases / Homebrew / ghcr.io へ自動配布）。
+> **Status**: All 11 milestones complete. Ready for release (push a tag to automatically distribute via GitHub Releases / Homebrew / ghcr.io).
 
-## インストール
+## Installation
 
-以下の 4 方式から選べます。
+Choose from 4 installation methods.
 
-### 1. Homebrew（macOS / Linux）
+### 1. Homebrew (macOS / Linux)
 
 ```bash
 brew install youyo/tap/kintone
 ```
 
-> 事前に Homebrew Tap リポジトリ `youyo/homebrew-tap` が公開されている必要があります（リリース後に自動更新）。
+> The Homebrew Tap repository `youyo/homebrew-tap` must be public before using this method (auto-updated after each release).
 
-### 2. Docker（multi-arch: amd64 / arm64）
+### 2. Docker (multi-arch: amd64 / arm64)
 
 ```bash
 docker pull ghcr.io/youyo/kintone:latest
 docker run --rm ghcr.io/youyo/kintone:latest version
 ```
 
-`~/.config/kintone` と `~/.cache/kintone` をマウントして使うと便利です:
+Mount `~/.config/kintone` and `~/.cache/kintone` for a persistent setup:
 
 ```bash
 docker run --rm -it \
@@ -39,12 +41,12 @@ docker run --rm -it \
 go install github.com/youyo/kintone/cmd/kintone@latest
 ```
 
-### 4. GitHub Releases バイナリ
+### 4. GitHub Releases binary
 
-[Releases](https://github.com/youyo/kintone/releases) から OS / arch に合った tar.gz / zip を取得し展開してください。
-SHA256 checksum (`checksums.txt`) で整合性を検証できます。
+Download the tar.gz / zip for your OS and arch from [Releases](https://github.com/youyo/kintone/releases).
+Verify integrity with the SHA256 checksum file (`checksums.txt`).
 
-### ソースからビルド（開発者向け）
+### Build from source (for developers)
 
 ```bash
 git clone https://github.com/youyo/kintone.git
@@ -52,19 +54,19 @@ cd kintone
 go build -o /usr/local/bin/kintone ./cmd/kintone
 ```
 
-## 認証方式の使い分け
+## Authentication Overview
 
-| 方式 | 想定ユース | 必要設定 | コマンド |
+| Method | Use case | Required setup | Command |
 |---|---|---|---|
-| **API Token** | CLI 単発実行 / シングルユーザ MCP / シンプルな自動化 | `KINTONE_DOMAIN` + `KINTONE_API_TOKEN`（または config.toml） | `kintone api/ops/mcp serve`（既定） |
-| **OAuth 2.0** | ユーザー個別の権限で操作 / マルチユーザ | OAuth クライアント登録 + `kintone auth login --oauth --principal-id <id>` | `kintone api/ops ...`（自動的に保存トークンを使用） |
-| **OIDC remote (idproxy)** | リモート MCP サーバ + 複数ユーザ + ID プロバイダ連携 | OIDC Issuer / Client / Cookie Secret 等 | `kintone mcp serve --listen :8080 --auth oidc --authz oauth` |
+| **API Token** | One-off CLI / single-user MCP / simple automation | `KINTONE_DOMAIN` + `KINTONE_API_TOKEN` (or config.toml) | `kintone api/ops/mcp serve` (default) |
+| **OAuth 2.0** | Per-user authorization / multi-user | Register OAuth client + `kintone auth login --oauth --principal-id <id>` | `kintone api/ops ...` (uses stored token automatically) |
+| **OIDC remote (idproxy)** | Remote MCP server + multiple users + identity provider | OIDC Issuer / Client / Cookie Secret etc. | `kintone mcp serve --listen :8080 --auth oidc --authz oauth` |
 
-詳細は本 README の「API Token 認証」「OAuth 認証」「MCP サーバー」セクション参照。
+See the "API Token Authentication", "OAuth Authentication", and "MCP Server" sections below for details.
 
-## 使い方
+## Usage
 
-### バージョン確認
+### Check version
 
 ```bash
 $ kintone version
@@ -74,31 +76,31 @@ $ kintone version --short
 0.1.0
 ```
 
-### ヘルプ
+### Help
 
 ```bash
 $ kintone --help
 ```
 
-### 設定（config）
+### Configuration (config)
 
-設定は以下の優先順位で解決されます:
+Configuration is resolved in the following priority order:
 
-1. CLI フラグ（`--profile`, `--config`）
-2. 環境変数（`KINTONE_*`）
+1. CLI flags (`--profile`, `--config`)
+2. Environment variables (`KINTONE_*`)
 3. `~/.config/kintone/config.toml`
 
-#### 設定ファイルを初期化
+#### Initialize config file
 
 ```bash
 $ kintone config init
 {"ok":true,"data":{"path":"/Users/foo/.config/kintone/config.toml","created":true}}
 ```
 
-既に存在する場合はエラー（`CONFIG_ALREADY_EXISTS`）になります。上書きしたい場合は `--force` を付けてください。
-パスは `--config` または `KINTONE_CONFIG_PATH` で変更できます。
+Returns an error (`CONFIG_ALREADY_EXISTS`) if the file already exists. Use `--force` to overwrite.
+The path can be changed with `--config` or `KINTONE_CONFIG_PATH`.
 
-#### 設定ファイルの例
+#### Example config file
 
 ```toml
 [default_profile]
@@ -113,55 +115,55 @@ domain = "dev.cybozu.com"
 auth   = "oauth"
 ```
 
-> 注意: API Token / OAuth client secret などの機微情報は config.toml に書かないでください。
-> 環境変数（`KINTONE_API_TOKEN` など）経由で渡すのが推奨です。
+> Note: Do not write sensitive values such as API Token or OAuth client secret in config.toml.
+> Pass them via environment variables (e.g. `KINTONE_API_TOKEN`).
 
-#### 現在の設定を表示
+#### Show current configuration
 
 ```bash
 $ kintone config show
 {"ok":true,"data":{"profile":"default","domain":"example.cybozu.com","auth":"api-token","api_token":"***","config_path":"/Users/foo/.config/kintone/config.toml","cache_path":"","source":{"profile":"file","domain":"file","auth":"file"}}}
 ```
 
-`api_token` は機微情報のためマスク表示（`***`）されます。`source` 各フィールドは値の出所（`cli` / `env` / `file` / `default`）を表します。
+`api_token` is masked (`***`) as a sensitive value. Each field in `source` shows where the value came from (`cli` / `env` / `file` / `default`).
 
-特定の profile を指定する場合:
+To use a specific profile:
 
 ```bash
 $ kintone config show --profile dev
 ```
 
-#### 環境変数
+#### Environment variables
 
-| 変数 | 用途 |
+| Variable | Purpose |
 |------|------|
-| `KINTONE_PROFILE` | 使用する profile 名 |
-| `KINTONE_CONFIG_PATH` | config.toml のパス |
-| `KINTONE_CACHE_PATH` | cache db のパス（デフォルト: `~/.cache/kintone/cache.db`、コンテナ: `/data/kintone/cache.db`） |
-| `KINTONE_CACHE_DISABLE` | `1` で SQLite キャッシュを無効化（API を毎回直叩き） |
-| `KINTONE_DOMAIN` | kintone ドメイン（例: `example.cybozu.com`） |
-| `KINTONE_AUTH` | 認証モード（`api-token` / `oauth`） |
+| `KINTONE_PROFILE` | Profile name to use |
+| `KINTONE_CONFIG_PATH` | Path to config.toml |
+| `KINTONE_CACHE_PATH` | Path to cache db (default: `~/.cache/kintone/cache.db`; container: `/data/kintone/cache.db`) |
+| `KINTONE_CACHE_DISABLE` | Set to `1` to disable the SQLite cache (always calls the API directly) |
+| `KINTONE_DOMAIN` | kintone domain (e.g. `example.cybozu.com`) |
+| `KINTONE_AUTH` | Authentication mode (`api-token` / `oauth`) |
 | `KINTONE_API_TOKEN` | API Token |
-| `KINTONE_OAUTH_CLIENT_ID` | OAuth クライアント ID |
-| `KINTONE_OAUTH_CLIENT_SECRET` | OAuth クライアントシークレット（config.toml より環境変数推奨） |
-| `KINTONE_OAUTH_REDIRECT_URL` | OAuth redirect URI（例: `http://127.0.0.1:18080/callback`）。kintone OAuth クライアント登録と完全一致させること |
-| `KINTONE_OAUTH_SCOPES` | OAuth スコープ（スペース区切り。省略時: `k:app_record:read k:app_record:write k:app_settings:read k:app_settings:write k:file:read k:file:write`） |
+| `KINTONE_OAUTH_CLIENT_ID` | OAuth client ID |
+| `KINTONE_OAUTH_CLIENT_SECRET` | OAuth client secret (prefer environment variable over config.toml) |
+| `KINTONE_OAUTH_REDIRECT_URL` | OAuth redirect URI (e.g. `http://127.0.0.1:18080/callback`). Must exactly match the registered OAuth client in kintone |
+| `KINTONE_OAUTH_SCOPES` | OAuth scopes (space-separated; default: `k:app_record:read k:app_record:write k:app_settings:read k:app_settings:write k:file:read k:file:write`) |
 
-## API Token 認証
+## API Token Authentication
 
-`KINTONE_API_TOKEN` 環境変数または config.toml の `api_token` フィールドで API Token を指定します。
-`internal/auth` パッケージが `X-Cybozu-API-Token` ヘッダを自動付与します。
+Specify the API Token via the `KINTONE_API_TOKEN` environment variable or the `api_token` field in config.toml.
+The `internal/auth` package automatically attaches the `X-Cybozu-API-Token` header.
 
-## OAuth 認証（M09）
+## OAuth Authentication (M09)
 
-kintone の OAuth 2.0 Authorization Code Grant + PKCE フローに対応しています。
-`KINTONE_AUTH=oauth` に設定することで、API Token の代わりに OAuth アクセストークンが使用されます。
-アクセストークンの期限切れ（通常 1h）は自動検知し、リフレッシュトークンで透過的に更新します。
+Supports kintone's OAuth 2.0 Authorization Code Grant + PKCE flow.
+Set `KINTONE_AUTH=oauth` to use OAuth access tokens instead of an API Token.
+Token expiration (typically 1h) is detected automatically and transparently refreshed using the refresh token.
 
-### 事前設定
+### Prerequisites
 
-1. kintone 管理画面で OAuth クライアントを登録し、redirect URI に `http://127.0.0.1:<ポート>/callback` を設定する
-2. クライアント ID / シークレット / redirect URI を環境変数に設定する:
+1. Register an OAuth client in the kintone admin panel and set the redirect URI to `http://127.0.0.1:<port>/callback`
+2. Set the client ID / secret / redirect URI as environment variables:
 
 ```bash
 export KINTONE_DOMAIN=example.cybozu.com
@@ -171,85 +173,85 @@ export KINTONE_OAUTH_CLIENT_SECRET=your-client-secret
 export KINTONE_OAUTH_REDIRECT_URL=http://127.0.0.1:18080/callback
 ```
 
-### ログイン（認可コードフロー）
+### Login (Authorization Code Flow)
 
 ```bash
 $ kintone auth login --oauth --principal-id oauth:alice
 ```
 
-- ブラウザが起動し kintone の認可画面が開きます
-- ユーザーが同意すると `http://127.0.0.1:<port>/callback` にリダイレクトされ、アクセストークンが取得されます
-- 取得されたトークンは `~/.cache/kintone/tokens.db` に保存されます（ファイル権限 0600）
+- A browser opens the kintone authorization page
+- After the user consents, the browser is redirected to `http://127.0.0.1:<port>/callback` and an access token is obtained
+- The token is stored in `~/.cache/kintone/tokens.db` (file permission 0600)
 
-ブラウザが起動できない環境（SSH / CI）では `--no-browser` フラグで認可 URL を stderr に出力できます:
+In environments without a browser (SSH / CI), use `--no-browser` to print the authorization URL to stderr:
 
 ```bash
 $ kintone auth login --oauth --principal-id oauth:alice --no-browser
 ```
 
-複数ユーザーが同一ドメインを使う場合は `--principal-id` を個別に指定します:
+For multiple users on the same domain, specify `--principal-id` individually:
 
 ```bash
 $ kintone auth login --oauth --principal-id oauth:bob
 ```
 
-> 注意: `--principal-id` は TokenStore のキーです。同一ドメインの別ユーザーは必ず異なる値を指定してください。
-> M10 (OIDC 対応) で自動取得に切り替わる予定です。
+> Note: `--principal-id` is the key in the TokenStore. Different users on the same domain must use different values.
+> Automatic retrieval will be introduced in M10 (OIDC support).
 
-### ログイン結果確認
+### Check login status
 
 ```bash
 $ kintone auth status
 {"ok":true,"data":{"entries":[{"principal_id":"oauth:alice","expires_at":"2026-04-29T10:00:00Z","has_refresh_token":true,"scope":"k:app_record:read k:app_record:write...","masked_token":"abcd...wxyz"}]}}
 ```
 
-特定ユーザーを絞り込む場合:
+To filter by a specific user:
 
 ```bash
 $ kintone auth status --principal-id oauth:alice
 ```
 
-### ログアウト
+### Logout
 
-特定ユーザーのトークン削除:
+Delete a specific user's token:
 
 ```bash
 $ kintone auth logout --principal-id oauth:alice
 {"ok":true,"data":{"deleted":1}}
 ```
 
-ドメイン内の全 OAuth トークン削除:
+Delete all OAuth tokens for the domain:
 
 ```bash
 $ kintone auth logout --all
 {"ok":true,"data":{"deleted":3}}
 ```
 
-### セキュリティ上の注意
+### Security notes
 
-- `KINTONE_OAUTH_CLIENT_SECRET` は環境変数での管理を推奨します（config.toml への記載は非推奨）
-- `kintone config show` の出力で `oauth_client_secret` は `***` にマスクされます
-- `kintone auth status` の出力でアクセストークンは先頭 4 文字 + `...` + 末尾 4 文字にマスクされます
-- tokens.db はファイル権限 0600 で保存されますが、平文保存です（M11 で暗号化予定）
-- PKCE (S256) と CSRF state 検証を実施します（`crypto/rand` による生成、`subtle.ConstantTimeCompare` による検証）
+- Manage `KINTONE_OAUTH_CLIENT_SECRET` via environment variables (storing it in config.toml is not recommended)
+- `oauth_client_secret` is masked as `***` in `kintone config show` output
+- Access tokens in `kintone auth status` output are masked as first 4 chars + `...` + last 4 chars
+- tokens.db is stored with permission 0600 but in plain text (encryption planned for M11)
+- PKCE (S256) and CSRF state verification are performed (`crypto/rand` for generation, `subtle.ConstantTimeCompare` for verification)
 
-## kintoneapi クライアント
+## kintoneapi Client
 
-`internal/kintoneapi` パッケージは `net/http` 薄ラッパーとして実装されています。
+The `internal/kintoneapi` package is a thin `net/http` wrapper.
 
-- `Client`: ベース URL / auth / リトライ設定を保持する REST クライアント
-- `Transport`: `http.RoundTripper` ラッパー（認証ヘッダ付与・エラーパース）
-- `APIError`: kintone 標準エラー（`code` / `id` / `message` / `HTTPStatus` / `RetryAfter`）を構造化
-- エンドポイント: `GET /k/v1/records.json`, `/k/v1/record.json`, `/k/v1/app.json`, `/k/v1/app/form/fields.json`
-- Retry-After ヘッダ対応（429 レート制限時の待機時間を自動解析）
+- `Client`: REST client holding base URL / auth / retry configuration
+- `Transport`: `http.RoundTripper` wrapper (attaches auth headers, parses errors)
+- `APIError`: Structured kintone standard error (`code` / `id` / `message` / `HTTPStatus` / `RetryAfter`)
+- Endpoints: `GET /k/v1/records.json`, `/k/v1/record.json`, `/k/v1/app.json`, `/k/v1/app/form/fields.json`
+- Supports Retry-After header (automatically parses wait time on 429 rate limit responses)
 
-## API サブコマンド（`kintone api ...`）
+## API Subcommands (`kintone api ...`)
 
-kintone REST API を直接叩く透過コマンド群です。出力は JSON 固定で、LLM / `jq` 連携を想定しています。
+Transparent pass-through commands for the kintone REST API. Output is always JSON, designed for LLM / `jq` integration.
 
-> 内部構造: `service/api` 層が REST エンドポイントを 1:1 で透過し、`service/operations` 層が LLM 向けに合成・整形します。CLI は `kintoneapi` を直接 import せず、必ず service 層を経由します。
+> Internal structure: The `service/api` layer passes through REST endpoints 1:1, and the `service/operations` layer composes and formats responses for LLM use. The CLI never imports `kintoneapi` directly — it always goes through the service layer.
 
-事前に環境変数で domain / API Token を渡してください:
+Set domain / API Token via environment variables first:
 
 ```bash
 export KINTONE_DOMAIN=example.cybozu.com
@@ -257,254 +259,254 @@ export KINTONE_AUTH=api-token
 export KINTONE_API_TOKEN=xxxxxxxxxxxxxxxxxxxx
 ```
 
-### レコード一覧
+### List records
 
 ```bash
 $ kintone api records get --app 1 --query 'name = "foo"' --field name --field age --total-count
 {"ok":true,"data":{"records":[{...}],"total_count":3}}
 
-# code / name / partial で App を指定可（M08 名前解決）
+# Specify App by code / name / partial (M08 name resolution)
 $ kintone api records get --app-ref sales --query 'createdAt > LAST_WEEK()'
 {"ok":true,"data":{"records":[{...}]}}
 ```
 
-| フラグ | 型 | 必須 | 説明 |
+| Flag | Type | Required | Description |
 |--------|---|------|------|
-| `--app` | int64 | △ | kintone アプリ ID（数値直指定、`--app-ref` と排他） |
-| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
-| `--query` | string | - | kintone クエリ言語 |
-| `--field` | string（複数指定可） | - | レスポンスを絞り込むフィールドコード |
-| `--total-count` | bool | - | true で `total_count` を含める |
+| `--app` | int64 | one of | kintone app ID (numeric, mutually exclusive with `--app-ref`) |
+| `--app-ref` | string | one of | App reference (numeric string / code / name / partial, mutually exclusive with `--app`, M08) |
+| `--query` | string | - | kintone query language |
+| `--field` | string (repeatable) | - | Field codes to include in the response |
+| `--total-count` | bool | - | Include `total_count` when true |
 
-`--app` と `--app-ref` は **どちらか必須・両方指定は USAGE エラー**。
+`--app` and `--app-ref` are **mutually exclusive; exactly one is required**.
 
-> `--field` は **複数フラグ繰り返し**で指定します（`--field name --field age`）。カンマ区切りはサポートしません。
+> Specify `--field` by **repeating the flag** (`--field name --field age`). Comma-separated values are not supported.
 
-### レコード単件
+### Get a single record
 
 ```bash
 $ kintone api record get --app 1 --id 5
 {"ok":true,"data":{"record":{...}}}
 ```
 
-### アプリ情報（snake_case 統一）
+### App info (snake_case unified)
 
 ```bash
 $ kintone api app get --app 1
 {"ok":true,"data":{"app_id":"1","code":"myapp","name":"テスト",...}}
 ```
 
-### フィールド定義
+### Field definitions
 
 ```bash
 $ kintone api app fields --app 1 --lang ja
 {"ok":true,"data":{"properties":{"name":{"type":"SINGLE_LINE_TEXT",...}},"revision":"5"}}
 ```
 
-### アプリ + フィールドの合成（operations 経由）
+### App + fields combined (via operations)
 
 ```bash
 $ kintone api app describe --app 1 --lang ja
 {"ok":true,"data":{"app":{"app_id":"1","name":"テスト",...},"fields":{...},"revision":"5"}}
 ```
 
-LLM がアプリ全体像を 1 回の呼び出しで把握できるよう、`app.json` と `app/form/fields.json` を合成して返します。
+Combines `app.json` and `app/form/fields.json` so an LLM can understand the full app structure in a single call.
 
-## Ops サブコマンド（`kintone ops ...`）
+## Ops Subcommands (`kintone ops ...`)
 
-LLM 向けの意味付けされたレコード CRUD と app 記述。書き込み系は `--dry-run` で送信予定リクエスト body を検証できます。
+Semantically enriched record CRUD and app description for LLMs. Write operations support `--dry-run` to inspect the request body before sending.
 
-> 内部構造: `service/operations` 層が `service/api` 越しに kintoneapi を呼びます。
-> CLI は `kintoneapi` を直接 import せず、必ず service 層を経由します。
-> 書き込み系（POST/PUT/DELETE）はデフォルトで **リトライ無効**（多重作成リスク回避）です。
+> Internal structure: The `service/operations` layer calls `kintoneapi` through `service/api`.
+> The CLI never imports `kintoneapi` directly — it always goes through the service layer.
+> Write operations (POST/PUT/DELETE) have **retries disabled by default** (to avoid duplicate creation).
 
-### レコード新規登録
+### Create records
 
-単件:
+Single record:
 ```bash
 $ kintone ops record create --app 1 --record-json '{"name":{"value":"foo"}}'
 {"ok":true,"data":{"ids":[100],"revisions":[1]}}
 ```
 
-複数件:
+Multiple records:
 ```bash
 $ kintone ops record create --app 1 --records-json '[{"name":{"value":"a"}},{"name":{"value":"b"}}]'
 {"ok":true,"data":{"ids":[101,102],"revisions":[1,1]}}
 ```
 
-dry-run（API を呼ばずリクエスト body のみ確認）:
+Dry-run (inspect request body without calling the API):
 ```bash
 $ kintone ops record create --app 1 --record-json '{"name":{"value":"foo"}}' --dry-run
 {"ok":true,"data":{"dry_run":true,"method":"POST","path":"/k/v1/records.json","body":{"app":1,"records":[{"name":{"value":"foo"}}]}}}
 ```
 
-| フラグ | 型 | 必須 | 説明 |
+| Flag | Type | Required | Description |
 |--------|---|------|------|
-| `--app` | int64 | △ | kintone アプリ ID（`--app-ref` と排他） |
-| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
-| `--record-json` | string | △ | 単件レコード JSON |
-| `--records-json` | string | △ | 複数件レコード JSON 配列 |
-| `--dry-run` | bool | - | true で API を呼ばず送信予定 body を出力 |
+| `--app` | int64 | one of | kintone app ID (mutually exclusive with `--app-ref`) |
+| `--app-ref` | string | one of | App reference (numeric string / code / name / partial, mutually exclusive with `--app`, M08) |
+| `--record-json` | string | one of | Single record JSON |
+| `--records-json` | string | one of | Multiple records JSON array |
+| `--dry-run` | bool | - | Output the request body without calling the API |
 
-`--app` と `--app-ref` は **どちらか必須・両方指定は USAGE エラー**。
-`--record-json` と `--records-json` は **どちらか必須・両方指定は USAGE エラー**。
+`--app` and `--app-ref` are **mutually exclusive; exactly one is required**.
+`--record-json` and `--records-json` are **mutually exclusive; exactly one is required**.
 
-### レコード単件更新
+### Update a record
 
-ID 指定:
+By ID:
 ```bash
 $ kintone ops record update --app 1 --id 7 --record-json '{"name":{"value":"updated"}}'
 {"ok":true,"data":{"revision":3}}
 ```
 
-updateKey（ユニークフィールド）指定:
+By updateKey (unique field):
 ```bash
 $ kintone ops record update --app 1 --update-key-field code --update-key-value A1 --record-json '{"name":{"value":"updated"}}'
 ```
 
-楽観ロック（`--revision`）:
+Optimistic locking (`--revision`):
 ```bash
 $ kintone ops record update --app 1 --id 7 --revision 2 --record-json '{"name":{"value":"x"}}'
 ```
 
-| フラグ | 型 | 必須 | 説明 |
+| Flag | Type | Required | Description |
 |--------|---|------|------|
-| `--app` | int64 | △ | kintone アプリ ID（`--app-ref` と排他） |
-| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
-| `--id` | int64 | △ | 更新対象レコード ID |
-| `--update-key-field` | string | △ | updateKey: フィールドコード（`--update-key-field-ref` と排他） |
-| `--update-key-field-ref` | string | △ | updateKey: フィールド参照（label / partial、M08） |
-| `--update-key-value` | string | △ | updateKey: 値（updateKey 経路で必須） |
-| `--record-json` | string | ◎ | 更新内容 JSON |
-| `--revision` | int64 | - | 楽観ロック用 revision |
-| `--dry-run` | bool | - | 送信予定 body のみ出力 |
+| `--app` | int64 | one of | kintone app ID (mutually exclusive with `--app-ref`) |
+| `--app-ref` | string | one of | App reference (numeric string / code / name / partial, mutually exclusive with `--app`, M08) |
+| `--id` | int64 | one of | Target record ID |
+| `--update-key-field` | string | one of | updateKey: field code (mutually exclusive with `--update-key-field-ref`) |
+| `--update-key-field-ref` | string | one of | updateKey: field reference (label / partial, M08) |
+| `--update-key-value` | string | one of | updateKey: value (required when using updateKey path) |
+| `--record-json` | string | required | Update content JSON |
+| `--revision` | int64 | - | Revision for optimistic locking |
+| `--dry-run` | bool | - | Output request body without calling the API |
 
-`--app` と `--app-ref` は **どちらか必須・両方指定は USAGE エラー**。
-`--id` と `--update-key-*` は **排他**。どちらかが必須です。
-`--update-key-field` と `--update-key-field-ref` は **排他**。
+`--app` and `--app-ref` are **mutually exclusive; exactly one is required**.
+`--id` and `--update-key-*` are **mutually exclusive; exactly one is required**.
+`--update-key-field` and `--update-key-field-ref` are **mutually exclusive**.
 
-`--update-key-field-ref` を指定すると、まず App ID 解決後に label / partial で field code が解決されます。
-ambiguous 時は `RESOLVER_FIELD_AMBIGUOUS` で候補を `details.candidates` に返します。
+When `--update-key-field-ref` is specified, the field code is resolved by label / partial after the app ID is resolved.
+On ambiguous results, `RESOLVER_FIELD_AMBIGUOUS` is returned with candidates in `details.candidates`.
 
-### レコード削除
+### Delete records
 
 ```bash
 $ kintone ops record delete --app 1 --id 7 --id 8
 {"ok":true,"data":{"deleted":2}}
 ```
 
-revisions 付き（楽観ロック）:
+With revisions (optimistic locking):
 ```bash
 $ kintone ops record delete --app 1 --id 7 --id 8 --revision 3 --revision 4
 ```
 
-dry-run:
+Dry-run:
 ```bash
 $ kintone ops record delete --app 1 --id 7 --id 8 --dry-run
 {"ok":true,"data":{"dry_run":true,"method":"DELETE","path":"/k/v1/records.json","body":{"app":1,"ids":[7,8]}}}
 ```
 
-| フラグ | 型 | 必須 | 説明 |
+| Flag | Type | Required | Description |
 |--------|---|------|------|
-| `--app` | int64 | △ | kintone アプリ ID（`--app-ref` と排他） |
-| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
-| `--id` | int64（複数指定可） | ◎ | 削除対象レコード ID（`--id 1 --id 2`） |
-| `--revision` | int64（複数指定可） | - | 楽観ロック用 revision（`--id` と同要素数） |
-| `--dry-run` | bool | - | 送信予定 body のみ出力 |
+| `--app` | int64 | one of | kintone app ID (mutually exclusive with `--app-ref`) |
+| `--app-ref` | string | one of | App reference (numeric string / code / name / partial, mutually exclusive with `--app`, M08) |
+| `--id` | int64 (repeatable) | required | Target record ID(s) (`--id 1 --id 2`) |
+| `--revision` | int64 (repeatable) | - | Revisions for optimistic locking (same count as `--id`) |
+| `--dry-run` | bool | - | Output request body without calling the API |
 
-### アプリ記述（ops 配下にも公開）
+### App describe (also available under ops)
 
-`kintone api app describe` と等価です。LLM が `ops` 名前空間下から発見できるよう同一 operations を再公開しています。
+Equivalent to `kintone api app describe`. Re-published under the `ops` namespace so LLMs can discover it there.
 
 ```bash
 $ kintone ops app describe --app 1 --lang ja
 {"ok":true,"data":{"app":{"app_id":"1","name":"テスト",...},"fields":{...},"revision":"5"}}
 ```
 
-## 名前解決（Resolver / M08）
+## Name Resolution (Resolver / M08)
 
-CLI / MCP の `--app` 引数（および `--update-key-field`）に **数値 ID 以外**の参照を渡せます。
+You can pass **non-numeric references** to the `--app` argument (and `--update-key-field`) in CLI / MCP.
 
-### App の解決順序
+### App resolution order
 
-1. **ID 直接**: `"42"` のような数値文字列はそのまま App ID として採用
-2. **code 完全一致**: `ListApps?codes[]=ref` で完全一致を検索
-3. **name 完全一致**: `ListApps?name=ref` の結果から `Name == ref` を抽出
-4. **name 部分一致**: 同レスポンスから `Name` に `ref` が含まれるものを抽出
+1. **Direct ID**: A numeric string like `"42"` is used as the App ID directly
+2. **Exact code match**: Searches via `ListApps?codes[]=ref`
+3. **Exact name match**: Filters results from `ListApps?name=ref` where `Name == ref`
+4. **Partial name match**: Filters the same response for entries where `Name` contains `ref`
 
-各段階でヒットしたら即採用（fallback しない / predictability 優先）。
-ambiguous（複数ヒット）時は `RESOLVER_APP_AMBIGUOUS` を返し `details.candidates` に全候補を含めます。
+The first match wins (no fallback — predictability first).
+On ambiguous results (multiple matches), `RESOLVER_APP_AMBIGUOUS` is returned with all candidates in `details.candidates`.
 
-### Field の解決順序
+### Field resolution order
 
-1. **code 完全一致**: `properties` のキー一致
-2. **label 完全一致**: properties 全走査
-3. **label 部分一致**: `strings.Contains` で抽出
+1. **Exact code match**: Key match in `properties`
+2. **Exact label match**: Full scan of properties
+3. **Partial label match**: Extracted via `strings.Contains`
 
-### 利用例
+### Examples
 
 ```bash
-# code で App を解決
+# Resolve app by code
 $ kintone api records get --app-ref sales --query 'createdAt > LAST_WEEK()'
 {"ok":true,"data":{"records":[...]}}
 
-# name 部分一致で複数ヒット → ambiguous
+# Partial name match returns multiple results → ambiguous
 $ kintone api app describe --app-ref 営業
 {"ok":false,"error":{"code":"RESOLVER_APP_AMBIGUOUS","message":"...","details":{"kind":"app","ref":"営業","candidates":[{"id":"42","code":"sales","name":"営業 A"},{"id":"55","code":"sales2","name":"営業 B"}]}}}
 
-# field を label で解決して updateKey 経由更新
+# Resolve field by label and update via updateKey
 $ kintone ops record update --app-ref sales --update-key-field-ref 顧客名 --update-key-value 山田 --record-json '{"phone":{"value":"080-..."}}'
 ```
 
-### キャッシュとの統合
+### Cache integration
 
-Resolver は `service/api.API`（M07 の CachingAPI でラップ済み）越しに `ListApps` / `GetFormFields` を呼びます。
-1 年 TTL でキャッシュされるため、同じ ref を 2 回引いた場合の REST 呼び出しは 1 回。
+The Resolver calls `ListApps` / `GetFormFields` through `service/api.API` (wrapped by CachingAPI from M07).
+With a 1-year TTL, the same ref only triggers one REST call regardless of how many times it is resolved.
 
-名前変更時の追従:
-- 1 年間は古い名前で resolve され続けるため、`kintone cache clear --scope=apps` で手動更新してください。
+When names change:
+- The old name continues to resolve for up to 1 year. Run `kintone cache clear --scope=apps` to force a refresh.
 
-### 後方互換
+### Backward compatibility
 
-既存の `--app <int>` 直指定は変更なしで動作します。
-MCP の `app: number` 引数も継続して受理します（`Required` のみ外し、`app_ref: string` を追加）。
+The existing `--app <int>` numeric flag continues to work unchanged.
+The MCP `app: number` argument is still accepted (`Required` removed, `app_ref: string` added).
 
 ---
 
-## キャッシュ管理（`kintone cache ...`）
+## Cache Management (`kintone cache ...`)
 
-kintone API の app / field 情報を SQLite にキャッシュし、繰り返しリクエストを削減します。
-TokenStore は OAuth アクセストークンを安全に保存・管理します。
+Caches kintone API app / field information in SQLite to reduce repeated requests.
+The TokenStore safely stores and manages OAuth access tokens.
 
-### キャッシュの統計確認
+### Cache statistics
 
 ```bash
 $ kintone cache stats
 {"ok":true,"data":{"db_path":"/Users/foo/.cache/kintone/cache.db","exists":true,"size_bytes":49152,"entry_count":12,"expired_count":0}}
 ```
 
-DB ファイルが存在しない場合は `exists: false` の統計を返します。
+Returns `exists: false` statistics if the DB file does not exist.
 
-### キャッシュの削除
+### Clear cache
 
 ```bash
 $ kintone cache clear
 {"ok":true,"data":{"cleared":true,"deleted_count":12}}
 ```
 
-特定キーパターンのみ削除する場合は `--key` フラグを使用します（省略時は全件削除）。
+Use the `--key` flag to delete only entries matching a specific key prefix (omit to delete all entries).
 
-| フラグ | 型 | 必須 | 説明 |
+| Flag | Type | Required | Description |
 |--------|---|------|------|
-| `--key` | string | - | 削除対象キーのプレフィックス（省略時は全件削除） |
+| `--key` | string | - | Key prefix to delete (omit to delete all) |
 
-## シェル補完（`kintone completion`）
+## Shell Completion (`kintone completion`)
 
-bash / zsh / fish / powershell の補完スクリプトを生成します。
+Generates completion scripts for bash / zsh / fish / powershell.
 
-> **出力規約の例外**: completion 出力はシェルが直接 source / Invoke-Expression するため、
-> 通常の JSON envelope（`{"ok":true,...}`）には包まずプレーンスクリプトを stdout に出力します。
-> `version --short` と同列の例外として明示しています。
+> **Output convention exception**: Completion output is intended to be directly `source`d / `Invoke-Expression`d by the shell,
+> so it is printed as a plain script to stdout rather than wrapped in a JSON envelope (`{"ok":true,...}`).
+> This is explicitly noted as an exception, on par with `version --short`.
 
 ### bash
 
@@ -512,7 +514,7 @@ bash / zsh / fish / powershell の補完スクリプトを生成します。
 # Linux
 kintone completion bash | sudo tee /etc/bash_completion.d/kintone > /dev/null
 
-# macOS（Homebrew）
+# macOS (Homebrew)
 kintone completion bash > "$(brew --prefix)/etc/bash_completion.d/kintone"
 ```
 
@@ -520,7 +522,7 @@ kintone completion bash > "$(brew --prefix)/etc/bash_completion.d/kintone"
 
 ```bash
 kintone completion zsh > "${fpath[1]}/_kintone"
-# 反映
+# Reload
 autoload -U compinit && compinit
 ```
 
@@ -532,31 +534,30 @@ kintone completion fish > ~/.config/fish/completions/kintone.fish
 
 ### PowerShell
 
-`$PROFILE` に追記:
+Add to `$PROFILE`:
 
 ```powershell
 kintone completion powershell | Out-String | Invoke-Expression
 ```
 
-## MCP サーバー（`kintone mcp serve`）
+## MCP Server (`kintone mcp serve`)
 
-LLM クライアント（Claude Desktop など）から kintone を操作するための
-MCP（Model Context Protocol）サーバーを起動します。
+Starts an MCP (Model Context Protocol) server for operating kintone from LLM clients such as Claude Desktop.
 
-### モード
+### Modes
 
-- `--listen` 未指定: **stdio JSON-RPC**（既定。Claude Desktop 等の子プロセス起動向け）
-- `--listen :8080`: **HTTP / Streamable**（remote MCP・複数クライアントで共有）
+- Without `--listen`: **stdio JSON-RPC** (default; for child process launch from Claude Desktop etc.)
+- `--listen :8080`: **HTTP / Streamable** (remote MCP; shared across multiple clients)
 
-### 認証フラグ
+### Authentication flags
 
-| フラグ / 環境変数 | 値 | 既定 | 役割 |
+| Flag / Env var | Values | Default | Role |
 |---|---|---|---|
-| `--listen` / `KINTONE_MCP_LISTEN_ADDR` | `host:port` | 空 | 空で stdio、値で HTTP |
-| `--auth` / `KINTONE_MCP_AUTH_MODE` | `none` / `oidc` | `none` | リクエスト前段の認証 |
-| `--authz` / `KINTONE_MCP_AUTHZ_MODE` | `api-token` / `oauth` | `api-token` | upstream kintone への認証 |
+| `--listen` / `KINTONE_MCP_LISTEN_ADDR` | `host:port` | empty | Empty for stdio, value for HTTP |
+| `--auth` / `KINTONE_MCP_AUTH_MODE` | `none` / `oidc` | `none` | Front-end authentication for incoming requests |
+| `--authz` / `KINTONE_MCP_AUTHZ_MODE` | `api-token` / `oauth` | `api-token` | Authentication to upstream kintone |
 
-### stdio + API Token（既存・後方互換）
+### stdio + API Token (existing, backward-compatible)
 
 ```bash
 $ KINTONE_DOMAIN=example.cybozu.com \
@@ -565,12 +566,12 @@ $ KINTONE_DOMAIN=example.cybozu.com \
   kintone mcp serve
 ```
 
-### HTTP + OIDC + multi-user（M10 から）
+### HTTP + OIDC + multi-user (from M10)
 
-`auth=oidc` 時は [github.com/youyo/idproxy](https://github.com/youyo/idproxy) v0.4.2 を組み込み、
-リクエストごとに OIDC ベースの Bearer JWT を検証して `principal_id = "<issuer>:<sub>"` を抽出します。
-upstream kintone への OAuth トークンは事前に各ユーザーが
-`kintone auth login --oauth --principal-id "<issuer>:<sub>"` で TokenStore に登録しておく必要があります。
+When `auth=oidc`, [github.com/youyo/idproxy](https://github.com/youyo/idproxy) v0.4.2 is embedded.
+It validates an OIDC-based Bearer JWT per request and extracts `principal_id = "<issuer>:<sub>"`.
+Each user must pre-register their upstream kintone OAuth token via
+`kintone auth login --oauth --principal-id "<issuer>:<sub>"` to the TokenStore.
 
 ```bash
 $ KINTONE_DOMAIN=example.cybozu.com \
@@ -587,34 +588,34 @@ $ KINTONE_DOMAIN=example.cybozu.com \
   kintone mcp serve --listen :8080 --auth oidc --authz oauth
 ```
 
-エンドポイント:
-- `POST /mcp` — Streamable HTTP transport（MCP クライアントからのメイン呼び出し）
-- `/login`, `/callback`, `/select`, `/.well-known/*`, `/authorize`, `/token`, `/register` — idproxy 予約パス
+Endpoints:
+- `POST /mcp` — Streamable HTTP transport (main MCP client entry point)
+- `/login`, `/callback`, `/select`, `/.well-known/*`, `/authorize`, `/token`, `/register` — reserved by idproxy
 
-> **MVP 範囲**: M10 では idproxy の SigningKey は起動時に ephemeral 生成されます（再起動で発行済み JWT が無効化）。永続鍵対応は M11+ 予定。
-> **プロビジョニング**: 各ユーザーの kintone refresh_token は事前 CLI ログインで TokenStore に登録します。MCP 内からの自動 OAuth 誘導は M11+ の対象です。
+> **MVP scope**: In M10, the idproxy SigningKey is generated ephemerally at startup (issued JWTs are invalidated on restart). Persistent key support is planned for M11+.
+> **Provisioning**: Each user's kintone refresh_token must be registered in the TokenStore via CLI login before use. Automatic OAuth prompting from within MCP is planned for M11+.
 
 
-提供する 6 つの tools:
+6 tools are provided:
 
-| ツール名 | 説明 |
+| Tool | Description |
 |---------|------|
-| `apps_search` | アプリを ids/codes/name/space_ids/limit/offset で検索 |
-| `app_describe` | 単一アプリの基本情報 + フォームのフィールド定義を取得（`app` または `app_ref`） |
-| `records_query` | kintone クエリでレコード一覧を取得（query / fields / total_count、`app` または `app_ref`） |
-| `record_create` | レコード新規登録（record / records 排他、最大 100 件、`app` または `app_ref`） |
-| `record_update` | レコード単件更新（id / update_key_* 排他、楽観ロック対応、`app`+`app_ref`、`update_key_field`+`update_key_field_ref` 排他） |
-| `record_delete` | レコード複数件削除（revisions 任意、`app` または `app_ref`） |
+| `apps_search` | Search apps by ids/codes/name/space_ids/limit/offset |
+| `app_describe` | Get basic app info + form field definitions (`app` or `app_ref`) |
+| `records_query` | Query records using kintone query language (query / fields / total_count, `app` or `app_ref`) |
+| `record_create` | Create records (record / records mutually exclusive, up to 100, `app` or `app_ref`) |
+| `record_update` | Update a single record (id / update_key_* mutually exclusive, optimistic locking, `app`+`app_ref`, `update_key_field`+`update_key_field_ref` mutually exclusive) |
+| `record_delete` | Delete multiple records (optional revisions, `app` or `app_ref`) |
 
-`apps_search` 以外の全 tool は **M08 から `app_ref: string` 引数を追加**しました。
-`app: number` と `app_ref: string` は排他（どちらか必須）。
-`record_update` は `update_key_field_ref: string` も追加（label / partial で field code を解決）。
+All tools except `apps_search` have had **`app_ref: string` added since M08**.
+`app: number` and `app_ref: string` are mutually exclusive (exactly one required).
+`record_update` also has `update_key_field_ref: string` added (resolves field code by label / partial).
 
-各 tool の出力は CLI と同じ JSON envelope（`{"ok":true,"data":{...}}` /
-`{"ok":false,"error":{...}}`）を `CallToolResult.Content[0].Text` に格納します。
-LLM 側から `JSON.parse` するだけで CLI と同じ意味論で結果を扱えます。
+Each tool's output stores the same JSON envelope as the CLI (`{"ok":true,"data":{...}}` /
+`{"ok":false,"error":{...}}`) in `CallToolResult.Content[0].Text`.
+LLM clients can `JSON.parse` the result and work with the same semantics as the CLI.
 
-### Claude Desktop での設定例（macOS）
+### Claude Desktop configuration example (macOS)
 
 `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -634,58 +635,58 @@ LLM 側から `JSON.parse` するだけで CLI と同じ意味論で結果を扱
 }
 ```
 
-> stdio モードでは認証モードは `api-token` / `oauth`（単一ユーザー）に対応。
-> HTTP + OIDC による multi-user remote MCP は M10 から対応（上記参照）。
-> CLI / 単一ユーザーの OAuth 認証は `kintone auth login --oauth` で利用可能です（M09 以降）。
+> stdio mode supports `api-token` / `oauth` (single user) authentication.
+> HTTP + OIDC multi-user remote MCP is supported from M10 (see above).
+> Single-user OAuth via CLI is available with `kintone auth login --oauth` (M09 and later).
 
-## JSON 出力規約
+## JSON Output Convention
 
-全コマンドは以下の形式で stdout に出力します。
+All commands write to stdout in the following format.
 
-**成功時**:
+**On success**:
 ```json
 {"ok":true,"data":{...}}
 ```
 
-**失敗時**:
+**On failure**:
 ```json
 {"ok":false,"error":{"code":"USAGE","message":"..."}}
 ```
 
-`jq` でのパース例:
+Example with `jq`:
 
 ```bash
 $ kintone version | jq -r '.data.version'
 0.1.0
 ```
 
-## ロードマップ
+## Roadmap
 
-詳細は [plans/kintone-roadmap.md](plans/kintone-roadmap.md) を参照してください。
-全 11 マイルストーン完了済。
+See [plans/kintone-roadmap.md](plans/kintone-roadmap.md) for details.
+All 11 milestones are complete.
 
-## リリース手順（メンテナ向け）
+## Release procedure (maintainers)
 
-タグを push すると `.github/workflows/release.yml` が起動し、
-GitHub Releases / Homebrew Tap / ghcr.io へ成果物を配布します。
+Pushing a tag triggers `.github/workflows/release.yml`, which distributes artifacts to
+GitHub Releases / Homebrew Tap / ghcr.io.
 
 ```bash
-# 1. main の最終確認
+# 1. Final check on main
 git checkout main && git pull
 go test -race ./... && golangci-lint run ./...
 
-# 2. タグ作成と push
+# 2. Create and push tag
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-事前準備（初回のみ）:
+One-time setup:
 
-- `youyo/homebrew-tap` リポジトリを GitHub に作成（空でよい）
-- リポジトリ Settings > Secrets > Actions に `HOMEBREW_TAP_GITHUB_TOKEN` を登録
-  （上記 Tap リポジトリへの `repo` 権限を持つ Personal Access Token）
-- ghcr.io への push は `GITHUB_TOKEN` の `packages: write` 権限で動作（追加設定不要）
+- Create the `youyo/homebrew-tap` repository on GitHub (can be empty)
+- Register `HOMEBREW_TAP_GITHUB_TOKEN` in repository Settings > Secrets > Actions
+  (a Personal Access Token with `repo` scope for the Tap repository)
+- Pushing to ghcr.io works with `GITHUB_TOKEN`'s `packages: write` permission (no additional setup needed)
 
-## ライセンス
+## License
 
 [MIT License](LICENSE)
