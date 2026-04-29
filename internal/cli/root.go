@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 	cliapi "github.com/youyo/kintone/internal/cli/api"
+	cliops "github.com/youyo/kintone/internal/cli/ops"
 	"github.com/youyo/kintone/internal/output"
 )
 
@@ -39,6 +40,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newConfigCmd())
 	cmd.AddCommand(cliapi.NewCmd())
+	cmd.AddCommand(cliops.NewCmd())
 	return cmd
 }
 
