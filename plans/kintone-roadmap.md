@@ -8,25 +8,27 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-04-29 07:55 |
-| ステータス | 未着手 |
+| 最終更新 | 2026-04-29 09:15 |
+| ステータス | 進行中（M01 完了） |
 
 ## Current Focus
-- **マイルストーン**: M1: プロジェクト雛形 + JSON 出力規約
-- **直近の完了**: ロードマップ作成
-- **次のアクション**: M1 着手（`/devflow:implement`）
+- **マイルストーン**: M2: config 層（toml + env + profile）
+- **直近の完了**: M01 — プロジェクト雛形 + JSON 出力規約（feat/m01-project-skeleton ブランチ）
+- **次のアクション**: M02 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
 
 ## Progress
 
-### M1: プロジェクト雛形 + JSON 出力規約
-- [ ] go.mod 作成（module github.com/youyo/kintone, go 1.26）
-- [ ] cmd/kintone/main.go（Cobra root）
-- [ ] internal/cli/{root.go, version.go}
-- [ ] internal/output/{json.go, json_test.go}（成功/エラー JSON フォーマット統一）
-- [ ] .github/workflows/ci.yml（go test / go vet / golangci-lint）
-- [ ] README.md（最小）/ LICENSE / .gitignore
-- [ ] 実行確認: `go run ./cmd/kintone version` で `{"ok":true,"data":{"version":"..."}}` 出力
+### M1: プロジェクト雛形 + JSON 出力規約 ✅ 完了
+- [x] go.mod 作成（module github.com/youyo/kintone, go 1.26）
+- [x] cmd/kintone/main.go（Cobra root）
+- [x] internal/cli/{root.go, version.go, errors.go, *_test.go}
+- [x] internal/output/{json.go, json_test.go}（成功/エラー JSON フォーマット統一）
+- [x] .github/workflows/ci.yml（go test / go vet / golangci-lint）
+- [x] README.md / LICENSE (MIT) / .gitignore / .golangci.yml
+- [x] 実行確認: `go run ./cmd/kintone version` で `{"ok":true,"data":{"version":"0.1.0"}}` 出力
+- [x] 全テスト pass（output 85.0% / cli 90.9% カバレッジ）
 - 詳細: plans/kintone-m01-project-skeleton.md
+- ブランチ: feat/m01-project-skeleton（main へ merge 待ち）
 
 ### M2: config 層（toml + env + profile）
 - [ ] internal/config/{config.go, profile.go, env.go, *_test.go}
@@ -126,3 +128,4 @@
 | 日時 | 種別 | 内容 |
 |------|------|------|
 | 2026-04-29 07:55 | 作成 | ロードマップ初版作成（インタビューに基づき M1-M11 を確定） |
+| 2026-04-29 09:15 | 進捗 | M01 完了（feat/m01-project-skeleton ブランチで 9 コミット）。devflow:cycle の Planner→devils-advocate→advocate(2 周)→advisor()→implementer(TDD)→手動動作確認まで一気通貫で実施。Current Focus を M02 に更新 |
