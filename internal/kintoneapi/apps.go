@@ -14,7 +14,7 @@ import (
 type ListAppsRequest struct {
 	IDs      []int64
 	Codes    []string
-	Name     string  // 部分一致
+	Name     string // 部分一致
 	SpaceIDs []int64
 	Limit    int64 // 1-100、0 で省略
 	Offset   int64 // 0 で省略
