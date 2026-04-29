@@ -23,4 +23,10 @@ var (
 	ErrRevisionsLengthMismatch = errors.New("operations: revisions length must match ids length")
 	// ErrInvalidID は record_delete の IDs 要素が <= 0 のとき。
 	ErrInvalidID = errors.New("operations: id must be > 0")
+	// ErrConflictingAppRef は App と AppRef が両方指定されたとき（M08）。
+	ErrConflictingAppRef = errors.New("operations: App and AppRef cannot be specified together")
+	// ErrConflictingUpdateKeyFieldRef は UpdateKeyField と UpdateKeyFieldRef が両方指定されたとき（M08）。
+	ErrConflictingUpdateKeyFieldRef = errors.New("operations: UpdateKeyField and UpdateKeyFieldRef cannot be specified together")
+	// ErrResolverUnavailable は AppRef / UpdateKeyFieldRef が指定されたが Resolver が nil のとき（M08）。
+	ErrResolverUnavailable = errors.New("operations: resolver is required when AppRef or UpdateKeyFieldRef is specified")
 )

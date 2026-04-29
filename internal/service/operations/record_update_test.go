@@ -16,7 +16,7 @@ func TestRecordUpdate_ByID(t *testing.T) {
 			return &kintoneapi.UpdateRecordResponse{Revision: "3"}, nil
 		},
 	}
-	out, err := operations.RecordUpdate(context.Background(), s, operations.RecordUpdateInput{
+	out, err := operations.RecordUpdate(context.Background(), s, nil, operations.RecordUpdateInput{
 		App: 42, ID: 7, Record: map[string]any{"x": 1},
 	})
 	if err != nil {
@@ -41,7 +41,7 @@ func TestRecordUpdate_WithRevision(t *testing.T) {
 		},
 	}
 	rev := int64(5)
-	_, err := operations.RecordUpdate(context.Background(), s, operations.RecordUpdateInput{
+	_, err := operations.RecordUpdate(context.Background(), s, nil, operations.RecordUpdateInput{
 		App: 42, ID: 7, Revision: &rev,
 		Record: map[string]any{"x": 1},
 	})
@@ -60,7 +60,7 @@ func TestRecordUpdate_ByUpdateKey(t *testing.T) {
 			return &kintoneapi.UpdateRecordResponse{Revision: "4"}, nil
 		},
 	}
-	_, err := operations.RecordUpdate(context.Background(), s, operations.RecordUpdateInput{
+	_, err := operations.RecordUpdate(context.Background(), s, nil, operations.RecordUpdateInput{
 		App: 42, UpdateKeyField: "code", UpdateKeyValue: "A1",
 		Record: map[string]any{"x": 1},
 	})
@@ -81,7 +81,7 @@ func TestRecordUpdate_ByUpdateKey(t *testing.T) {
 // OU-4: ID + UpdateKey 両方 → ErrConflictingUpdateKey
 func TestRecordUpdate_Conflicting(t *testing.T) {
 	s := &stubAPI{}
-	_, err := operations.RecordUpdate(context.Background(), s, operations.RecordUpdateInput{
+	_, err := operations.RecordUpdate(context.Background(), s, nil, operations.RecordUpdateInput{
 		App: 1, ID: 1, UpdateKeyField: "c", UpdateKeyValue: "v",
 		Record: map[string]any{"x": 1},
 	})
@@ -93,7 +93,7 @@ func TestRecordUpdate_Conflicting(t *testing.T) {
 // OU-5: ID なし & updateKey 半分（Field のみ） → ErrMissingUpdateKey
 func TestRecordUpdate_MissingUpdateKeyValue(t *testing.T) {
 	s := &stubAPI{}
-	_, err := operations.RecordUpdate(context.Background(), s, operations.RecordUpdateInput{
+	_, err := operations.RecordUpdate(context.Background(), s, nil, operations.RecordUpdateInput{
 		App: 1, UpdateKeyField: "code", Record: map[string]any{"x": 1},
 	})
 	if !errors.Is(err, operations.ErrMissingUpdateKey) {
@@ -108,7 +108,7 @@ func TestRecordUpdate_OnlyUpdateKey(t *testing.T) {
 			return &kintoneapi.UpdateRecordResponse{Revision: "1"}, nil
 		},
 	}
-	_, err := operations.RecordUpdate(context.Background(), s, operations.RecordUpdateInput{
+	_, err := operations.RecordUpdate(context.Background(), s, nil, operations.RecordUpdateInput{
 		App: 1, UpdateKeyField: "code", UpdateKeyValue: "A",
 		Record: map[string]any{"x": 1},
 	})
@@ -120,7 +120,7 @@ func TestRecordUpdate_OnlyUpdateKey(t *testing.T) {
 // OU-7: App=0
 func TestRecordUpdate_InvalidApp(t *testing.T) {
 	s := &stubAPI{}
-	_, err := operations.RecordUpdate(context.Background(), s, operations.RecordUpdateInput{
+	_, err := operations.RecordUpdate(context.Background(), s, nil, operations.RecordUpdateInput{
 		ID: 1, Record: map[string]any{"x": 1},
 	})
 	if !errors.Is(err, operations.ErrInvalidApp) {
@@ -131,7 +131,7 @@ func TestRecordUpdate_InvalidApp(t *testing.T) {
 // OU-8: Record 空
 func TestRecordUpdate_EmptyRecord(t *testing.T) {
 	s := &stubAPI{}
-	_, err := operations.RecordUpdate(context.Background(), s, operations.RecordUpdateInput{
+	_, err := operations.RecordUpdate(context.Background(), s, nil, operations.RecordUpdateInput{
 		App: 1, ID: 1,
 	})
 	if !errors.Is(err, operations.ErrEmptyRecord) {
@@ -147,7 +147,7 @@ func TestRecordUpdate_APIErrorPassThrough(t *testing.T) {
 			return nil, apiErr
 		},
 	}
-	_, err := operations.RecordUpdate(context.Background(), s, operations.RecordUpdateInput{
+	_, err := operations.RecordUpdate(context.Background(), s, nil, operations.RecordUpdateInput{
 		App: 1, ID: 1, Record: map[string]any{"x": 1},
 	})
 	var got *kintoneapi.APIError
@@ -163,7 +163,7 @@ func TestRecordUpdate_RevisionParseError(t *testing.T) {
 			return &kintoneapi.UpdateRecordResponse{Revision: "abc"}, nil
 		},
 	}
-	_, err := operations.RecordUpdate(context.Background(), s, operations.RecordUpdateInput{
+	_, err := operations.RecordUpdate(context.Background(), s, nil, operations.RecordUpdateInput{
 		App: 1, ID: 1, Record: map[string]any{"x": 1},
 	})
 	if err == nil {

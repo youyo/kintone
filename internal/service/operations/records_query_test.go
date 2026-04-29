@@ -105,7 +105,7 @@ func TestRecordsQuery_AllParams(t *testing.T) {
 	in := operations.RecordsQueryInput{
 		App: 42, Query: `name = "foo"`, Fields: []string{"name", "age"}, TotalCount: true,
 	}
-	out, err := operations.RecordsQuery(context.Background(), s, in)
+	out, err := operations.RecordsQuery(context.Background(), s, nil, in)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestRecordsQuery_Minimal(t *testing.T) {
 			return &kintoneapi.GetRecordsResponse{Records: []map[string]any{}}, nil
 		},
 	}
-	out, err := operations.RecordsQuery(context.Background(), s, operations.RecordsQueryInput{App: 1})
+	out, err := operations.RecordsQuery(context.Background(), s, nil, operations.RecordsQueryInput{App: 1})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestRecordsQuery_InvalidApp(t *testing.T) {
 			return nil, nil
 		},
 	}
-	_, err := operations.RecordsQuery(context.Background(), s, operations.RecordsQueryInput{App: 0})
+	_, err := operations.RecordsQuery(context.Background(), s, nil, operations.RecordsQueryInput{App: 0})
 	if !errors.Is(err, operations.ErrInvalidApp) {
 		t.Errorf("err=%v want ErrInvalidApp", err)
 	}
@@ -163,7 +163,7 @@ func TestRecordsQuery_TotalCountZero(t *testing.T) {
 			return &kintoneapi.GetRecordsResponse{Records: []map[string]any{}, TotalCount: strPtr("0")}, nil
 		},
 	}
-	out, err := operations.RecordsQuery(context.Background(), s, operations.RecordsQueryInput{App: 1})
+	out, err := operations.RecordsQuery(context.Background(), s, nil, operations.RecordsQueryInput{App: 1})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestRecordsQuery_InvalidTotalCount(t *testing.T) {
 			return &kintoneapi.GetRecordsResponse{Records: []map[string]any{}, TotalCount: strPtr("abc")}, nil
 		},
 	}
-	_, err := operations.RecordsQuery(context.Background(), s, operations.RecordsQueryInput{App: 1})
+	_, err := operations.RecordsQuery(context.Background(), s, nil, operations.RecordsQueryInput{App: 1})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -193,7 +193,7 @@ func TestRecordsQuery_APIErrorPassThrough(t *testing.T) {
 			return nil, apiErr
 		},
 	}
-	_, err := operations.RecordsQuery(context.Background(), s, operations.RecordsQueryInput{App: 1})
+	_, err := operations.RecordsQuery(context.Background(), s, nil, operations.RecordsQueryInput{App: 1})
 	var got *kintoneapi.APIError
 	if !errors.As(err, &got) {
 		t.Fatalf("expected APIError, got %v", err)
@@ -212,7 +212,7 @@ func TestRecordsQuery_ContextCancel(t *testing.T) {
 			return nil, ctx.Err()
 		},
 	}
-	_, err := operations.RecordsQuery(ctx, s, operations.RecordsQueryInput{App: 1})
+	_, err := operations.RecordsQuery(ctx, s, nil, operations.RecordsQueryInput{App: 1})
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err=%v want context.Canceled", err)
 	}

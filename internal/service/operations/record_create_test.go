@@ -21,7 +21,7 @@ func TestRecordCreate_SingleRecord(t *testing.T) {
 		App:    42,
 		Record: map[string]any{"name": map[string]any{"value": "x"}},
 	}
-	out, err := operations.RecordCreate(context.Background(), s, in)
+	out, err := operations.RecordCreate(context.Background(), s, nil, in)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestRecordCreate_MultipleRecords(t *testing.T) {
 			{"b": map[string]any{"value": "2"}},
 		},
 	}
-	out, err := operations.RecordCreate(context.Background(), s, in)
+	out, err := operations.RecordCreate(context.Background(), s, nil, in)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestRecordCreate_Conflicting(t *testing.T) {
 			return nil, nil
 		},
 	}
-	_, err := operations.RecordCreate(context.Background(), s, operations.RecordCreateInput{
+	_, err := operations.RecordCreate(context.Background(), s, nil, operations.RecordCreateInput{
 		App: 1, Record: map[string]any{"x": 1}, Records: []map[string]any{{"y": 2}},
 	})
 	if !errors.Is(err, operations.ErrConflictingRecords) {
@@ -84,7 +84,7 @@ func TestRecordCreate_Conflicting(t *testing.T) {
 // OC-4: 両方未指定 → ErrEmptyRecords
 func TestRecordCreate_Empty(t *testing.T) {
 	s := &stubAPI{}
-	_, err := operations.RecordCreate(context.Background(), s, operations.RecordCreateInput{App: 1})
+	_, err := operations.RecordCreate(context.Background(), s, nil, operations.RecordCreateInput{App: 1})
 	if !errors.Is(err, operations.ErrEmptyRecords) {
 		t.Errorf("err=%v", err)
 	}
@@ -93,7 +93,7 @@ func TestRecordCreate_Empty(t *testing.T) {
 // OC-5: App=0 → ErrInvalidApp
 func TestRecordCreate_InvalidApp(t *testing.T) {
 	s := &stubAPI{}
-	_, err := operations.RecordCreate(context.Background(), s, operations.RecordCreateInput{
+	_, err := operations.RecordCreate(context.Background(), s, nil, operations.RecordCreateInput{
 		App: 0, Record: map[string]any{"x": 1},
 	})
 	if !errors.Is(err, operations.ErrInvalidApp) {
@@ -109,7 +109,7 @@ func TestRecordCreate_APIErrorPassThrough(t *testing.T) {
 			return nil, apiErr
 		},
 	}
-	_, err := operations.RecordCreate(context.Background(), s, operations.RecordCreateInput{
+	_, err := operations.RecordCreate(context.Background(), s, nil, operations.RecordCreateInput{
 		App: 1, Record: map[string]any{"x": 1},
 	})
 	var got *kintoneapi.APIError
@@ -125,7 +125,7 @@ func TestRecordCreate_IDParseError(t *testing.T) {
 			return &kintoneapi.InsertRecordsResponse{IDs: []string{"abc"}, Revisions: []string{"1"}}, nil
 		},
 	}
-	_, err := operations.RecordCreate(context.Background(), s, operations.RecordCreateInput{
+	_, err := operations.RecordCreate(context.Background(), s, nil, operations.RecordCreateInput{
 		App: 1, Record: map[string]any{"x": 1},
 	})
 	if err == nil {
