@@ -1,0 +1,95 @@
+package server
+
+import (
+	"errors"
+	"fmt"
+)
+
+// AuthMode は MCP server 層の認証要否を表す。
+//
+// kintone MCP は HTTP/SSE remote 公開時のリクエスト前段保護で使う。
+// stdio mode（cli 経由）は AuthModeNone 固定。
+type AuthMode string
+
+const (
+	// AuthModeNone は認証なし。stdio または信頼済み LAN での HTTP 公開で使う。
+	AuthModeNone AuthMode = "none"
+	// AuthModeOIDC は idproxy v0.4.2 によるリクエスト認証。
+	AuthModeOIDC AuthMode = "oidc"
+)
+
+// AuthZMode は upstream kintone への認証方式（Authorization）。
+//
+// service/api.AuthZMode と同じ値域だが、cli/server 層の設定として独立に保持する
+// （層をまたぐ struct 共有を避ける、内部 enum の重複は許容する）。
+type AuthZMode string
+
+const (
+	// AuthZModeAPIToken は API Token 認証（既存挙動）。
+	AuthZModeAPIToken AuthZMode = "api-token"
+	// AuthZModeOAuth は OAuth 認証（M09）。
+	AuthZModeOAuth AuthZMode = "oauth"
+)
+
+// ParseAuthMode は文字列から AuthMode を返す。空文字は AuthModeNone。
+func ParseAuthMode(s string) (AuthMode, error) {
+	switch s {
+	case "", "none":
+		return AuthModeNone, nil
+	case "oidc":
+		return AuthModeOIDC, nil
+	default:
+		return "", fmt.Errorf("server: unknown auth mode %q (allowed: none, oidc)", s)
+	}
+}
+
+// ParseAuthZMode は文字列から AuthZMode を返す。空文字は AuthZModeAPIToken。
+func ParseAuthZMode(s string) (AuthZMode, error) {
+	switch s {
+	case "", "api-token":
+		return AuthZModeAPIToken, nil
+	case "oauth":
+		return AuthZModeOAuth, nil
+	default:
+		return "", fmt.Errorf("server: unknown authz mode %q (allowed: api-token, oauth)", s)
+	}
+}
+
+// ServeMode は MCP server の起動モードを表す（stdio / http）。
+type ServeMode int
+
+const (
+	// ServeModeStdio は stdio JSON-RPC モード。listen 空のとき。
+	ServeModeStdio ServeMode = iota
+	// ServeModeHTTP は HTTP/Streamable モード。listen 指定あり。
+	ServeModeHTTP
+)
+
+// PickServeMode は --listen フラグから ServeMode を決定する。
+func PickServeMode(listenAddr string) ServeMode {
+	if listenAddr == "" {
+		return ServeModeStdio
+	}
+	return ServeModeHTTP
+}
+
+// ValidateModes は (mode, auth, authz) の組み合わせを検証する。
+//
+//   - stdio + auth=oidc は不正（stdio に HTTP 認証は不要かつ不可能）
+//   - http + auth=oidc + authz=api-token は許容（multi-user だが共通 API Token）
+func ValidateModes(serve ServeMode, auth AuthMode, authz AuthZMode) error {
+	if serve == ServeModeStdio && auth == AuthModeOIDC {
+		return errors.New("server: AuthMode=oidc is not supported on stdio (use --listen for HTTP mode)")
+	}
+	switch authz {
+	case AuthZModeAPIToken, AuthZModeOAuth:
+	default:
+		return fmt.Errorf("server: invalid AuthZMode %q", authz)
+	}
+	switch auth {
+	case AuthModeNone, AuthModeOIDC:
+	default:
+		return fmt.Errorf("server: invalid AuthMode %q", auth)
+	}
+	return nil
+}

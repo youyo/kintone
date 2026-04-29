@@ -456,7 +456,22 @@ $ kintone cache clear
 ## MCP サーバー（`kintone mcp serve`）
 
 LLM クライアント（Claude Desktop など）から kintone を操作するための
-MCP（Model Context Protocol）サーバーを stdio JSON-RPC モードで起動します。
+MCP（Model Context Protocol）サーバーを起動します。
+
+### モード
+
+- `--listen` 未指定: **stdio JSON-RPC**（既定。Claude Desktop 等の子プロセス起動向け）
+- `--listen :8080`: **HTTP / Streamable**（remote MCP・複数クライアントで共有）
+
+### 認証フラグ
+
+| フラグ / 環境変数 | 値 | 既定 | 役割 |
+|---|---|---|---|
+| `--listen` / `KINTONE_MCP_LISTEN_ADDR` | `host:port` | 空 | 空で stdio、値で HTTP |
+| `--auth` / `KINTONE_MCP_AUTH_MODE` | `none` / `oidc` | `none` | リクエスト前段の認証 |
+| `--authz` / `KINTONE_MCP_AUTHZ_MODE` | `api-token` / `oauth` | `api-token` | upstream kintone への認証 |
+
+### stdio + API Token（既存・後方互換）
 
 ```bash
 $ KINTONE_DOMAIN=example.cybozu.com \
@@ -464,6 +479,36 @@ $ KINTONE_DOMAIN=example.cybozu.com \
   KINTONE_API_TOKEN=xxxx \
   kintone mcp serve
 ```
+
+### HTTP + OIDC + multi-user（M10 から）
+
+`auth=oidc` 時は [github.com/youyo/idproxy](https://github.com/youyo/idproxy) v0.4.2 を組み込み、
+リクエストごとに OIDC ベースの Bearer JWT を検証して `principal_id = "<issuer>:<sub>"` を抽出します。
+upstream kintone への OAuth トークンは事前に各ユーザーが
+`kintone auth login --oauth --principal-id "<issuer>:<sub>"` で TokenStore に登録しておく必要があります。
+
+```bash
+$ KINTONE_DOMAIN=example.cybozu.com \
+  KINTONE_AUTH=oauth \
+  KINTONE_OAUTH_CLIENT_ID=... \
+  KINTONE_OAUTH_CLIENT_SECRET=... \
+  \
+  KINTONE_MCP_OIDC_ISSUER=https://accounts.google.com \
+  KINTONE_MCP_OIDC_CLIENT_ID=... \
+  KINTONE_MCP_OIDC_CLIENT_SECRET=... \
+  KINTONE_MCP_EXTERNAL_URL=https://mcp.example.com \
+  KINTONE_MCP_COOKIE_SECRET=$(openssl rand -hex 32) \
+  \
+  kintone mcp serve --listen :8080 --auth oidc --authz oauth
+```
+
+エンドポイント:
+- `POST /mcp` — Streamable HTTP transport（MCP クライアントからのメイン呼び出し）
+- `/login`, `/callback`, `/select`, `/.well-known/*`, `/authorize`, `/token`, `/register` — idproxy 予約パス
+
+> **MVP 範囲**: M10 では idproxy の SigningKey は起動時に ephemeral 生成されます（再起動で発行済み JWT が無効化）。永続鍵対応は M11+ 予定。
+> **プロビジョニング**: 各ユーザーの kintone refresh_token は事前 CLI ログインで TokenStore に登録します。MCP 内からの自動 OAuth 誘導は M11+ の対象です。
+
 
 提供する 6 つの tools:
 
@@ -504,8 +549,8 @@ LLM 側から `JSON.parse` するだけで CLI と同じ意味論で結果を扱
 }
 ```
 
-> 認証モードは現在 `api-token` のみ対応（MCP サーバーとして起動する場合）。
-> multi-user remote サーバーは M10 以降で対応予定です。
+> stdio モードでは認証モードは `api-token` / `oauth`（単一ユーザー）に対応。
+> HTTP + OIDC による multi-user remote MCP は M10 から対応（上記参照）。
 > CLI / 単一ユーザーの OAuth 認証は `kintone auth login --oauth` で利用可能です（M09 以降）。
 
 ## JSON 出力規約

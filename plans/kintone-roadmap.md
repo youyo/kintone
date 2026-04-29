@@ -12,9 +12,9 @@
 | ステータス | 進行中（M09 完了） |
 
 ## Current Focus
-- **マイルストーン**: M10: idproxy + multi-user MCP（remote/oidc）
-- **直近の完了**: M09 — OAuth 認証 + 自動更新（feat/m09-oauth-auth ブランチ）
-- **次のアクション**: M10 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
+- **マイルストーン**: M11: completion + Docker + GoReleaser リリース
+- **直近の完了**: M10 — idproxy + multi-user MCP（feat/m10-idproxy-multiuser-mcp ブランチ）
+- **次のアクション**: M11 着手（`/devflow:plan` で詳細計画 → `/devflow:implement`）
 
 ## Progress
 
@@ -132,14 +132,18 @@
 - ブランチ: feat/m09-oauth-auth（main への merge 待ち）
 
 ### M10: idproxy + multi-user MCP（remote/oidc）
-- [ ] internal/idproxy/{provider.go, oidc.go, *_test.go}
-- [ ] principal_id = provider:sub
-- [ ] MCP Auth: none / oidc
-- [ ] MCP AuthZ: oauth / api-token
-- [ ] KINTONE_MCP_AUTH_MODE / KINTONE_MCP_AUTHZ_MODE
-- [ ] HTTP/SSE remote MCP サーバー
-- [ ] multi-user TokenStore 連携
-- 詳細: 着手時生成
+- [x] internal/idproxy/{config.go, principal.go, middleware.go, *_test.go}（idproxy v0.4.2 の thin wrapper）
+- [x] principal_id = provider:sub（`User.Issuer + ":" + User.Subject`）
+- [x] MCP Auth: none / oidc（`server.ParseAuthMode` + `ValidateModes`）
+- [x] MCP AuthZ: oauth / api-token（`server.ParseAuthZMode`）
+- [x] KINTONE_MCP_AUTH_MODE / KINTONE_MCP_AUTHZ_MODE / KINTONE_MCP_LISTEN_ADDR
+- [x] HTTP/Streamable remote MCP サーバー（`mcp/server/http.go`、SSE は M11+）
+- [x] multi-user TokenStore 連携（`service/api/principal.go` の `PrincipalAPIFactory`）
+- [x] 既存 stdio + auth=none + authz=api-token は完全後方互換
+- [x] go test -race ./... 全 21 パッケージ pass
+- [x] 新規 lint 違反 0（既存 transport.go errcheck 2 件は M11 polish 対象として継続）
+- 詳細: plans/kintone-m10-idproxy-multiuser-mcp.md
+- ブランチ: feat/m10-idproxy-multiuser-mcp（main への merge 待ち）
 
 ### M11: completion + Docker + GoReleaser リリース
 - [ ] CLI: `kintone completion {bash|zsh|fish|powershell}`
@@ -175,3 +179,4 @@
 | 2026-04-29 18:10 | 進捗 | M07 完了（feat/m07-sqlite-cache-tokenstore ブランチ）。modernc.org/sqlite v1.50.0 を採用、`internal/cache`（SQLite キャッシュ層・TTL・パス解決）と `internal/tokenstore`（OAuth トークン保存）を TDD で実装。`CachingAPI` decorator（service/api）で `GetApp` / `GetAppFormFields` / `ListApps` にキャッシュを注入。CLI に `kintone cache clear / stats` サブコマンドを追加。`KINTONE_CACHE_DISABLE=1` で無効化対応。全テスト pass（cache 76.2% / tokenstore 79.0% / service/api 88.9%）、新規 lint 違反 0。Current Focus を M08 に更新 |
 | 2026-04-29 18:50 | 進捗 | M08 完了（feat/m08-resolver ブランチ）。`internal/resolver` パッケージで App / Field 名前解決を TDD で実装（coverage 97.8%）。App: `ID 直接 → code 完全一致 → name 完全一致 → name 部分一致`、Field: `code → label 完全一致 → label 部分一致`、各段階でヒットしたら即 return（fallback しない）。operations 層に `AppRef` / `UpdateKeyFieldRef` フィールドを追加し、resolver 引数（nil 許容）でハイブリッド解決（既存 `App int64` 直指定経路は完全後方互換）。CLI 全コマンドに `--app-ref` / `--update-key-field-ref` を追加、MCP 全 tools に `app_ref` / `update_key_field_ref` を追加（`app: required` を外す）。`RESOLVER_APP_NOT_FOUND` / `RESOLVER_APP_AMBIGUOUS` 等のエラーコードと `details.candidates` を CLI/facade 両方にミラー実装。CachingAPI 経由で apps/fields のキャッシュを共有（resolver 専用キャッシュは持たない）。全テスト pass（resolver 97.8% / operations 98.2% / cli 85.2% / cli/api 72.1% / cli/ops 70.9% / facade 79.6%）、新規 lint 違反 0。Current Focus を M09 に更新 |
 | 2026-04-29 23:00 | 進捗 | M09 完了（feat/m09-oauth-auth ブランチ）。`internal/auth/oauth` パッケージで OAuth 2.0 Authorization Code + PKCE フローを TDD で実装（coverage 88.3%）。loopback callback サーバ（sync.Once + graceful shutdown）/ PKCE S256（crypto/rand）/ state 検証（subtle.ConstantTimeCompare）/ refresh_token 自動更新（skew 60s + sync.Mutex 並行制御）/ OS 別ブラウザ起動（darwin/linux/windows）。`kintoneapi.NewFromResolvedWithAuth` を新設し依存方向を維持。CLI に `kintone auth login --oauth --principal-id <id>` / `auth status` / `auth logout` を追加。config に `KINTONE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URL/SCOPES` 環境変数を追加、`config show` で client_secret を `***` マスク。TokenStore（M07 既存基盤）を本格利用。全テスト pass（auth/oauth 88.3% / cli/auth 74.1% / cli 86.7%）、新規 lint 違反 0。Current Focus を M10 に更新 |
+| 2026-04-30 00:50 | 進捗 | M10 完了（feat/m10-idproxy-multiuser-mcp ブランチ）。`github.com/youyo/idproxy` v0.4.2 を採用し thin wrapper（`internal/idproxy`）で kintone Principal context へ正規化。HTTP/Streamable transport を `internal/mcp/server/http.go` に追加し、`mark3labs/mcp-go` v0.49.0 の `NewStreamableHTTPServer` で /mcp を提供。`kintone mcp serve --listen :8080 --auth oidc --authz oauth` で multi-user remote MCP 起動が可能に。`service/api/PrincipalAPIFactory` で per-request にユーザー別 TokenStore（M07 基盤）を引く設計。SSE transport は仕様 2025-03-26 で非推奨方向のため M11+ に明示移動。advisor の指摘 3 点（mcp-go API 検証 / principalFromUser 単体テスト / プロビジョニングモデル明記）を計画に反映後 TDD で実装。全 21 パッケージ test pass（race 検出なし）、新規 lint 違反 0、既存 stdio + auth=none + authz=api-token は完全後方互換。Current Focus を M11 に更新 |

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト現状
 
-**M09 完了済み**。M10（idproxy + multi-user MCP）が次のマイルストーン。
+**M10 完了済み**。M11（completion + Docker + GoReleaser リリース）が次のマイルストーン。
 
 - Go 1.26、module: `github.com/youyo/kintone`
 - 動作する CLI: `version` / `config show|init` / `api {records,record,app} ...` / `ops {record create|update|delete, app describe}` / `mcp serve`（M06）/ `cache clear|stats`（M07）/ 全コマンドに `--app-ref` / `--update-key-field-ref` で名前解決（M08）/ **`auth login --oauth` / `auth status` / `auth logout`（M09）**
@@ -17,7 +17,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `internal/kintoneapi` — net/http 薄ラッパー REST クライアント + **`NewFromResolvedWithAuth`**（M09）
   - `internal/service/api` — `kintoneapi` の薄い透過層 + `CachingAPI` decorator（M07）
   - `internal/service/operations` — LLM 向け抽象化（M08 で `*Ref` フィールド + `resolver` 引数追加）
-  - `internal/mcp/server` — mark3labs/mcp-go v0.49.0 の薄いラッパー（stdio 起動）
+  - `internal/mcp/server` — mark3labs/mcp-go v0.49.0 の薄いラッパー（stdio + **HTTP/Streamable transport** M10 / Auth/AuthZ モード判定 M10）
+  - **`internal/idproxy`** — `github.com/youyo/idproxy` v0.4.2 の thin wrapper（OIDC リクエスト認証 + `Principal` context 注入、M10）
+  - **`internal/service/api/PrincipalAPIFactory`** — per-request にユーザー別 TokenStore からトークンを引いて API を構築（M10）
   - `internal/mcp/facade` — 6 つの MCP tools ハンドラと `MapError`
   - `internal/cache` — SQLite ベースのキャッシュ層（modernc.org/sqlite v1.50.0 / TTL 管理）（M07）
   - `internal/tokenstore` — OAuth アクセストークン保存（Key=Domain+PrincipalID+AuthType）（M07 / M09 で本格利用）
@@ -147,4 +149,6 @@ go run ./cmd/kintone version       # JSON 出力で動作確認
 - M06 詳細計画: `plans/kintone-m06-mcp-server-facade.md`
 - M07 詳細計画: `plans/kintone-m07-sqlite-cache-tokenstore.md`
 - M08 詳細計画: `plans/kintone-m08-resolver.md`
-- M09 以降の詳細計画は着手時に `/devflow:plan` で生成する
+- M09 詳細計画: `plans/kintone-m09-oauth-auth.md`
+- M10 詳細計画: `plans/kintone-m10-idproxy-multiuser-mcp.md`
+- M11 以降の詳細計画は着手時に `/devflow:plan` で生成する
