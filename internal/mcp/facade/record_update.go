@@ -33,7 +33,7 @@ func recordUpdateTool() mcp.Tool {
 			mcp.Description("updateKey 用の値（文字列）。update_key_field と併用。"),
 		),
 		mcp.WithNumber("revision",
-			mcp.Description("楽観ロック用 revision。-1 で省略相当（kintone の挙動に委ねる）。"),
+			mcp.Description("楽観ロック用 revision（任意・未指定で省略）。"),
 		),
 		mcp.WithObject("record",
 			mcp.Required(),

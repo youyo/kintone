@@ -3,7 +3,6 @@ package facade_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"reflect"
 	"testing"
 
@@ -146,6 +145,3 @@ func TestAppsSearch_BadIDs(t *testing.T) {
 		t.Errorf("code=%s", e.Error.Code)
 	}
 }
-
-// not-used: avoid unused import warnings if helpers are stripped
-var _ = errors.New

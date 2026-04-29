@@ -1,7 +1,6 @@
 package facade_test
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -36,8 +35,6 @@ func TestRecordDelete_OK(t *testing.T) {
 		!reflect.DeepEqual(m.gotDelete.Revisions, []int64{1, 1}) {
 		t.Errorf("got=%+v", m.gotDelete)
 	}
-	// API.DeleteRecords は呼ばれたが空エラー（mock デフォルト）→ 成功扱い
-	_ = context.Background
 }
 
 // FX-2: ids 空
