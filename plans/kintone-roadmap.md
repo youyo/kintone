@@ -8,14 +8,13 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-04-29 23:00 |
-| ステータス | 進行中（M09 完了） |
+| 最終更新 | 2026-05-01 09:50 |
+| ステータス | 進行中（M11 完了 / M12 Phase 0-1 進行中） |
 
 ## Current Focus
-- **マイルストーン**: 全 11 マイルストーン完了 / リリース準備完了
-- **直近の完了**: M11 — completion + Docker + GoReleaser（feat/m11-completion-docker-release ブランチ）
-- **次のアクション**: main へ merge → タグ push（`git tag v0.1.0 && git push origin v0.1.0`）で GoReleaser ワークフロー起動。
-  事前準備として `youyo/homebrew-tap` リポジトリ作成と `HOMEBREW_TAP_GITHUB_TOKEN` Secret 登録が必要
+- **マイルストーン**: M12（統合 Storage バックエンド）Phase 0-1 完了
+- **直近の完了**: M12 Phase 0（事実確認 + 決定ドキュメント 3 本）+ Phase 1（internal/store 骨格 + memory backend + Container/Factory + slog 基盤）
+- **次のアクション**: Phase 2（SQLite backend）→ Phase 3-9 を順次実施。詳細は `plans/binary-imagining-lemur.md` を参照
 
 ## Progress
 
@@ -157,6 +156,22 @@
 - 詳細: plans/kintone-m11-completion-docker-release.md
 - ブランチ: feat/m11-completion-docker-release（main への merge 待ち）
 
+### M12: 統合 Storage バックエンド（進行中）
+4 backend (Memory + SQLite + Redis + DynamoDB) を 1 つの `internal/store` パッケージに統合。kintone TokenStore + Cache + OIDC SigningKey + idproxy 状態を同一 backend に格納。
+- [x] Phase 0: 事実確認 + 決定ドキュメント（`docs/decisions/0001-sqlite-pool.md` / `0002-idproxy-store-fact-finding.md` / `0003-interface-compat.md`）
+- [x] Phase 1: `internal/store` 骨格 + Memory backend + Container/Factory + `internal/output/logger.go`（slog 基盤）+ goleak 検証
+- [ ] Phase 2: SQLite backend（kintone.db のみ、modernc.org/sqlite + WAL + busy_timeout）
+- [ ] Phase 3: SigningKey 永続化 + idproxy.Store 統合（auth=oidc 軸 fail-fast）
+- [ ] Phase 4: Redis backend
+- [ ] Phase 5: DynamoDB backend（GSI1 + GSI2）
+- [ ] Phase 6: CLI/MCP 配線（Wave A/B、Container ライフサイクル、エラー envelope）
+- [ ] Phase 7: 旧 `internal/tokenstore` / `internal/cache` 削除
+- [ ] Phase 8: `kintone store init` コマンド
+- [ ] Phase 8.5: E2E ハーネス（OIDC stub + kintone-fake + CI matrix）
+- [ ] Phase 9: ドキュメント更新
+- 詳細: plans/binary-imagining-lemur.md
+- ブランチ: feat-m12-unified-storage-phase01
+
 ## Blockers
 なし
 
@@ -169,6 +184,10 @@
 | 4 | 垂直スライス進行（M1 ごとに動く成果物） | 大規模仕様に対し早期動作確認とフィードバック反映を優先 | 2026-04-29 |
 | 5 | API Token を先行実装、OAuth/idproxy は後段 | 動作確認が早期に可能・実装難易度を平準化 | 2026-04-29 |
 | 6 | キャッシュ/Resolver は M7-M8 で導入 | データ整合性問題を避けるため CLI/MCP の主要機能が動作確認後 | 2026-04-29 |
+| 7 | M12 統合 Storage は同一 backend で kintone と idproxy を論理分離 | 工数最小・upstream 追従容易・設定 1 つの体感 | 2026-05-01 |
+| 8 | M12 SQLite は同ディレクトリ・2 ファイル分離（kintone.db + idproxy.db）| idproxy v0.4.2 の `New(path)` API 制約により *sql.DB 共有不可（ADR 0001） | 2026-05-01 |
+| 9 | M12 DynamoDB は upstream が GSI 不使用のため kintone 側で GSI1/GSI2 を追加し共存 | テーブル分離より配布シンプル（ADR 0002）| 2026-05-01 |
+| 10 | M12 backend dispatch は register パターン（caller blank import 必須）| 循環 import 回避のため | 2026-05-01 |
 
 ## Changelog
 | 日時 | 種別 | 内容 |
@@ -184,4 +203,5 @@
 | 2026-04-29 18:50 | 進捗 | M08 完了（feat/m08-resolver ブランチ）。`internal/resolver` パッケージで App / Field 名前解決を TDD で実装（coverage 97.8%）。App: `ID 直接 → code 完全一致 → name 完全一致 → name 部分一致`、Field: `code → label 完全一致 → label 部分一致`、各段階でヒットしたら即 return（fallback しない）。operations 層に `AppRef` / `UpdateKeyFieldRef` フィールドを追加し、resolver 引数（nil 許容）でハイブリッド解決（既存 `App int64` 直指定経路は完全後方互換）。CLI 全コマンドに `--app-ref` / `--update-key-field-ref` を追加、MCP 全 tools に `app_ref` / `update_key_field_ref` を追加（`app: required` を外す）。`RESOLVER_APP_NOT_FOUND` / `RESOLVER_APP_AMBIGUOUS` 等のエラーコードと `details.candidates` を CLI/facade 両方にミラー実装。CachingAPI 経由で apps/fields のキャッシュを共有（resolver 専用キャッシュは持たない）。全テスト pass（resolver 97.8% / operations 98.2% / cli 85.2% / cli/api 72.1% / cli/ops 70.9% / facade 79.6%）、新規 lint 違反 0。Current Focus を M09 に更新 |
 | 2026-04-29 23:00 | 進捗 | M09 完了（feat/m09-oauth-auth ブランチ）。`internal/auth/oauth` パッケージで OAuth 2.0 Authorization Code + PKCE フローを TDD で実装（coverage 88.3%）。loopback callback サーバ（sync.Once + graceful shutdown）/ PKCE S256（crypto/rand）/ state 検証（subtle.ConstantTimeCompare）/ refresh_token 自動更新（skew 60s + sync.Mutex 並行制御）/ OS 別ブラウザ起動（darwin/linux/windows）。`kintoneapi.NewFromResolvedWithAuth` を新設し依存方向を維持。CLI に `kintone auth login --oauth --principal-id <id>` / `auth status` / `auth logout` を追加。config に `KINTONE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URL/SCOPES` 環境変数を追加、`config show` で client_secret を `***` マスク。TokenStore（M07 既存基盤）を本格利用。全テスト pass（auth/oauth 88.3% / cli/auth 74.1% / cli 86.7%）、新規 lint 違反 0。Current Focus を M10 に更新 |
 | 2026-04-30 00:50 | 進捗 | M10 完了（feat/m10-idproxy-multiuser-mcp ブランチ）。`github.com/youyo/idproxy` v0.4.2 を採用し thin wrapper（`internal/idproxy`）で kintone Principal context へ正規化。HTTP/Streamable transport を `internal/mcp/server/http.go` に追加し、`mark3labs/mcp-go` v0.49.0 の `NewStreamableHTTPServer` で /mcp を提供。`kintone mcp serve --listen :8080 --auth oidc --authz oauth` で multi-user remote MCP 起動が可能に。`service/api/PrincipalAPIFactory` で per-request にユーザー別 TokenStore（M07 基盤）を引く設計。SSE transport は仕様 2025-03-26 で非推奨方向のため M11+ に明示移動。advisor の指摘 3 点（mcp-go API 検証 / principalFromUser 単体テスト / プロビジョニングモデル明記）を計画に反映後 TDD で実装。全 21 パッケージ test pass（race 検出なし）、新規 lint 違反 0、既存 stdio + auth=none + authz=api-token は完全後方互換。Current Focus を M11 に更新 |
+| 2026-05-01 09:50 | 進捗 | M12 Phase 0-1 完了（feat-m12-unified-storage-phase01 ブランチ）。**Phase 0**: idproxy v0.4.2 の SQLite/Redis/DynamoDB Store 構築 API、modernc.org/sqlite v1.50.0 の DSN 構文（`_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)`）と 2 Pool 並行挙動（5000 ops / 0 BUSY）を検証。新旧 interface 形状の互換性を確認し ADR 0001/0002/0003 として `docs/decisions/` に固定。DynamoDB は upstream に GSI が無いため kintone 側のみ GSI1/GSI2 を追加する方針で共存（テーブル共有維持）。**Phase 1**: `internal/store/{doc,errors,types,env,tokens,cache,signingkey,container,factory}.go` + `internal/store/memory/{tokens,cache,signingkey,idproxy_adapter,container,register}.go` + `internal/store/storetest/conformance.go` を TDD で実装。`Container` interface（`Tokens / CacheForDecorator / CacheForAdmin / SigningKey / IDProxyStore / LocationString / Close(ctx)`）+ context helper（`WithContainer` / `ContainerFromContext`）+ register パターンで factory dispatch（循環 import 回避、caller は blank import が必要）。`internal/output/logger.go` に slog ベースの stderr logger（`KINTONE_LOG_LEVEL` 制御）を新設。`go.uber.org/goleak v1.3.0` を依存追加し `Container.Close` 後の goroutine leak ゼロを検証。Conformance テストで TokenStore/CacheStore/SigningKeyStore の正常系・異常系を backend 横断的にカバー。code-reviewer 9 観点レビューで Critical 1 件（SA1019 deprecated `k1.D`）+ High 2 件（factory メッセージの phase 依存削除 + register 文書化）を修正。全 24 パッケージ test pass、`golangci-lint run` 違反 0、`gofmt` 差分 0。 |
 | 2026-04-30 01:05 | 進捗 | M11 完了（feat/m11-completion-docker-release ブランチ）。`internal/cli/completion` パッケージで `kintone completion {bash|zsh|fish|powershell}` を実装（cobra `Gen*Completion` ラップ、JSON envelope の例外として明示）。Dockerfile を multi-stage（`golang:1.26-alpine` → `gcr.io/distroless/static-debian12:nonroot` / CGO_ENABLED=0 / uid 65532）で作成、`.dockerignore` で context 最小化。`.goreleaser.yaml` で linux/{amd64,arm64} + darwin/{amd64,arm64} + windows/amd64 cross build、Homebrew Tap (`youyo/homebrew-tap`)、ghcr.io multi-arch manifest を構成（`goreleaser check` 通過）。`.github/workflows/release.yml` でタグ push 起動の goreleaser/goreleaser-action@v6 ワークフローを追加（actionlint クリア）。M10 持ち越し polish: transport.go errcheck を IIFE 形式 `defer func() { _ = resp.Body.Close() }()` で解消、`internal/mcp/facade.ToolDeps` に `APIResolver` interface 型 `Factory` フィールドを追加（オプショナル / 後方互換）、6 ハンドラを `resolveAPI(ctx, deps)` 共通ヘルパー経由に統一、`facade.MapError` に `serviceapi.ErrAuthRequired` → `AUTH_REQUIRED` マッピングを追加。README をインストール 4 方式 / 認証 3 方式 / completion / MCP セットアップ / リリース runbook で完備。全 22 パッケージ test pass（race 検出なし）、`golangci-lint run` 違反 0（既存 transport.go errcheck 2 件も解消）。**全 11 マイルストーン完了 / リリース準備完了**。 |
