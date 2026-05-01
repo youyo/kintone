@@ -7,6 +7,7 @@ require (
 	github.com/mark3labs/mcp-go v0.49.0
 	github.com/spf13/cobra v1.8.1
 	github.com/youyo/idproxy v0.4.2
+	go.uber.org/goleak v1.3.0
 	modernc.org/sqlite v1.50.0
 )
 
