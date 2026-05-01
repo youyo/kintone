@@ -211,7 +211,7 @@ func RunSigningKeyStoreConformance(t *testing.T, makeStore func() (store.Signing
 		if k1 != k2 {
 			t.Fatalf("LoadOrCreate should return the same key on repeated calls (k1=%p k2=%p)", k1, k2)
 		}
-		if k1 == nil || k1.PublicKey.Curve == nil {
+		if k1 == nil || k1.Curve == nil {
 			t.Fatalf("LoadOrCreate returned invalid key: %#v", k1)
 		}
 	})
