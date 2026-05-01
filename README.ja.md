@@ -5,7 +5,14 @@
 kintone API を操作するための CLI ツール / MCP サーバーです。
 全コマンドは LLM・パイプ処理に適した JSON 形式で結果を出力します。
 
-> **Status**: 全 11 マイルストーン完了。リリース準備済み（タグ push で GitHub Releases / Homebrew / ghcr.io へ自動配布）。
+## 特徴
+
+- **JSON 固定出力**: 成功時 `{"ok":true,"data":{...}}` / 失敗時 `{"ok":false,"error":{...}}` で統一。`jq` / LLM パイプライン連携が容易
+- **3 種類の認証**: API Token / OAuth 2.0（PKCE 対応）/ OIDC remote（idproxy 組み込み）
+- **MCP サーバー**: stdio / HTTP Streamable transport の両対応。Claude Desktop など LLM クライアントから直接 kintone を操作
+- **名前解決**: アプリ・フィールドを ID だけでなく code / name / label の部分一致でも参照可能
+- **SQLite キャッシュ**: アプリ・フィールド情報を 1 年 TTL でキャッシュし REST 呼び出しを削減
+- **クロスプラットフォーム配布**: Homebrew / Docker (multi-arch) / `go install` / GitHub Releases バイナリ
 
 ## インストール
 
@@ -17,8 +24,6 @@ kintone API を操作するための CLI ツール / MCP サーバーです。
 brew install youyo/tap/kintone
 ```
 
-> 事前に Homebrew Tap リポジトリ `youyo/homebrew-tap` が公開されている必要があります（リリース後に自動更新）。
-
 ### 2. Docker（multi-arch: amd64 / arm64）
 
 ```bash
@@ -26,13 +31,13 @@ docker pull ghcr.io/youyo/kintone:latest
 docker run --rm ghcr.io/youyo/kintone:latest version
 ```
 
-`~/.config/kintone` と `~/.cache/kintone` をマウントして使うと便利です:
+`~/.config/kintone` と `~/.local/state/kintone` をマウントして使うと便利です:
 
 ```bash
 docker run --rm -it \
   -v "$HOME/.config/kintone:/home/nonroot/.config/kintone" \
-  -v "$HOME/.cache/kintone:/home/nonroot/.cache/kintone" \
-  ghcr.io/youyo/kintone:latest api records --app 1
+  -v "$HOME/.local/state/kintone:/home/nonroot/.local/state/kintone" \
+  ghcr.io/youyo/kintone:latest api records get --app 1
 ```
 
 ### 3. `go install`
@@ -61,8 +66,6 @@ go build -o /usr/local/bin/kintone ./cmd/kintone
 | **API Token** | CLI 単発実行 / シングルユーザ MCP / シンプルな自動化 | `KINTONE_DOMAIN` + `KINTONE_API_TOKEN`（または config.toml） | `kintone api/ops/mcp serve`（既定） |
 | **OAuth 2.0** | ユーザー個別の権限で操作 / マルチユーザ | OAuth クライアント登録 + `kintone auth login --oauth --principal-id <id>` | `kintone api/ops ...`（自動的に保存トークンを使用） |
 | **OIDC remote (idproxy)** | リモート MCP サーバ + 複数ユーザ + ID プロバイダ連携 | OIDC Issuer / Client / Cookie Secret 等 | `kintone mcp serve --listen :8080 --auth oidc --authz oauth` |
-
-詳細は本 README の「API Token 認証」「OAuth 認証」「MCP サーバー」セクション参照。
 
 ## 使い方
 
@@ -139,8 +142,6 @@ $ kintone config show --profile dev
 |------|------|
 | `KINTONE_PROFILE` | 使用する profile 名 |
 | `KINTONE_CONFIG_PATH` | config.toml のパス |
-| `KINTONE_CACHE_PATH` | cache db のパス（デフォルト: `~/.cache/kintone/cache.db`、コンテナ: `/data/kintone/cache.db`） |
-| `KINTONE_CACHE_DISABLE` | `1` で SQLite キャッシュを無効化（API を毎回直叩き） |
 | `KINTONE_DOMAIN` | kintone ドメイン（例: `example.cybozu.com`） |
 | `KINTONE_AUTH` | 認証モード（`api-token` / `oauth`） |
 | `KINTONE_API_TOKEN` | API Token |
@@ -148,22 +149,168 @@ $ kintone config show --profile dev
 | `KINTONE_OAUTH_CLIENT_SECRET` | OAuth クライアントシークレット（config.toml より環境変数推奨） |
 | `KINTONE_OAUTH_REDIRECT_URL` | OAuth redirect URI（例: `http://127.0.0.1:18080/callback`）。kintone OAuth クライアント登録と完全一致させること |
 | `KINTONE_OAUTH_SCOPES` | OAuth スコープ（スペース区切り。省略時: `k:app_record:read k:app_record:write k:app_settings:read k:app_settings:write k:file:read k:file:write`） |
+| `KINTONE_STORE_BACKEND` | Storage バックエンド（`memory` / `sqlite` / `redis` / `dynamodb`。既定: `sqlite`） |
+| `KINTONE_STORE_SQLITE_DIR` | SQLite ファイルを置くディレクトリ（既定: `~/.local/state/kintone/`。`kintone.db` と `idproxy.db` を配置） |
+| `KINTONE_STORE_REDIS_URL` | Redis URL（DB index 含む。`redis://` または `rediss://`。backend=redis 時は必須） |
+| `KINTONE_STORE_REDIS_TLS` | `1` で `redis://` 接続に TLS を強制（`rediss://` は常時 TLS） |
+| `KINTONE_STORE_REDIS_PASSWORD` | Redis 認証パスワード（URL に含めない場合） |
+| `KINTONE_STORE_REDIS_INSECURE_PLAINTEXT` | `1` で非 localhost への `redis://` 平文接続を明示的に許可（既定: `0`。セキュリティ上の理由でデフォルト無効） |
+| `KINTONE_STORE_CACHE_BYPASS` | `1` でキャッシュのみ無効化（TokenStore / SigningKey は通常通り動作。`KINTONE_CACHE_DISABLE` の後継） |
+| `KINTONE_STORE_DYNAMODB_TABLE` | DynamoDB テーブル名（backend=dynamodb 時は必須） |
+| `KINTONE_STORE_DYNAMODB_REGION` | DynamoDB リージョン（AWS SDK のリージョン解決にフォールバック） |
+| `KINTONE_MCP_SIGNING_KEY_PEM` | OIDC JWT 署名鍵の PKCS#8 PEM 文字列（Storage より優先。本番の `auth=oidc` では必須） |
+| `KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE` | `1` で Storage への署名鍵自動生成を許可（dev / test 専用。本番非推奨） |
+| `KINTONE_LOG_LEVEL` | ログレベル（`debug` / `info` / `warn` / `error`。既定: `info`） |
+
+## Storage バックエンド
+
+kintone CLI/MCP は認証情報・キャッシュ・OIDC 状態を 1 つの Storage バックエンドに保管します。
+
+| Backend  | 用途                          | 主要 ENV                                              |
+|----------|-------------------------------|------------------------------------------------------|
+| memory   | dev / test                    | `KINTONE_STORE_BACKEND=memory`                       |
+| sqlite   | host / single-instance（既定）| `KINTONE_STORE_SQLITE_DIR=...`                       |
+| redis    | k8s / Fargate scale-out       | `KINTONE_STORE_REDIS_URL=rediss://...`               |
+| dynamodb | Lambda / serverless           | `KINTONE_STORE_DYNAMODB_TABLE=...`                   |
+
+全 backend で kintone TokenStore / Cache / OIDC SigningKey / idproxy session・refresh_token が
+1 接続で共存します（key prefix で論理分離。SQLite のみ同ディレクトリ・2 ファイル分離）。
+
+### Backend 別設定例
+
+```bash
+# Memory（dev / test）
+export KINTONE_STORE_BACKEND=memory
+
+# SQLite（既定）
+export KINTONE_STORE_BACKEND=sqlite
+export KINTONE_STORE_SQLITE_DIR=$HOME/.local/state/kintone
+
+# Redis（k8s / Fargate）
+export KINTONE_STORE_BACKEND=redis
+export KINTONE_STORE_REDIS_URL=rediss://prod-redis.example.com:6380/0
+export KINTONE_STORE_REDIS_PASSWORD=$REDIS_PASSWORD
+
+# DynamoDB（Lambda / serverless）
+export KINTONE_STORE_BACKEND=dynamodb
+export KINTONE_STORE_DYNAMODB_TABLE=kintone-prod
+export KINTONE_STORE_DYNAMODB_REGION=ap-northeast-1
+```
+
+### DynamoDB セットアップ
+
+事前にテーブルを作成してください:
+
+```bash
+aws dynamodb create-table --table-name kintone-prod \
+  --attribute-definitions \
+    AttributeName=pk,AttributeType=S \
+    AttributeName=gsi1pk,AttributeType=S AttributeName=gsi1sk,AttributeType=S \
+    AttributeName=gsi2pk,AttributeType=S AttributeName=gsi2sk,AttributeType=S \
+  --key-schema AttributeName=pk,KeyType=HASH \
+  --global-secondary-indexes '[
+    {"IndexName":"gsi1","KeySchema":[{"AttributeName":"gsi1pk","KeyType":"HASH"},{"AttributeName":"gsi1sk","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+    {"IndexName":"gsi2","KeySchema":[{"AttributeName":"gsi2pk","KeyType":"HASH"},{"AttributeName":"gsi2sk","KeyType":"RANGE"}],"Projection":{"ProjectionType":"KEYS_ONLY"}}
+  ]' \
+  --billing-mode PAY_PER_REQUEST
+
+aws dynamodb update-time-to-live --table-name kintone-prod \
+  --time-to-live-specification 'Enabled=true,AttributeName=ttl'
+
+# kintone CLI で検証:
+kintone store init dynamodb --table kintone-prod --region ap-northeast-1
+```
+
+最小 IAM ポリシー（Scan は不要、Query/BatchWriteItem のみ）:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem",
+      "dynamodb:Query", "dynamodb:BatchWriteItem", "dynamodb:DescribeTable",
+      "dynamodb:DescribeTimeToLive"
+    ],
+    "Resource": [
+      "arn:aws:dynamodb:*:*:table/kintone-prod",
+      "arn:aws:dynamodb:*:*:table/kintone-prod/index/*"
+    ]
+  }]
+}
+```
+
+### Redis 推奨 ACL（最小権限）
+
+```
+ACL SETUSER kintone on >password \
+    ~kintone:* ~idproxy:* \
+    +@read +@write +@string +@hash +@scripting -@admin -@dangerous
+```
+
+### MCP Secret 2 種
+
+`KINTONE_MCP_COOKIE_SECRET`（cookie 暗号化）と `KINTONE_MCP_SIGNING_KEY_PEM`（OIDC JWT 署名鍵）は
+Storage と独立に管理してください。`auth=oidc` で SigningKey が解決できない場合 startup を拒否します。
+
+dev/test では `KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE=1` で Storage 自動生成を許可できます
+（本番では非推奨。`KINTONE_MCP_SIGNING_KEY_PEM` の外部供給を推奨）。
+
+### Multi-user MCP の principal_id 規約
+
+OIDC を使う MCP HTTP サーバーで CLI 経由のトークンと共有したい場合、
+`kintone auth login --oauth --principal-id <issuer>:<sub>` 形式でプロビジョニングしてください。
+例: `--principal-id "https://accounts.google.com:1234567890"`
+
+### Memory backend の制約
+
+`KINTONE_STORE_BACKEND=memory` と `--auth oidc` の組み合わせは startup で拒否されます
+（`STORE_MEMORY_OIDC_FORBIDDEN`）。memory backend ではプロセス再起動で state が失われ、
+multi-replica 環境で session が孤立するためです。dev で `auth=oidc` を試す場合は
+`KINTONE_STORE_BACKEND=sqlite` + `KINTONE_STORE_SQLITE_DIR=$(mktemp -d)` を推奨します。
 
 ## API Token 認証
 
 `KINTONE_API_TOKEN` 環境変数または config.toml の `api_token` フィールドで API Token を指定します。
-`internal/auth` パッケージが `X-Cybozu-API-Token` ヘッダを自動付与します。
+`X-Cybozu-API-Token` ヘッダが自動付与されます。
 
-## OAuth 認証（M09）
+API Token の発行方法は [kintone REST API 共通仕様 — 認証](https://cybozu.dev/ja/kintone/docs/rest-api/overview/authentication/) を参照してください。
 
-kintone の OAuth 2.0 Authorization Code Grant + PKCE フローに対応しています。
+## OAuth 認証
+
+kintone の OAuth 2.0 Authorization Code Grant + PKCE（S256）フローに対応しています。
 `KINTONE_AUTH=oauth` に設定することで、API Token の代わりに OAuth アクセストークンが使用されます。
-アクセストークンの期限切れ（通常 1h）は自動検知し、リフレッシュトークンで透過的に更新します。
+アクセストークンの期限切れ（通常 1 時間）は自動検知し、リフレッシュトークンで透過的に更新します。
 
-### 事前設定
+### 事前準備（kintone 管理者作業）
 
-1. kintone 管理画面で OAuth クライアントを登録し、redirect URI に `http://127.0.0.1:<ポート>/callback` を設定する
-2. クライアント ID / シークレット / redirect URI を環境変数に設定する:
+OAuth を利用するには **cybozu.com 管理者による OAuth クライアント登録**が必須です。
+公式手順に従って以下を実施してください。
+
+1. **OAuth クライアントを追加**
+   cybozu.com 共通管理 > 外部サービス連携 > OAuth クライアント から登録します。
+   - 詳細手順: [cybozu developer network — OAuth クライアントを追加する](https://cybozu.dev/ja/common/docs/oauth-client/add-client/)
+   - cybozu.com ヘルプ: [OAuth クライアントを追加する](https://jp.cybozu.help/general/ja/admin/list_externalservices/add_oauth_client.html)
+
+2. **redirect URI を `http://127.0.0.1:<ポート>/callback` で登録**
+   ローカルループバック方式のため、本 CLI が起動するポートと完全一致させる必要があります（既定: `http://127.0.0.1:18080/callback`）。
+
+3. **必要なスコープを付与**
+   既定では以下を要求します。アプリ要件に応じて調整してください。
+   - `k:app_record:read` / `k:app_record:write`
+   - `k:app_settings:read` / `k:app_settings:write`
+   - `k:file:read` / `k:file:write`
+   - 利用可能なスコープ一覧: [cybozu developer network — kintone の OAuth スコープ](https://cybozu.dev/ja/common/docs/oauth-client/scope-kintone/)
+
+4. **OAuth クライアントを利用するユーザーを「利用者の設定」で許可**
+   登録直後はクライアント ID とシークレット、利用許可ユーザーがそれぞれ別画面で管理されています。利用者を明示的に許可しないと認可フローが失敗します。
+
+OAuth クライアント全体の概念は [cybozu developer network — OAuth クライアント](https://cybozu.dev/ja/common/docs/oauth-client/) に解説があります。
+
+### CLI 側の設定
+
+クライアント ID / シークレット / redirect URI を環境変数に設定します:
 
 ```bash
 export KINTONE_DOMAIN=example.cybozu.com
@@ -181,7 +328,7 @@ $ kintone auth login --oauth --principal-id oauth:alice
 
 - ブラウザが起動し kintone の認可画面が開きます
 - ユーザーが同意すると `http://127.0.0.1:<port>/callback` にリダイレクトされ、アクセストークンが取得されます
-- 取得されたトークンは `~/.cache/kintone/tokens.db` に保存されます（ファイル権限 0600）
+- 取得されたトークンは `~/.local/state/kintone/kintone.db` に保存されます（ファイル権限 0600）
 
 ブラウザが起動できない環境（SSH / CI）では `--no-browser` フラグで認可 URL を stderr に出力できます:
 
@@ -195,10 +342,9 @@ $ kintone auth login --oauth --principal-id oauth:alice --no-browser
 $ kintone auth login --oauth --principal-id oauth:bob
 ```
 
-> 注意: `--principal-id` は TokenStore のキーです。同一ドメインの別ユーザーは必ず異なる値を指定してください。
-> M10 (OIDC 対応) で自動取得に切り替わる予定です。
+> `--principal-id` は TokenStore のキーです。同一ドメインの別ユーザーは必ず異なる値を指定してください。
 
-### ログイン結果確認
+### ログイン状態の確認
 
 ```bash
 $ kintone auth status
@@ -232,24 +378,12 @@ $ kintone auth logout --all
 - `KINTONE_OAUTH_CLIENT_SECRET` は環境変数での管理を推奨します（config.toml への記載は非推奨）
 - `kintone config show` の出力で `oauth_client_secret` は `***` にマスクされます
 - `kintone auth status` の出力でアクセストークンは先頭 4 文字 + `...` + 末尾 4 文字にマスクされます
-- tokens.db はファイル権限 0600 で保存されますが、平文保存です（M11 で暗号化予定）
-- PKCE (S256) と CSRF state 検証を実施します（`crypto/rand` による生成、`subtle.ConstantTimeCompare` による検証）
-
-## kintoneapi クライアント
-
-`internal/kintoneapi` パッケージは `net/http` 薄ラッパーとして実装されています。
-
-- `Client`: ベース URL / auth / リトライ設定を保持する REST クライアント
-- `Transport`: `http.RoundTripper` ラッパー（認証ヘッダ付与・エラーパース）
-- `APIError`: kintone 標準エラー（`code` / `id` / `message` / `HTTPStatus` / `RetryAfter`）を構造化
-- エンドポイント: `GET /k/v1/records.json`, `/k/v1/record.json`, `/k/v1/app.json`, `/k/v1/app/form/fields.json`
-- Retry-After ヘッダ対応（429 レート制限時の待機時間を自動解析）
+- `kintone.db`（SQLite バックエンド）はファイル権限 0600 で保存されます（平文保存）
+- PKCE (S256) と CSRF state 検証を実施します（`crypto/rand` で生成、`subtle.ConstantTimeCompare` で検証）
 
 ## API サブコマンド（`kintone api ...`）
 
 kintone REST API を直接叩く透過コマンド群です。出力は JSON 固定で、LLM / `jq` 連携を想定しています。
-
-> 内部構造: `service/api` 層が REST エンドポイントを 1:1 で透過し、`service/operations` 層が LLM 向けに合成・整形します。CLI は `kintoneapi` を直接 import せず、必ず service 層を経由します。
 
 事前に環境変数で domain / API Token を渡してください:
 
@@ -265,7 +399,7 @@ export KINTONE_API_TOKEN=xxxxxxxxxxxxxxxxxxxx
 $ kintone api records get --app 1 --query 'name = "foo"' --field name --field age --total-count
 {"ok":true,"data":{"records":[{...}],"total_count":3}}
 
-# code / name / partial で App を指定可（M08 名前解決）
+# code / name / partial で App を指定可（名前解決）
 $ kintone api records get --app-ref sales --query 'createdAt > LAST_WEEK()'
 {"ok":true,"data":{"records":[{...}]}}
 ```
@@ -273,7 +407,7 @@ $ kintone api records get --app-ref sales --query 'createdAt > LAST_WEEK()'
 | フラグ | 型 | 必須 | 説明 |
 |--------|---|------|------|
 | `--app` | int64 | △ | kintone アプリ ID（数値直指定、`--app-ref` と排他） |
-| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
+| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他） |
 | `--query` | string | - | kintone クエリ言語 |
 | `--field` | string（複数指定可） | - | レスポンスを絞り込むフィールドコード |
 | `--total-count` | bool | - | true で `total_count` を含める |
@@ -303,7 +437,7 @@ $ kintone api app fields --app 1 --lang ja
 {"ok":true,"data":{"properties":{"name":{"type":"SINGLE_LINE_TEXT",...}},"revision":"5"}}
 ```
 
-### アプリ + フィールドの合成（operations 経由）
+### アプリ + フィールドの合成
 
 ```bash
 $ kintone api app describe --app 1 --lang ja
@@ -316,8 +450,6 @@ LLM がアプリ全体像を 1 回の呼び出しで把握できるよう、`app
 
 LLM 向けの意味付けされたレコード CRUD と app 記述。書き込み系は `--dry-run` で送信予定リクエスト body を検証できます。
 
-> 内部構造: `service/operations` 層が `service/api` 越しに kintoneapi を呼びます。
-> CLI は `kintoneapi` を直接 import せず、必ず service 層を経由します。
 > 書き込み系（POST/PUT/DELETE）はデフォルトで **リトライ無効**（多重作成リスク回避）です。
 
 ### レコード新規登録
@@ -343,13 +475,10 @@ $ kintone ops record create --app 1 --record-json '{"name":{"value":"foo"}}' --d
 | フラグ | 型 | 必須 | 説明 |
 |--------|---|------|------|
 | `--app` | int64 | △ | kintone アプリ ID（`--app-ref` と排他） |
-| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
+| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他） |
 | `--record-json` | string | △ | 単件レコード JSON |
 | `--records-json` | string | △ | 複数件レコード JSON 配列 |
 | `--dry-run` | bool | - | true で API を呼ばず送信予定 body を出力 |
-
-`--app` と `--app-ref` は **どちらか必須・両方指定は USAGE エラー**。
-`--record-json` と `--records-json` は **どちらか必須・両方指定は USAGE エラー**。
 
 ### レコード単件更新
 
@@ -372,18 +501,14 @@ $ kintone ops record update --app 1 --id 7 --revision 2 --record-json '{"name":{
 | フラグ | 型 | 必須 | 説明 |
 |--------|---|------|------|
 | `--app` | int64 | △ | kintone アプリ ID（`--app-ref` と排他） |
-| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
+| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他） |
 | `--id` | int64 | △ | 更新対象レコード ID |
 | `--update-key-field` | string | △ | updateKey: フィールドコード（`--update-key-field-ref` と排他） |
-| `--update-key-field-ref` | string | △ | updateKey: フィールド参照（label / partial、M08） |
+| `--update-key-field-ref` | string | △ | updateKey: フィールド参照（label / partial） |
 | `--update-key-value` | string | △ | updateKey: 値（updateKey 経路で必須） |
 | `--record-json` | string | ◎ | 更新内容 JSON |
 | `--revision` | int64 | - | 楽観ロック用 revision |
 | `--dry-run` | bool | - | 送信予定 body のみ出力 |
-
-`--app` と `--app-ref` は **どちらか必須・両方指定は USAGE エラー**。
-`--id` と `--update-key-*` は **排他**。どちらかが必須です。
-`--update-key-field` と `--update-key-field-ref` は **排他**。
 
 `--update-key-field-ref` を指定すると、まず App ID 解決後に label / partial で field code が解決されます。
 ambiguous 時は `RESOLVER_FIELD_AMBIGUOUS` で候補を `details.candidates` に返します。
@@ -409,7 +534,7 @@ $ kintone ops record delete --app 1 --id 7 --id 8 --dry-run
 | フラグ | 型 | 必須 | 説明 |
 |--------|---|------|------|
 | `--app` | int64 | △ | kintone アプリ ID（`--app-ref` と排他） |
-| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他、M08） |
+| `--app-ref` | string | △ | アプリ参照（数値文字列 / code / name / partial、`--app` と排他） |
 | `--id` | int64（複数指定可） | ◎ | 削除対象レコード ID（`--id 1 --id 2`） |
 | `--revision` | int64（複数指定可） | - | 楽観ロック用 revision（`--id` と同要素数） |
 | `--dry-run` | bool | - | 送信予定 body のみ出力 |
@@ -423,7 +548,7 @@ $ kintone ops app describe --app 1 --lang ja
 {"ok":true,"data":{"app":{"app_id":"1","name":"テスト",...},"fields":{...},"revision":"5"}}
 ```
 
-## 名前解決（Resolver / M08）
+## 名前解決（Resolver）
 
 CLI / MCP の `--app` 引数（および `--update-key-field`）に **数値 ID 以外**の参照を渡せます。
 
@@ -460,25 +585,16 @@ $ kintone ops record update --app-ref sales --update-key-field-ref 顧客名 --u
 
 ### キャッシュとの統合
 
-Resolver は `service/api.API`（M07 の CachingAPI でラップ済み）越しに `ListApps` / `GetFormFields` を呼びます。
+Resolver は内部で `ListApps` / `GetFormFields` を SQLite キャッシュ越しに呼び出します。
 1 年 TTL でキャッシュされるため、同じ ref を 2 回引いた場合の REST 呼び出しは 1 回。
 
-名前変更時の追従:
-- 1 年間は古い名前で resolve され続けるため、`kintone cache clear --scope=apps` で手動更新してください。
-
-### 後方互換
-
-既存の `--app <int>` 直指定は変更なしで動作します。
-MCP の `app: number` 引数も継続して受理します（`Required` のみ外し、`app_ref: string` を追加）。
-
----
+名前変更に追従するには `kintone cache clear` で手動更新してください。
 
 ## キャッシュ管理（`kintone cache ...`）
 
 kintone API の app / field 情報を SQLite にキャッシュし、繰り返しリクエストを削減します。
-TokenStore は OAuth アクセストークンを安全に保存・管理します。
 
-### キャッシュの統計確認
+### キャッシュ統計
 
 ```bash
 $ kintone cache stats
@@ -487,7 +603,7 @@ $ kintone cache stats
 
 DB ファイルが存在しない場合は `exists: false` の統計を返します。
 
-### キャッシュの削除
+### キャッシュ削除
 
 ```bash
 $ kintone cache clear
@@ -558,7 +674,7 @@ MCP（Model Context Protocol）サーバーを起動します。
 | `--auth` / `KINTONE_MCP_AUTH_MODE` | `none` / `oidc` | `none` | リクエスト前段の認証 |
 | `--authz` / `KINTONE_MCP_AUTHZ_MODE` | `api-token` / `oauth` | `api-token` | upstream kintone への認証 |
 
-### stdio + API Token（既存・後方互換）
+### stdio + API Token
 
 ```bash
 $ KINTONE_DOMAIN=example.cybozu.com \
@@ -567,9 +683,9 @@ $ KINTONE_DOMAIN=example.cybozu.com \
   kintone mcp serve
 ```
 
-### HTTP + OIDC + multi-user（M10 から）
+### HTTP + OIDC + multi-user
 
-`auth=oidc` 時は [github.com/youyo/idproxy](https://github.com/youyo/idproxy) v0.4.2 を組み込み、
+`auth=oidc` 時は [github.com/youyo/idproxy](https://github.com/youyo/idproxy) を組み込み、
 リクエストごとに OIDC ベースの Bearer JWT を検証して `principal_id = "<issuer>:<sub>"` を抽出します。
 upstream kintone への OAuth トークンは事前に各ユーザーが
 `kintone auth login --oauth --principal-id "<issuer>:<sub>"` で TokenStore に登録しておく必要があります。
@@ -593,11 +709,9 @@ $ KINTONE_DOMAIN=example.cybozu.com \
 - `POST /mcp` — Streamable HTTP transport（MCP クライアントからのメイン呼び出し）
 - `/login`, `/callback`, `/select`, `/.well-known/*`, `/authorize`, `/token`, `/register` — idproxy 予約パス
 
-> **MVP 範囲**: M10 では idproxy の SigningKey は起動時に ephemeral 生成されます（再起動で発行済み JWT が無効化）。永続鍵対応は M11+ 予定。
-> **プロビジョニング**: 各ユーザーの kintone refresh_token は事前 CLI ログインで TokenStore に登録します。MCP 内からの自動 OAuth 誘導は M11+ の対象です。
+> idproxy の SigningKey は `KINTONE_MCP_SIGNING_KEY_PEM`（env）または Storage から永続解決されます。`auth=oidc` 時に SigningKey が解決できない場合 startup を拒否します（`SIGNING_KEY_REQUIRED`）。dev では `KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE=1` で自動生成を許可できます。
 
-
-提供する 6 つの tools:
+### 提供する 6 つの tools
 
 | ツール名 | 説明 |
 |---------|------|
@@ -608,9 +722,8 @@ $ KINTONE_DOMAIN=example.cybozu.com \
 | `record_update` | レコード単件更新（id / update_key_* 排他、楽観ロック対応、`app`+`app_ref`、`update_key_field`+`update_key_field_ref` 排他） |
 | `record_delete` | レコード複数件削除（revisions 任意、`app` または `app_ref`） |
 
-`apps_search` 以外の全 tool は **M08 から `app_ref: string` 引数を追加**しました。
-`app: number` と `app_ref: string` は排他（どちらか必須）。
-`record_update` は `update_key_field_ref: string` も追加（label / partial で field code を解決）。
+`apps_search` 以外の全 tool は `app: number` と `app_ref: string` のいずれかを排他必須で受け付けます。
+`record_update` は `update_key_field_ref: string` も受け付けます（label / partial で field code を解決）。
 
 各 tool の出力は CLI と同じ JSON envelope（`{"ok":true,"data":{...}}` /
 `{"ok":false,"error":{...}}`）を `CallToolResult.Content[0].Text` に格納します。
@@ -637,8 +750,7 @@ LLM 側から `JSON.parse` するだけで CLI と同じ意味論で結果を扱
 ```
 
 > stdio モードでは認証モードは `api-token` / `oauth`（単一ユーザー）に対応。
-> HTTP + OIDC による multi-user remote MCP は M10 から対応（上記参照）。
-> CLI / 単一ユーザーの OAuth 認証は `kintone auth login --oauth` で利用可能です（M09 以降）。
+> HTTP + OIDC による multi-user remote MCP は上記参照。
 
 ## JSON 出力規約
 
@@ -661,10 +773,7 @@ $ kintone version | jq -r '.data.version'
 0.1.0
 ```
 
-## ロードマップ
-
-詳細は [plans/kintone-roadmap.md](plans/kintone-roadmap.md) を参照してください。
-全 11 マイルストーン完了済。
+例外: `kintone completion` および `kintone version --short` はシェル / 人間向けにプレーン文字列を出力します。
 
 ## リリース手順（メンテナ向け）
 
@@ -680,13 +789,6 @@ go test -race ./... && golangci-lint run ./...
 git tag v0.1.0
 git push origin v0.1.0
 ```
-
-事前準備（初回のみ）:
-
-- `youyo/homebrew-tap` リポジトリを GitHub に作成（空でよい）
-- リポジトリ Settings > Secrets > Actions に `HOMEBREW_TAP_GITHUB_TOKEN` を登録
-  （上記 Tap リポジトリへの `repo` 権限を持つ Personal Access Token）
-- ghcr.io への push は `GITHUB_TOKEN` の `packages: write` 権限で動作（追加設定不要）
 
 ## ライセンス
 

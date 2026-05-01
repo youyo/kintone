@@ -29,14 +29,20 @@
 ---
 
 ## ディレクトリ構成
+
+```
 cmd/kintone
 internal/
   cli/
   config/
   auth/
   idproxy/
-  tokenstore/
-  cache/
+  store/          ← 統合 Storage（M12～）
+    memory/
+    sqlite/
+    redis/
+    dynamodb/
+    storetest/
   resolver/
   kintoneapi/
   service/
@@ -46,6 +52,7 @@ internal/
     server/
     facade/
   output/
+```
 
 ---
 
@@ -54,38 +61,99 @@ internal/
 ~/.config/kintone/config.toml
 
 ### 環境変数
+
+```
+# 設定
 KINTONE_PROFILE
 KINTONE_CONFIG_PATH
-KINTONE_CACHE_PATH
 KINTONE_DOMAIN
 KINTONE_AUTH
 
+# 認証
+KINTONE_API_TOKEN
 KINTONE_OAUTH_CLIENT_ID
 KINTONE_OAUTH_CLIENT_SECRET
 KINTONE_OAUTH_REDIRECT_URL
+KINTONE_OAUTH_SCOPES
 
-KINTONE_API_TOKEN
-
+# MCP
 KINTONE_MCP_AUTH_MODE
 KINTONE_MCP_AUTHZ_MODE
+KINTONE_MCP_LISTEN_ADDR
+KINTONE_MCP_COOKIE_SECRET
+KINTONE_MCP_SIGNING_KEY_PEM
+KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE
+
+# Storage（KINTONE_STORE_* は env のみ、config.toml には不可）
+KINTONE_STORE_BACKEND          # memory / sqlite / redis / dynamodb（既定: sqlite）
+KINTONE_STORE_SQLITE_DIR       # SQLite ディレクトリ（既定: ~/.local/state/kintone/）
+KINTONE_STORE_REDIS_URL        # Redis URL
+KINTONE_STORE_REDIS_TLS        # 1 で redis:// に TLS 強制
+KINTONE_STORE_REDIS_PASSWORD   # Redis パスワード
+KINTONE_STORE_REDIS_INSECURE_PLAINTEXT  # 1 で非 localhost への平文接続を許可
+KINTONE_STORE_CACHE_BYPASS     # 1 でキャッシュのみ無効化
+KINTONE_STORE_DYNAMODB_TABLE   # DynamoDB テーブル名
+KINTONE_STORE_DYNAMODB_REGION  # DynamoDB リージョン
+
+# ログ
+KINTONE_LOG_LEVEL              # debug / info / warn / error（既定: info）
+```
 
 優先順位:
-CLI > ENV > config
+CLI > ENV > config（KINTONE_STORE_* は env のみ）
 
 ---
 
-## キャッシュ
-パス:
-~/.cache/kintone/cache.db
+## データストア
 
-TTL:
-apps / fields / resolver = 1年
+kintone CLI/MCP は認証情報・キャッシュ・OIDC 状態を単一の Storage に保管する。
+
+### バックエンド種別
+
+| Backend  | 用途                | 物理共有 / 論理分離                      |
+|----------|---------------------|----------------------------------------|
+| memory   | dev / test          | プロセス内 map（idproxy は別インスタンス）|
+| sqlite   | host / single-inst. | 同ディレクトリ・2 ファイル分離（kintone.db + idproxy.db）|
+| redis    | k8s / scale-out     | UniversalClient 共有 + kintone:/idproxy: prefix 分離 |
+| dynamodb | Lambda / serverless | 単一テーブル + kintone GSI1/GSI2、idproxy は PK のみ |
+
+### キー名前空間
+
+- kintone 側: `kintone:tokens:` / `kintone:cache:` / `kintone:signingkey:`
+- idproxy 側: `session:` / `authcode:` / `accesstoken:` / `refreshtoken:` / `client:` / `familyrevoked:`
+- 衝突防止: `kintone:` で始まらない PK/key を kintone 自前ストアが書くことを禁止
+
+### TTL
+
+apps / fields / resolver = 1 年
+
+---
+
+## SigningKey 解決順序
+
+1. `KINTONE_MCP_SIGNING_KEY_PEM` 環境変数（PKCS#8 PEM）
+2. Storage の SigningKey accessor（`KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE=1` 必須）
+3. `auth=none` のみ ephemeral 生成（slog.Warn）
+4. `auth=oidc` で 1/2 が解決できなければ fail-fast（`SIGNING_KEY_REQUIRED`）
+
+### Memory backend × auth=oidc は全面禁止
+
+session/auth_code/refresh_token state が memory のためプロセス再起動で全失効、
+multi-replica で session が孤立する。`STORE_MEMORY_OIDC_FORBIDDEN` で startup 拒否。
+
+### Threat Model（簡易）
+
+保護対象: OAuth refresh_token / API Token / OIDC SigningKey / idproxy session・refresh_token
+
+at-rest 暗号化はインフラ層に委譲（SQLite=ファイル権限 0o600、Redis=KMS 接続 + ACL、DynamoDB=KMS at rest）。
+アプリケーション層 envelope encryption（KMS / Vault 連携）は M13+。
 
 ---
 
 ## TokenStore
+
 interface:
-Get / Put / Delete
+Get / Put / Delete / ListByDomain
 
 Key:
 Domain + PrincipalID + AuthType
