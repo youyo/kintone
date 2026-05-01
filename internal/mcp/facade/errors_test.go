@@ -7,10 +7,12 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/youyo/kintone/internal/idproxy"
 	"github.com/youyo/kintone/internal/kintoneapi"
 	"github.com/youyo/kintone/internal/mcp/facade"
 	serviceapi "github.com/youyo/kintone/internal/service/api"
 	"github.com/youyo/kintone/internal/service/operations"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // TestMapError は facade.MapError が各種エラーを正しく output.Error に変換することを確認。
@@ -110,5 +112,107 @@ func TestMapError_Nil(t *testing.T) {
 	t.Parallel()
 	if got := facade.MapError(nil); got != nil {
 		t.Errorf("got=%v", got)
+	}
+}
+
+// Phase 6d: store / idproxy エラーマッピングテスト（facade 経路）
+
+// FSE-1: store.ErrTableNotFound → STORE_TABLE_NOT_FOUND
+func TestMapError_StoreTableNotFound(t *testing.T) {
+	t.Parallel()
+	got := facade.MapError(store.ErrTableNotFound)
+	if got.Code != "STORE_TABLE_NOT_FOUND" {
+		t.Errorf("code=%q want STORE_TABLE_NOT_FOUND", got.Code)
+	}
+}
+
+// FSE-1w: wrapped store.ErrTableNotFound も検出される
+func TestMapError_StoreTableNotFound_Wrapped(t *testing.T) {
+	t.Parallel()
+	err := fmt.Errorf("backend: %w", store.ErrTableNotFound)
+	got := facade.MapError(err)
+	if got.Code != "STORE_TABLE_NOT_FOUND" {
+		t.Errorf("code=%q want STORE_TABLE_NOT_FOUND", got.Code)
+	}
+}
+
+// FSE-2: store.ErrGSIMissing → STORE_GSI_MISSING
+func TestMapError_StoreGSIMissing(t *testing.T) {
+	t.Parallel()
+	got := facade.MapError(store.ErrGSIMissing)
+	if got.Code != "STORE_GSI_MISSING" {
+		t.Errorf("code=%q want STORE_GSI_MISSING", got.Code)
+	}
+}
+
+// FSE-3: store.ErrTTLDisabled → STORE_TTL_DISABLED
+func TestMapError_StoreTTLDisabled(t *testing.T) {
+	t.Parallel()
+	got := facade.MapError(store.ErrTTLDisabled)
+	if got.Code != "STORE_TTL_DISABLED" {
+		t.Errorf("code=%q want STORE_TTL_DISABLED", got.Code)
+	}
+}
+
+// FSE-4: store.ErrConnectionFailed → STORE_CONNECTION_FAILED (INTERNAL + cause_class)
+func TestMapError_StoreConnectionFailed(t *testing.T) {
+	t.Parallel()
+	got := facade.MapError(store.ErrConnectionFailed)
+	if got.Code != "STORE_CONNECTION_FAILED" {
+		t.Errorf("code=%q want STORE_CONNECTION_FAILED", got.Code)
+	}
+	if got.Details == nil {
+		t.Fatal("expected non-nil details")
+	}
+	if _, ok := got.Details["cause_class"]; !ok {
+		t.Errorf("expected cause_class in details, got %v", got.Details)
+	}
+	if _, ok := got.Details["cause"]; ok {
+		t.Errorf("unexpected cause in details (should be sanitized), got %v", got.Details)
+	}
+}
+
+// FSE-5: store.ErrMemoryOIDCForbidden → STORE_MEMORY_OIDC_FORBIDDEN
+func TestMapError_StoreMemoryOIDCForbidden(t *testing.T) {
+	t.Parallel()
+	got := facade.MapError(store.ErrMemoryOIDCForbidden)
+	if got.Code != "STORE_MEMORY_OIDC_FORBIDDEN" {
+		t.Errorf("code=%q want STORE_MEMORY_OIDC_FORBIDDEN", got.Code)
+	}
+}
+
+// FSE-6: idproxy.ErrSigningKeyRequired → SIGNING_KEY_REQUIRED
+func TestMapError_SigningKeyRequired(t *testing.T) {
+	t.Parallel()
+	got := facade.MapError(idproxy.ErrSigningKeyRequired)
+	if got.Code != "SIGNING_KEY_REQUIRED" {
+		t.Errorf("code=%q want SIGNING_KEY_REQUIRED", got.Code)
+	}
+}
+
+// FSE-7: store.ErrCacheBypassInvalid → STORE_CACHE_BYPASS_INVALID
+func TestMapError_StoreCacheBypassInvalid(t *testing.T) {
+	t.Parallel()
+	got := facade.MapError(store.ErrCacheBypassInvalid)
+	if got.Code != "STORE_CACHE_BYPASS_INVALID" {
+		t.Errorf("code=%q want STORE_CACHE_BYPASS_INVALID", got.Code)
+	}
+}
+
+// FSE-8: store.ErrPlaintextForbidden → STORE_PLAINTEXT_FORBIDDEN
+func TestMapError_StorePlaintextForbidden(t *testing.T) {
+	t.Parallel()
+	got := facade.MapError(store.ErrPlaintextForbidden)
+	if got.Code != "STORE_PLAINTEXT_FORBIDDEN" {
+		t.Errorf("code=%q want STORE_PLAINTEXT_FORBIDDEN", got.Code)
+	}
+}
+
+// FSE-9: store.ErrPrincipalNotFound → RESOLVER_PRINCIPAL_NOT_FOUND
+func TestMapError_StorePrincipalNotFound(t *testing.T) {
+	t.Parallel()
+	got := facade.MapError(store.ErrPrincipalNotFound)
+	if got.Code != "RESOLVER_PRINCIPAL_NOT_FOUND" {
+		t.Errorf("code=%q want RESOLVER_PRINCIPAL_NOT_FOUND", got.Code)
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/youyo/kintone/internal/cli/clierr"
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/output"
-	"github.com/youyo/kintone/internal/tokenstore"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // loginFn は oauth.Login の差し替え可能な hook（テスト時にモック注入）。
@@ -99,12 +99,12 @@ func runLogin(ctx context.Context, out io.Writer, oauthFlag bool, principalID st
 		return oauth.ErrMissingClientCredentials
 	}
 
-	// TokenStore を開く
-	store, err := openTokenStoreFn()
+	// TokenStore を取得（context > hook > env の優先順）
+	ts, cleanup, err := getTokenStore(ctx)
 	if err != nil {
 		return fmt.Errorf("oauth: open tokenstore: %w", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer cleanup()
 
 	// OAuth Login フロー
 	cfg := oauth.Config{
@@ -123,15 +123,15 @@ func runLogin(ctx context.Context, out io.Writer, oauthFlag bool, principalID st
 	}
 
 	// TokenStore に保存
-	tok := tokenstore.Token{
+	tok := store.Token{
 		Domain:       r.Domain,
 		PrincipalID:  principalID,
-		AuthType:     tokenstore.AuthTypeOAuth,
+		AuthType:     store.AuthTypeOAuth,
 		AccessToken:  result.AccessToken,
 		RefreshToken: result.RefreshToken,
 		ExpiresAt:    result.ExpiresAt,
 	}
-	if putErr := store.Put(ctx, tok); putErr != nil {
+	if putErr := ts.Put(ctx, tok); putErr != nil {
 		return fmt.Errorf("oauth: store token: %w", putErr)
 	}
 

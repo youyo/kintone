@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"fmt"
@@ -8,10 +9,16 @@ import (
 	"testing"
 	"time"
 
+	awsdynamodbtest "github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dynamodbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+
 	"github.com/youyo/kintone/internal/auth/oauth"
 	"github.com/youyo/kintone/internal/cli"
+	clistore "github.com/youyo/kintone/internal/cli/store"
 	"github.com/youyo/kintone/internal/config"
+	"github.com/youyo/kintone/internal/idproxy"
 	"github.com/youyo/kintone/internal/kintoneapi"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // OAuth エラーのヘルパー関数群
@@ -283,4 +290,191 @@ func TestMapToOutputError_OAuthProviderError(t *testing.T) {
 	if _, ok := oe.Details["provider_code"]; !ok {
 		t.Errorf("expected provider_code in details, got %v", oe.Details)
 	}
+}
+
+// Phase 6d: store / idproxy エラーマッピングテスト
+
+// ES-1: store.ErrTableNotFound → STORE_TABLE_NOT_FOUND (USAGE)
+func TestMapToOutputError_StoreTableNotFound(t *testing.T) {
+	oe := cli.MapToOutputError(store.ErrTableNotFound)
+	if oe.Code != "STORE_TABLE_NOT_FOUND" {
+		t.Errorf("Code=%q want STORE_TABLE_NOT_FOUND", oe.Code)
+	}
+}
+
+// ES-1w: wrapped store.ErrTableNotFound も検出される
+func TestMapToOutputError_StoreTableNotFound_Wrapped(t *testing.T) {
+	err := fmt.Errorf("backend op: %w", store.ErrTableNotFound)
+	oe := cli.MapToOutputError(err)
+	if oe.Code != "STORE_TABLE_NOT_FOUND" {
+		t.Errorf("Code=%q want STORE_TABLE_NOT_FOUND", oe.Code)
+	}
+}
+
+// ES-2: store.ErrGSIMissing → STORE_GSI_MISSING (USAGE)
+func TestMapToOutputError_StoreGSIMissing(t *testing.T) {
+	oe := cli.MapToOutputError(store.ErrGSIMissing)
+	if oe.Code != "STORE_GSI_MISSING" {
+		t.Errorf("Code=%q want STORE_GSI_MISSING", oe.Code)
+	}
+}
+
+// ES-3: store.ErrTTLDisabled → STORE_TTL_DISABLED (USAGE)
+func TestMapToOutputError_StoreTTLDisabled(t *testing.T) {
+	oe := cli.MapToOutputError(store.ErrTTLDisabled)
+	if oe.Code != "STORE_TTL_DISABLED" {
+		t.Errorf("Code=%q want STORE_TTL_DISABLED", oe.Code)
+	}
+}
+
+// ES-4: store.ErrConnectionFailed → STORE_CONNECTION_FAILED (INTERNAL + cause_class)
+func TestMapToOutputError_StoreConnectionFailed(t *testing.T) {
+	oe := cli.MapToOutputError(store.ErrConnectionFailed)
+	if oe.Code != "STORE_CONNECTION_FAILED" {
+		t.Errorf("Code=%q want STORE_CONNECTION_FAILED", oe.Code)
+	}
+	if oe.Details == nil {
+		t.Fatal("expected non-nil details")
+	}
+	// cause_class は存在すること
+	if _, ok := oe.Details["cause_class"]; !ok {
+		t.Errorf("expected cause_class in details, got %v", oe.Details)
+	}
+	// raw cause は出力しないこと
+	if _, ok := oe.Details["cause"]; ok {
+		t.Errorf("unexpected cause in details (should be sanitized), got %v", oe.Details)
+	}
+}
+
+// ES-4n: 接続失敗 wrapped エラーで cause_class=network になること
+func TestMapToOutputError_StoreConnectionFailed_Network(t *testing.T) {
+	netErr := stderrors.New("connection refused")
+	err := fmt.Errorf("connect: %w: %w", store.ErrConnectionFailed, netErr)
+	oe := cli.MapToOutputError(err)
+	if oe.Code != "STORE_CONNECTION_FAILED" {
+		t.Errorf("Code=%q want STORE_CONNECTION_FAILED", oe.Code)
+	}
+	if cc, _ := oe.Details["cause_class"].(string); cc != "network" {
+		t.Errorf("cause_class=%q want network", cc)
+	}
+}
+
+// ES-5: store.ErrMemoryOIDCForbidden → STORE_MEMORY_OIDC_FORBIDDEN (USAGE)
+func TestMapToOutputError_StoreMemoryOIDCForbidden(t *testing.T) {
+	oe := cli.MapToOutputError(store.ErrMemoryOIDCForbidden)
+	if oe.Code != "STORE_MEMORY_OIDC_FORBIDDEN" {
+		t.Errorf("Code=%q want STORE_MEMORY_OIDC_FORBIDDEN", oe.Code)
+	}
+}
+
+// ES-6: idproxy.ErrSigningKeyRequired → SIGNING_KEY_REQUIRED (USAGE)
+func TestMapToOutputError_SigningKeyRequired(t *testing.T) {
+	oe := cli.MapToOutputError(idproxy.ErrSigningKeyRequired)
+	if oe.Code != "SIGNING_KEY_REQUIRED" {
+		t.Errorf("Code=%q want SIGNING_KEY_REQUIRED", oe.Code)
+	}
+}
+
+// ES-7: store.ErrCacheBypassInvalid → STORE_CACHE_BYPASS_INVALID (USAGE)
+func TestMapToOutputError_StoreCacheBypassInvalid(t *testing.T) {
+	oe := cli.MapToOutputError(store.ErrCacheBypassInvalid)
+	if oe.Code != "STORE_CACHE_BYPASS_INVALID" {
+		t.Errorf("Code=%q want STORE_CACHE_BYPASS_INVALID", oe.Code)
+	}
+}
+
+// ES-8: store.ErrPlaintextForbidden → STORE_PLAINTEXT_FORBIDDEN (USAGE)
+func TestMapToOutputError_StorePlaintextForbidden(t *testing.T) {
+	oe := cli.MapToOutputError(store.ErrPlaintextForbidden)
+	if oe.Code != "STORE_PLAINTEXT_FORBIDDEN" {
+		t.Errorf("Code=%q want STORE_PLAINTEXT_FORBIDDEN", oe.Code)
+	}
+}
+
+// ES-9: store.ErrPrincipalNotFound → RESOLVER_PRINCIPAL_NOT_FOUND (USAGE)
+func TestMapToOutputError_StorePrincipalNotFound(t *testing.T) {
+	oe := cli.MapToOutputError(store.ErrPrincipalNotFound)
+	if oe.Code != "RESOLVER_PRINCIPAL_NOT_FOUND" {
+		t.Errorf("Code=%q want RESOLVER_PRINCIPAL_NOT_FOUND", oe.Code)
+	}
+}
+
+// Phase 8: store init errStoreInitHandled の details 取り込みテスト
+
+// EP8-1: store init が STORE_GSI_MISSING で失敗した場合、
+// MapToOutputError は nil を返す（二重書き防止）
+func TestMapToOutputError_StoreInitHandled_ReturnsNil(t *testing.T) {
+	// RunInit に fake client で GSI 不足を起こし、errStoreInitHandled を返させる
+	opts := clistore.InitOptions{
+		Table:      "test-table",
+		Capability: "token",
+		Client:     &errTestFakeClient{missingGSI: true},
+	}
+	var buf bytes.Buffer
+	err := clistore.RunInit(context.Background(), &buf, opts)
+	if err == nil {
+		t.Fatal("expected error from RunInit")
+	}
+	// MapToOutputError は handled エラーを受け取ると nil を返す（二重書き防止）
+	oe := cli.MapToOutputError(err)
+	if oe != nil {
+		t.Errorf("expected nil from MapToOutputError for handled error, got %+v", oe)
+	}
+}
+
+// EP8-2: store init が STORE_TABLE_NOT_FOUND で失敗した場合、
+// out には details.table を含む JSON が書かれている
+func TestRunInit_TableNotFound_OutputContainsDetails(t *testing.T) {
+	opts := clistore.InitOptions{
+		Table:      "my-missing-table",
+		Capability: "full",
+		Client:     &errTestFakeClient{tableNotFound: true},
+	}
+	var buf bytes.Buffer
+	err := clistore.RunInit(context.Background(), &buf, opts)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	// MapToOutputError は nil を返す（handled）
+	oe := cli.MapToOutputError(err)
+	if oe != nil {
+		t.Errorf("expected nil output error for handled, got %v", oe)
+	}
+	// buf に書かれた JSON が空でないこと
+	if buf.Len() == 0 {
+		t.Fatal("expected output in buf")
+	}
+}
+
+// errTestFakeClient は errors_test.go 専用の最小 fake DynamoDB クライアント。
+// missingGSI=true なら pk のみ返し GSI なし（STORE_GSI_MISSING を起こす）。
+// tableNotFound=true なら ResourceNotFoundException を返す。
+type errTestFakeClient struct {
+	missingGSI    bool
+	tableNotFound bool
+}
+
+func (f *errTestFakeClient) DescribeTable(_ context.Context, _ *awsdynamodbtest.DescribeTableInput, _ ...func(*awsdynamodbtest.Options)) (*awsdynamodbtest.DescribeTableOutput, error) {
+	if f.tableNotFound {
+		return nil, &dynamodbtypes.ResourceNotFoundException{}
+	}
+	tableName := "test-table"
+	pkName := "pk"
+	return &awsdynamodbtest.DescribeTableOutput{
+		Table: &dynamodbtypes.TableDescription{
+			TableName: &tableName,
+			AttributeDefinitions: []dynamodbtypes.AttributeDefinition{
+				{AttributeName: &pkName, AttributeType: dynamodbtypes.ScalarAttributeTypeS},
+			},
+		},
+	}, nil
+}
+
+func (f *errTestFakeClient) DescribeTimeToLive(_ context.Context, _ *awsdynamodbtest.DescribeTimeToLiveInput, _ ...func(*awsdynamodbtest.Options)) (*awsdynamodbtest.DescribeTimeToLiveOutput, error) {
+	status := dynamodbtypes.TimeToLiveStatusEnabled
+	return &awsdynamodbtest.DescribeTimeToLiveOutput{
+		TimeToLiveDescription: &dynamodbtypes.TimeToLiveDescription{
+			TimeToLiveStatus: status,
+		},
+	}, nil
 }

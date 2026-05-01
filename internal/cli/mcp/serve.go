@@ -99,14 +99,10 @@ func runHTTP(ctx context.Context, srv *mcpserver.MCPServer, addr string, auth mc
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	mw, err := buildHTTPMiddleware(ctx, auth)
+	mw, err := buildHTTPMiddleware(ctx, auth, authz)
 	if err != nil {
 		return err
 	}
-
-	// authz は per-principal API 解決の向き先決定に使う。MVP では Resolved.Auth に委ねるが、
-	// 将来 PrincipalAPIFactory への切替フックを当てるため err 判定だけ残す。
-	_ = authz
 
 	return mcpserver.ServeHTTP(ctx, srv, mcpserver.HTTPServeOptions{
 		Addr:       addr,
@@ -116,12 +112,12 @@ func runHTTP(ctx context.Context, srv *mcpserver.MCPServer, addr string, auth mc
 
 // buildHTTPMiddleware は AuthMode に応じた http middleware を返す。
 // idproxy 依存は別ファイル idproxy_glue.go に切り出し、auth=none では idproxy package を実行しない。
-func buildHTTPMiddleware(ctx context.Context, auth mcpserver.AuthMode) (mcpserver.MiddlewareFunc, error) {
+func buildHTTPMiddleware(ctx context.Context, auth mcpserver.AuthMode, authz mcpserver.AuthZMode) (mcpserver.MiddlewareFunc, error) {
 	switch auth {
 	case mcpserver.AuthModeNone:
 		return nil, nil // ServeHTTP で no-op に解決される
 	case mcpserver.AuthModeOIDC:
-		return buildOIDCMiddleware(ctx)
+		return buildOIDCMiddleware(ctx, string(auth), string(authz))
 	default:
 		return nil, errors.New("mcp serve: unknown auth mode")
 	}

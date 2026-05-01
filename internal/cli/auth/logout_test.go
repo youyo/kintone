@@ -3,37 +3,35 @@ package auth_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	cliauth "github.com/youyo/kintone/internal/cli/auth"
-	"github.com/youyo/kintone/internal/tokenstore"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // AO-1: --principal-id 指定 → 該当のみ Delete
 func TestLogout_WithPrincipalID(t *testing.T) {
-	dbPath := t.TempDir() + "/tokens.db"
-
-	// 事前にデータを投入
-	setupStore, err := tokenstore.Open(dbPath)
+	c := newMemoryContainer(t)
+	ts, err := c.Tokens()
 	if err != nil {
-		t.Fatalf("open setup store: %v", err)
+		t.Fatalf("Tokens: %v", err)
 	}
 	future := time.Now().Add(1 * time.Hour)
-	_ = setupStore.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain: "example.cybozu.com", PrincipalID: "oauth:alice",
-		AuthType: tokenstore.AuthTypeOAuth, AccessToken: "alice-tok",
+		AuthType: store.AuthTypeOAuth, AccessToken: "alice-tok",
 		ExpiresAt: future,
 	})
-	_ = setupStore.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain: "example.cybozu.com", PrincipalID: "oauth:bob",
-		AuthType: tokenstore.AuthTypeOAuth, AccessToken: "bob-tok",
+		AuthType: store.AuthTypeOAuth, AccessToken: "bob-tok",
 		ExpiresAt: future,
 	})
-	_ = setupStore.Close()
 
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return tokenstore.Open(dbPath) })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	t.Setenv("KINTONE_DOMAIN", "example.cybozu.com")
 
@@ -42,20 +40,13 @@ func TestLogout_WithPrincipalID(t *testing.T) {
 		t.Fatalf("unexpected error: %v\nout: %s", err, out.String())
 	}
 
-	// logout 後に DB を再オープンして確認
-	checkStore, err := tokenstore.Open(dbPath)
-	if err != nil {
-		t.Fatalf("reopen store: %v", err)
-	}
-	defer func() { _ = checkStore.Close() }()
-
 	// alice が削除されていること
-	_, err = checkStore.Get(t.Context(), "example.cybozu.com", "oauth:alice", tokenstore.AuthTypeOAuth)
-	if err != tokenstore.ErrNotFound {
+	_, err = ts.Get(t.Context(), "example.cybozu.com", "oauth:alice", store.AuthTypeOAuth)
+	if !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("expected alice deleted, err=%v", err)
 	}
 	// bob は残っていること
-	_, err = checkStore.Get(t.Context(), "example.cybozu.com", "oauth:bob", tokenstore.AuthTypeOAuth)
+	_, err = ts.Get(t.Context(), "example.cybozu.com", "oauth:bob", store.AuthTypeOAuth)
 	if err != nil {
 		t.Errorf("expected bob to remain, err=%v", err)
 	}
@@ -79,24 +70,22 @@ func TestLogout_WithPrincipalID(t *testing.T) {
 
 // AO-2: --all 指定 → 当該 Domain の全 OAuth エントリを Delete
 func TestLogout_All(t *testing.T) {
-	dbPath := t.TempDir() + "/tokens.db"
-
-	setupStore, err := tokenstore.Open(dbPath)
+	c := newMemoryContainer(t)
+	ts, err := c.Tokens()
 	if err != nil {
-		t.Fatalf("open setup store: %v", err)
+		t.Fatalf("Tokens: %v", err)
 	}
 	future := time.Now().Add(1 * time.Hour)
 	for _, pid := range []string{"oauth:alice", "oauth:bob", "oauth:charlie"} {
-		_ = setupStore.Put(t.Context(), tokenstore.Token{
+		_ = ts.Put(t.Context(), store.Token{
 			Domain: "example.cybozu.com", PrincipalID: pid,
-			AuthType: tokenstore.AuthTypeOAuth, AccessToken: "tok",
+			AuthType: store.AuthTypeOAuth, AccessToken: "tok",
 			ExpiresAt: future,
 		})
 	}
-	_ = setupStore.Close()
 
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return tokenstore.Open(dbPath) })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	t.Setenv("KINTONE_DOMAIN", "example.cybozu.com")
 
@@ -124,9 +113,9 @@ func TestLogout_All(t *testing.T) {
 
 // AO-3: 該当なし → ok=true / deleted=0
 func TestLogout_NotFound(t *testing.T) {
-	store := newTestStore(t)
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return store, nil })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	c := newMemoryContainer(t)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	t.Setenv("KINTONE_DOMAIN", "example.cybozu.com")
 

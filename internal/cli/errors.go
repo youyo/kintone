@@ -9,10 +9,12 @@ import (
 	"github.com/youyo/kintone/internal/auth/oauth"
 	"github.com/youyo/kintone/internal/cli/clierr"
 	"github.com/youyo/kintone/internal/config"
+	"github.com/youyo/kintone/internal/idproxy"
 	"github.com/youyo/kintone/internal/kintoneapi"
 	"github.com/youyo/kintone/internal/output"
 	"github.com/youyo/kintone/internal/resolver"
 	"github.com/youyo/kintone/internal/service/operations"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // MapToOutputError は cobra、config、kintoneapi 関連のエラーを *output.Error に変換する。
@@ -197,6 +199,68 @@ func MapToOutputError(err error) *output.Error {
 			Code:    "OAUTH_PROVIDER_ERROR",
 			Message: oauthErr.Error(),
 			Details: details,
+		}
+	}
+
+	// store init handled エラー（Phase 8）
+	// store init は RunE 内で output.Failure を直接書き込み済み。
+	// ExecuteWith が再度 output.Failure を書かないよう nil を返す（二重書き防止）。
+	type handledError interface {
+		IsHandled() bool
+	}
+	var he handledError
+	if errors.As(err, &he) && he.IsHandled() {
+		return nil
+	}
+
+	// store / idproxy の sentinel（Phase 6d）
+	// USAGE 系（設定ミス・未対応組合せ）
+	//
+	// errorWithDetails は store init 専用の handled エラーから details を取り出す interface。
+	// cli/store パッケージへの直接 import を避け、interface 経由で details を取得する。
+	type errorWithDetails interface {
+		error
+		DetailMap() map[string]any
+	}
+	switch {
+	case errors.Is(err, store.ErrTableNotFound):
+		oe := &output.Error{Code: "STORE_TABLE_NOT_FOUND", Message: err.Error()}
+		var ed errorWithDetails
+		if errors.As(err, &ed) {
+			oe.Details = ed.DetailMap()
+		}
+		return oe
+	case errors.Is(err, store.ErrGSIMissing):
+		oe := &output.Error{Code: "STORE_GSI_MISSING", Message: err.Error()}
+		var ed errorWithDetails
+		if errors.As(err, &ed) {
+			oe.Details = ed.DetailMap()
+		}
+		return oe
+	case errors.Is(err, store.ErrTTLDisabled):
+		oe := &output.Error{Code: "STORE_TTL_DISABLED", Message: err.Error()}
+		var ed errorWithDetails
+		if errors.As(err, &ed) {
+			oe.Details = ed.DetailMap()
+		}
+		return oe
+	case errors.Is(err, store.ErrMemoryOIDCForbidden):
+		return &output.Error{Code: "STORE_MEMORY_OIDC_FORBIDDEN", Message: err.Error()}
+	case errors.Is(err, store.ErrCacheBypassInvalid):
+		return &output.Error{Code: "STORE_CACHE_BYPASS_INVALID", Message: err.Error()}
+	case errors.Is(err, store.ErrPlaintextForbidden):
+		return &output.Error{Code: "STORE_PLAINTEXT_FORBIDDEN", Message: err.Error()}
+	case errors.Is(err, store.ErrPrincipalNotFound):
+		return &output.Error{Code: "RESOLVER_PRINCIPAL_NOT_FOUND", Message: err.Error()}
+	case errors.Is(err, idproxy.ErrSigningKeyRequired):
+		return &output.Error{Code: "SIGNING_KEY_REQUIRED", Message: err.Error()}
+	}
+	// INTERNAL 系（接続失敗）— cause_class で分類、raw message は出さない
+	if errors.Is(err, store.ErrConnectionFailed) {
+		return &output.Error{
+			Code:    "STORE_CONNECTION_FAILED",
+			Message: err.Error(),
+			Details: map[string]any{"cause_class": output.ClassifyBackendError(err)},
 		}
 	}
 

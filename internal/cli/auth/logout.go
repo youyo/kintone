@@ -2,13 +2,14 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/spf13/cobra"
 	"github.com/youyo/kintone/internal/cli/clierr"
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/output"
-	"github.com/youyo/kintone/internal/tokenstore"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // logoutResult は `kintone auth logout` の成功時 data 部分。
@@ -51,13 +52,13 @@ func runLogout(ctx context.Context, out io.Writer, principalID string, all bool)
 		return err
 	}
 
-	store, err := openTokenStoreFn()
+	ts, cleanup, err := getTokenStore(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = store.Close() }()
+	defer cleanup()
 
-	deleted, err := deleteOAuthTokens(ctx, store, r.Domain, principalID, all)
+	deleted, err := deleteOAuthTokens(ctx, ts, r.Domain, principalID, all)
 	if err != nil {
 		return err
 	}
@@ -70,42 +71,32 @@ func runLogout(ctx context.Context, out io.Writer, principalID string, all bool)
 }
 
 // deleteOAuthTokens は TokenStore から OAuth トークンを削除し、削除数を返す。
-func deleteOAuthTokens(ctx context.Context, store tokenstore.Store, domain, principalID string, all bool) (int, error) {
-	type listable interface {
-		ListByDomain(ctx context.Context, domain string, authType tokenstore.AuthType) ([]*tokenstore.Token, error)
-	}
-
+func deleteOAuthTokens(ctx context.Context, ts store.TokenStore, domain, principalID string, all bool) (int, error) {
 	if !all {
 		// 特定 principal のみ削除
 		// 削除前に存在確認（Delete は no-op で不在でも error を返さないため）
-		_, getErr := store.Get(ctx, domain, principalID, tokenstore.AuthTypeOAuth)
-		if getErr == tokenstore.ErrNotFound {
+		_, getErr := ts.Get(ctx, domain, principalID, store.AuthTypeOAuth)
+		if errors.Is(getErr, store.ErrNotFound) {
 			return 0, nil
 		}
 		if getErr != nil {
 			return 0, getErr
 		}
-		if err := store.Delete(ctx, domain, principalID, tokenstore.AuthTypeOAuth); err != nil {
+		if err := ts.Delete(ctx, domain, principalID, store.AuthTypeOAuth); err != nil {
 			return 0, err
 		}
 		return 1, nil
 	}
 
-	// --all: ドメイン内全 OAuth エントリを削除
-	ls, ok := store.(listable)
-	if !ok {
-		// ListByDomain が使えない場合は 0 を返す（Store が限定的な interface 実装の場合）
-		return 0, nil
-	}
-
-	tokens, err := ls.ListByDomain(ctx, domain, tokenstore.AuthTypeOAuth)
+	// --all: ドメイン内全 OAuth エントリを削除（store.TokenStore interface に ListByDomain あり）
+	tokens, err := ts.ListByDomain(ctx, domain, store.AuthTypeOAuth)
 	if err != nil {
 		return 0, err
 	}
 
 	deleted := 0
 	for _, tok := range tokens {
-		if delErr := store.Delete(ctx, tok.Domain, tok.PrincipalID, tokenstore.AuthTypeOAuth); delErr != nil {
+		if delErr := ts.Delete(ctx, tok.Domain, tok.PrincipalID, store.AuthTypeOAuth); delErr != nil {
 			return deleted, delErr
 		}
 		deleted++

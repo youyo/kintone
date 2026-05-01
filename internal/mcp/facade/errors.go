@@ -13,11 +13,13 @@ import (
 	"errors"
 	"net/url"
 
+	"github.com/youyo/kintone/internal/idproxy"
 	"github.com/youyo/kintone/internal/kintoneapi"
 	"github.com/youyo/kintone/internal/output"
 	"github.com/youyo/kintone/internal/resolver"
 	serviceapi "github.com/youyo/kintone/internal/service/api"
 	"github.com/youyo/kintone/internal/service/operations"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // MapError は facade 経路の任意 error を *output.Error に変換する。
@@ -110,6 +112,35 @@ func MapError(err error) *output.Error {
 			Code:    "KINTONE_NETWORK",
 			Message: err.Error(),
 			Details: map[string]any{"timeout": true},
+		}
+	}
+
+	// store / idproxy の sentinel（Phase 6d）
+	// INVALID_PARAMS 相当（設定ミス・未対応組合せ）
+	switch {
+	case errors.Is(err, store.ErrTableNotFound):
+		return &output.Error{Code: "STORE_TABLE_NOT_FOUND", Message: err.Error()}
+	case errors.Is(err, store.ErrGSIMissing):
+		return &output.Error{Code: "STORE_GSI_MISSING", Message: err.Error()}
+	case errors.Is(err, store.ErrTTLDisabled):
+		return &output.Error{Code: "STORE_TTL_DISABLED", Message: err.Error()}
+	case errors.Is(err, store.ErrMemoryOIDCForbidden):
+		return &output.Error{Code: "STORE_MEMORY_OIDC_FORBIDDEN", Message: err.Error()}
+	case errors.Is(err, store.ErrCacheBypassInvalid):
+		return &output.Error{Code: "STORE_CACHE_BYPASS_INVALID", Message: err.Error()}
+	case errors.Is(err, store.ErrPlaintextForbidden):
+		return &output.Error{Code: "STORE_PLAINTEXT_FORBIDDEN", Message: err.Error()}
+	case errors.Is(err, store.ErrPrincipalNotFound):
+		return &output.Error{Code: "RESOLVER_PRINCIPAL_NOT_FOUND", Message: err.Error()}
+	case errors.Is(err, idproxy.ErrSigningKeyRequired):
+		return &output.Error{Code: "SIGNING_KEY_REQUIRED", Message: err.Error()}
+	}
+	// INTERNAL 系（接続失敗）— cause_class で分類、raw message は出さない
+	if errors.Is(err, store.ErrConnectionFailed) {
+		return &output.Error{
+			Code:    "STORE_CONNECTION_FAILED",
+			Message: err.Error(),
+			Details: map[string]any{"cause_class": output.ClassifyBackendError(err)},
 		}
 	}
 

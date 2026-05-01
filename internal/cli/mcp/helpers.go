@@ -2,25 +2,30 @@
 //
 //	kintone mcp serve   stdio MCP サーバーを起動
 //
-// 設計判断:
+// 設計判断 (M12 Phase 6c):
 //   - kintoneapi を直接 import せず、必ず service/api を経由する
+//   - Cache decorator は per-request lazy resolution（CacheProvider）で構築する
+//   - Container は ctx 経由で取得（root の ExecuteWith が PersistentPreRunE で注入）
+//   - KINTONE_STORE_CACHE_BYPASS=1 のとき CachingAPI を skip し upstream を直接返す
+//   - 旧 KINTONE_CACHE_DISABLE は削除（M12 で KINTONE_STORE_CACHE_BYPASS に統一）
 //   - テスト hook（NewAPIBuilder）でグローバル var を差し替え可能（並列テスト禁止）
 package mcp
 
 import (
-	"os"
+	"context"
 
 	"github.com/spf13/cobra"
 
-	"github.com/youyo/kintone/internal/cache"
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/kintoneapi"
 	serviceapi "github.com/youyo/kintone/internal/service/api"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // LoaderInput は NewAPIBuilder hook へ渡される情報。
 type LoaderInput struct {
 	CLI config.CLIConfig
+	Ctx context.Context
 }
 
 // NewAPIBuilder は CLI コマンドが service/api.API を取得するための hook。
@@ -33,8 +38,9 @@ type LoaderInput struct {
 var NewAPIBuilder = defaultNewAPI
 
 // defaultNewAPI は本番用ローダー。
+//
 // CLIConfig → config.Load → kintoneapi.NewFromResolved → service/api.NewFromKintone。
-// KINTONE_CACHE_DISABLE=1 でない限り、CachingAPI で upstream をラップする。
+// KINTONE_STORE_CACHE_BYPASS=1 でない限り、CachingAPI で upstream をラップする。
 func defaultNewAPI(in LoaderInput) (serviceapi.API, error) {
 	r, err := config.Load(config.LoadOptions{CLI: in.CLI})
 	if err != nil {
@@ -48,18 +54,23 @@ func defaultNewAPI(in LoaderInput) (serviceapi.API, error) {
 	if err != nil {
 		return nil, err
 	}
-	if os.Getenv("KINTONE_CACHE_DISABLE") == "1" {
+	env := store.LoadFromEnv()
+	if env.CacheBypass {
 		return upstream, nil
 	}
-	cachePath, err := cache.DefaultCachePath(nil, nil)
-	if err != nil {
-		return upstream, nil
+	provider := newCacheProvider(in.Ctx)
+	return serviceapi.NewCachingAPI(upstream, provider, r.Domain), nil
+}
+
+// newCacheProvider は ctx に注入された Container から CacheForDecorator を引く CacheProvider を返す。
+func newCacheProvider(ctx context.Context) serviceapi.CacheProvider {
+	return func() (store.CacheStore, error) {
+		container := store.ContainerFromContext(ctx)
+		if container == nil {
+			return nil, nil
+		}
+		return container.CacheForDecorator()
 	}
-	store, err := cache.Open(cachePath)
-	if err != nil {
-		return upstream, nil
-	}
-	return serviceapi.NewCachingAPI(upstream, store, r.Domain), nil
 }
 
 // readCLIConfig は cobra 親コマンドの PersistentFlags から CLIConfig を構築する。
@@ -72,5 +83,5 @@ func readCLIConfig(cmd *cobra.Command) config.CLIConfig {
 // buildAPI は cobra cmd から service/api.API を構築する。
 func buildAPI(cmd *cobra.Command) (serviceapi.API, error) {
 	cli := readCLIConfig(cmd)
-	return NewAPIBuilder(LoaderInput{CLI: cli})
+	return NewAPIBuilder(LoaderInput{CLI: cli, Ctx: cmd.Context()})
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/idproxy"
 	"github.com/youyo/kintone/internal/kintoneapi"
-	"github.com/youyo/kintone/internal/tokenstore"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // ErrAuthRequired は MCP リクエスト時に Principal が必要だが取得できなかった場合のエラー。
@@ -30,11 +30,11 @@ const (
 // PrincipalAPIFactory は MCP リクエスト context から API を構築するファクトリ。
 //
 // stateless に各リクエストで呼ばれる。base は config.Resolved（domain / OAuth client 情報を含む）。
-// store は OAuth トークン参照用、refresher は refresh_token grant 実行用。
+// tokens は OAuth トークン参照用、refresher は refresh_token grant 実行用。
 type PrincipalAPIFactory struct {
 	base      *config.Resolved
 	mode      AuthZMode
-	store     tokenstore.Store
+	tokens    store.TokenStore
 	refresher oauth.RefresherInterface
 	// fallback は AuthZMode=api-token または Principal 不在時に使う既存 API。
 	// 既存 stdio 経路の単発構築をそのまま流用するため、構築済みの API を持ち回る。
@@ -48,7 +48,7 @@ type PrincipalAPIFactoryConfig struct {
 	// Mode は upstream への認証方式。
 	Mode AuthZMode
 	// Store は OAuth Token 永続ストア。AuthZMode=oauth で必須。
-	Store tokenstore.Store
+	Store store.TokenStore
 	// Refresher は refresh_token grant を実行する。AuthZMode=oauth で必須。
 	Refresher oauth.RefresherInterface
 	// Fallback は Principal 不在時に使う API。AuthZMode=api-token のときは常にこれを返す。
@@ -81,7 +81,7 @@ func NewPrincipalAPIFactory(cfg PrincipalAPIFactoryConfig) (*PrincipalAPIFactory
 	return &PrincipalAPIFactory{
 		base:      cfg.Base,
 		mode:      cfg.Mode,
-		store:     cfg.Store,
+		tokens:    cfg.Store,
 		refresher: cfg.Refresher,
 		fallback:  cfg.Fallback,
 	}, nil
@@ -105,9 +105,9 @@ func (f *PrincipalAPIFactory) ForContext(ctx context.Context) (API, error) {
 	}
 
 	// AuthZ=oauth + Principal あり: TokenStore から ID 別トークンを参照
-	tok, err := f.store.Get(ctx, f.base.Domain, p.ID, tokenstore.AuthTypeOAuth)
+	tok, err := f.tokens.Get(ctx, f.base.Domain, p.ID, store.AuthTypeOAuth)
 	if err != nil {
-		if errors.Is(err, tokenstore.ErrNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, fmt.Errorf("%w: principal %q has no token", ErrAuthRequired, p.ID)
 		}
 		return nil, fmt.Errorf("api: PrincipalAPIFactory: get token: %w", err)
@@ -116,7 +116,7 @@ func (f *PrincipalAPIFactory) ForContext(ctx context.Context) (API, error) {
 		return nil, fmt.Errorf("%w: principal %q has no token", ErrAuthRequired, p.ID)
 	}
 
-	authn := oauth.NewAuthenticator(f.store, f.base.Domain, p.ID, f.refresher, nil)
+	authn := oauth.NewAuthenticator(f.tokens, f.base.Domain, p.ID, f.refresher, nil)
 	kc, err := kintoneapi.NewFromResolvedWithAuth(f.base, authn)
 	if err != nil {
 		return nil, fmt.Errorf("api: PrincipalAPIFactory: build kintone client: %w", err)

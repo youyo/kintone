@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/youyo/kintone/internal/tokenstore"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // RefresherInterface は Refresh メソッドを持つ任意の型を受け付けるインターフェース。
@@ -22,7 +22,7 @@ type RefresherInterface interface {
 //
 // auth.Authenticator interface を実装する。
 type Authenticator struct {
-	store       tokenstore.Store
+	tokenStore  store.TokenStore
 	domain      string
 	principalID string
 	refresher   RefresherInterface
@@ -33,15 +33,15 @@ type Authenticator struct {
 
 // NewAuthenticator は OAuth 用 Authenticator を構築する。
 //
-// store は M07 tokenstore、refresher は *Refresher または テスト用 mock。
+// s は M12 統合 Storage の TokenStore、refresher は *Refresher または テスト用 mock。
 // refresher が nil の場合、refresh 機能は無効（access_token 期限切れ時はエラー）。
 // now が nil の場合は time.Now を使用する。
-func NewAuthenticator(store tokenstore.Store, domain, principalID string, refresher RefresherInterface, now func() time.Time) *Authenticator {
+func NewAuthenticator(s store.TokenStore, domain, principalID string, refresher RefresherInterface, now func() time.Time) *Authenticator {
 	if now == nil {
 		now = time.Now
 	}
 	return &Authenticator{
-		store:       store,
+		tokenStore:  s,
 		domain:      domain,
 		principalID: principalID,
 		refresher:   refresher,
@@ -63,7 +63,7 @@ func (a *Authenticator) Apply(ctx context.Context, req *http.Request) error {
 	defer a.mu.Unlock()
 
 	// TokenStore から最新トークンを取得（lock 内で毎回取得して二重チェック）
-	tok, err := a.store.Get(ctx, a.domain, a.principalID, tokenstore.AuthTypeOAuth)
+	tok, err := a.tokenStore.Get(ctx, a.domain, a.principalID, store.AuthTypeOAuth)
 	if err != nil {
 		return fmt.Errorf("oauth: authenticator: get token: %w", err)
 	}
@@ -88,16 +88,16 @@ func (a *Authenticator) Apply(ctx context.Context, req *http.Request) error {
 	}
 
 	// TokenStore を更新
-	updatedTok := tokenstore.Token{
+	updatedTok := store.Token{
 		Domain:       a.domain,
 		PrincipalID:  a.principalID,
-		AuthType:     tokenstore.AuthTypeOAuth,
+		AuthType:     store.AuthTypeOAuth,
 		AccessToken:  newResult.AccessToken,
 		RefreshToken: newResult.RefreshToken,
 		ExpiresAt:    newResult.ExpiresAt,
 		UpdatedAt:    a.now(),
 	}
-	if putErr := a.store.Put(ctx, updatedTok); putErr != nil {
+	if putErr := a.tokenStore.Put(ctx, updatedTok); putErr != nil {
 		// Put 失敗でも今回のリクエストは続行（次回の Apply で再取得される）
 		return fmt.Errorf("oauth: authenticator: put updated token: %w", putErr)
 	}
@@ -107,7 +107,7 @@ func (a *Authenticator) Apply(ctx context.Context, req *http.Request) error {
 }
 
 // isValid は access_token が有効（期限切れでなく、skew 内でもない）かを確認する。
-func (a *Authenticator) isValid(tok *tokenstore.Token) bool {
+func (a *Authenticator) isValid(tok *store.Token) bool {
 	if tok.ExpiresAt.IsZero() {
 		// expires_at が未設定なら有効とみなす
 		return true
