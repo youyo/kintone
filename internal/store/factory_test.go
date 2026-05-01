@@ -32,7 +32,8 @@ func TestOpenFromConfig_Memory(t *testing.T) {
 }
 
 func TestOpenFromConfig_UnsupportedBackends(t *testing.T) {
-	cases := []string{store.BackendSQLite, store.BackendRedis, store.BackendDynamoDB, "unknown-xyz", ""}
+	// Phase 2 で sqlite backend が register されたため、未対応 backend は redis/dynamodb と未知 backend のみ。
+	cases := []string{store.BackendRedis, store.BackendDynamoDB, "unknown-xyz", ""}
 	for _, b := range cases {
 		b := b
 		t.Run(b, func(t *testing.T) {
