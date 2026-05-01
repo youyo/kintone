@@ -1,9 +1,50 @@
 package output
 
 import (
+	"context"
+	"errors"
+	"net"
 	"net/url"
 	"strings"
 )
+
+// ClassifyBackendError は backend エラーを cause_class 文字列に分類する。
+//
+// raw error message は出力しない（資格情報漏洩防止）。
+// 返り値は "network" / "auth" / "timeout" / "unknown" のいずれか。
+//
+// 判定優先順位:
+//  1. context.DeadlineExceeded → "timeout"
+//  2. *net.OpError → "network"
+//  3. エラーメッセージ文字列マッチ（大文字小文字無視）
+//     - "noauth" / "wrongpass" / "access denied" / "unauthorized" → "auth"
+//     - "timeout" / "deadline" → "timeout"
+//     - "connection refused" / "no such host" / "network" → "network"
+//  4. その他 → "unknown"
+func ClassifyBackendError(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		return "network"
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "noauth") || strings.Contains(msg, "wrongpass") ||
+		strings.Contains(msg, "access denied") || strings.Contains(msg, "unauthorized"):
+		return "auth"
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline"):
+		return "timeout"
+	case strings.Contains(msg, "connection refused") || strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "network"):
+		return "network"
+	}
+	return "unknown"
+}
 
 // SanitizeURL は URL の userinfo password・クエリ password を *** にマスクする。
 //
