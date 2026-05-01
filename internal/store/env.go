@@ -31,6 +31,10 @@ type Config struct {
 	// SigningKey が env / Storage に未保存のとき新規生成・保存を許可するフラグ。
 	// 未設定（false）かつ env も未設定の場合、auth=oidc では fail-fast する。
 	SigningKeyAutoGenerate bool
+	// RedisInsecurePlaintext は KINTONE_STORE_REDIS_INSECURE_PLAINTEXT=1 のオプトインで、
+	// 非 localhost への redis:// 平文接続を許可するフラグ。
+	// 未設定（false）の場合、loopback 以外への redis:// 接続は ErrPlaintextForbidden で reject される。
+	RedisInsecurePlaintext bool
 }
 
 // LoadFromEnv は os 環境変数から Config を構築する。
@@ -48,6 +52,7 @@ func LoadFromEnv() *Config {
 		CacheBypass:            boolEnv("KINTONE_STORE_CACHE_BYPASS"),
 		SigningKeyPEM:          os.Getenv("KINTONE_MCP_SIGNING_KEY_PEM"),
 		SigningKeyAutoGenerate: boolEnv("KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE"),
+		RedisInsecurePlaintext: boolEnv("KINTONE_STORE_REDIS_INSECURE_PLAINTEXT"),
 	}
 }
 
