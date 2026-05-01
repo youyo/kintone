@@ -8,13 +8,13 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-05-01 18:30 |
-| ステータス | 全 M11 + M12 完了（リリース準備完了） |
+| 最終更新 | 2026-05-02 00:30 |
+| ステータス | 全 M11 + M12 完了 / M13（Remote MCP OAuth callback）を新規追加 |
 
 ## Current Focus
-- **マイルストーン**: M12（統合 Storage バックエンド）全 11 フェーズ完了
-- **直近の完了**: M12 Phase 8.5（in-process E2E ハーネス基盤、oidcstub + kintonefake + SeedTokenForE2E + e2e build tag テスト）
-- **次のアクション**: M12 を main へ merge → タグ push（`git tag v0.2.0 && git push origin v0.2.0`）で GoReleaser ワークフロー起動。M13+ で CI matrix 統合 / KMS 連携 / principal alias 等を検討
+- **マイルストーン**: M13（Remote MCP 用サーバホスト型 OAuth callback）
+- **直近の決定**: kintone OAuth が redirect_uri に https を強制する事実が確定（gyuma 実装で裏付け、cybozu 公式ドキュメント確認）。ローカル CLI の loopback http フローは技術的に成立しないため廃止し、認証モデルを「ローカル CLI = API Token」「Remote MCP = OAuth」の二系統に整理（v0.3.0）。
+- **次のアクション**: M13（Remote MCP サーバ上の OAuth callback 実装）に着手。`/devflow:plan` で詳細設計を生成 → `/devflow:implement` で実装。
 
 ## Progress
 
@@ -171,6 +171,18 @@
 - [x] Phase 9: ドキュメント更新（README / spec / CHANGELOG）
 - 詳細: plans/binary-imagining-lemur.md
 - ブランチ: feat-m12-unified-storage-phase01
+
+### M13: Remote MCP 用 サーバホスト型 OAuth callback
+kintone OAuth は redirect_uri に https を強制するため、ローカル CLI loopback フローは廃止（v0.3.0）。リモート MCP サーバ自身が OAuth client として振る舞い、ユーザの kintone トークンをサーバ側で取得・保存する。
+- [ ] `mcp serve --listen` 時に `/oauth/kintone/start` と `/oauth/kintone/callback` ハンドラを追加（`internal/mcp/server` または専用パッケージ）
+- [ ] `state` パラメータに OIDC `sub` を紐付け（state ↔ session map を short-TTL で保持。CSRF 保護として乱数 + HMAC を併用）
+- [ ] callback で受信した authorization code を kintone token endpoint に交換し、TokenStore に `Domain + sub + AuthType=oauth` で保存（既存スキーマ流用）
+- [ ] PrincipalAPIFactory が token 不在を検知した場合、MCP ツール呼び出しは `AUTH_REQUIRED` envelope に authorize URL を含めて返す → クライアントが UI に表示してユーザがブラウザ承認
+- [ ] redirect_uri は MCP サーバの公開 https URL 1 つに固定（kintone OAuth は完全一致照合）
+- [ ] `internal/auth/oauth/{flow,callback,token,refresh}.go` のうち token exchange / refresh ロジックは流用、loopback サーバ部分は削除
+- [ ] E2E: `internal/testsupport/kintonefake` を拡張し、OAuth authorize → callback → API 呼び出しの一連フローを oidcstub 経由で検証
+- [ ] ドキュメント: README / spec / CHANGELOG 更新（`/oauth/kintone/*` エンドポイント仕様、`AUTH_REQUIRED` envelope の追加）
+- 詳細: plans/kintone-m13-remote-mcp-oauth-callback.md（着手時に `/devflow:plan` で生成）
 
 ## Blockers
 なし

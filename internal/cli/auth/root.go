@@ -1,7 +1,13 @@
-// Package auth は kintone CLI の認証関連コマンド（auth login/status/logout）を提供する。
+// Package auth は kintone CLI の認証情報管理コマンド（auth status/logout）を提供する。
 //
-// M09: OAuth 2.0 (Authorization Code Grant + PKCE) のログイン/ステータス/ログアウト。
-// M10 以降: idproxy / multi-user remote MCP への拡張を予定。
+// 認証モデル:
+//   - ローカル CLI 実行: API Token のみ（config.toml / 環境変数 / フラグで指定）
+//   - リモート MCP サーバ: OAuth（M13 でサーバ側 callback を実装予定）
+//
+// kintone OAuth は redirect_uri に https を強制する（loopback http 不可）ため、
+// CLI からのインタラクティブ OAuth ログインは廃止された。サーバ側ホスト型の
+// OAuth フローのみサポートする。auth status/logout は TokenStore 内の
+// OAuth トークンの参照・削除に用いる。
 package auth
 
 import (
@@ -13,9 +19,8 @@ func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "認証情報を管理する",
-		Long:  "auth login / status / logout コマンドで OAuth 認証情報を管理します。",
+		Long:  "auth status / logout コマンドで TokenStore 内の OAuth トークンを管理します。CLI ログインは廃止されました（kintone OAuth は https redirect 必須のため、リモート MCP サーバ経由でのみ取得できます）。",
 	}
-	cmd.AddCommand(newLoginCmd())
 	cmd.AddCommand(newStatusCmd())
 	cmd.AddCommand(newLogoutCmd())
 	return cmd

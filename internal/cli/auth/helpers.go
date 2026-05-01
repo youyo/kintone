@@ -1,4 +1,4 @@
-// Package auth は kintone CLI の認証関連コマンド（auth login/status/logout）を提供する。
+// Package auth は kintone CLI の認証情報管理コマンド（auth status/logout）を提供する。
 //
 // M12 Phase 6b では旧 internal/tokenstore に依存していた経路を internal/store の
 // 統合 Container 経由に切り替えた。Container の取得順序は次の通り:

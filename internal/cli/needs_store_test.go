@@ -60,7 +60,6 @@ func TestIsStoreSkippedCommand(t *testing.T) {
 		{"kintone store init dynamodb", true},
 		// store 必要系
 		{"kintone auth", false},
-		{"kintone auth login", false},
 		{"kintone cache", false},
 		{"kintone cache stats", false},
 		{"kintone mcp serve", false},
@@ -83,7 +82,6 @@ func TestIsStoreRequiredCommand(t *testing.T) {
 		required bool
 	}{
 		{"kintone auth", true},
-		{"kintone auth login", true},
 		{"kintone auth status", true},
 		{"kintone auth logout", true},
 		{"kintone cache", true},
@@ -151,7 +149,6 @@ func TestNeedsStore_Matrix(t *testing.T) {
 		{"help", "kintone help", "", false, false},
 
 		// 必須コマンド
-		{"auth login", "kintone auth login", "", false, true},
 		{"auth status", "kintone auth status", "", false, true},
 		{"auth logout", "kintone auth logout", "", false, true},
 		{"cache stats", "kintone cache stats", "", false, true},

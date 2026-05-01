@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### BREAKING CHANGES — 認証モデルの整理（v0.3.0）
+
+- **削除**: `kintone auth login` サブコマンド（loopback http フロー）。kintone OAuth が redirect_uri に https を強制する事実が確定したため、ローカル CLI からの OAuth ログインは技術的に成立しないと判断した
+- **新方針**: ローカル CLI 利用は **API Token のみ**。OAuth は **リモート MCP サーバ専用**（M13 でサーバホスト型 callback を実装予定）
+- **据え置き**: `kintone auth status` / `kintone auth logout` は TokenStore 内のトークン参照・削除のため残す
+- **据え置き**: `internal/auth/oauth/` の token exchange / refresh / PKCE / state 生成ロジックは M13 のサーバ側 callback で再利用するため保持
+
 ### BREAKING CHANGES — M12 Unified Storage
 
 - 削除した環境変数: `KINTONE_TOKENS_PATH`, `KINTONE_CACHE_PATH`, `KINTONE_CACHE_DISABLE`
