@@ -17,4 +17,17 @@
 //   - dynamodb: マルチリージョン / フルマネージド運用
 //
 // Phase 1 では memory backend のみを実装する。
+//
+// # Backend の登録
+//
+// 各 backend サブパッケージ（memory/sqlite/redis/dynamodb）は
+// init() で RegisterOpener を呼び、factory に自身を登録する。
+// caller は使用する backend をプログラム main の早期で blank import する必要がある。
+//
+//	import (
+//	    _ "github.com/youyo/kintone/internal/store/memory"
+//	    _ "github.com/youyo/kintone/internal/store/sqlite"
+//	)
+//
+// blank import を忘れると OpenFromConfig が ErrUnsupportedBackend を返す。
 package store

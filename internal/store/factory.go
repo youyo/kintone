@@ -42,12 +42,7 @@ func OpenFromConfig(cfg *Config) (Container, error) {
 	op, ok := openers[cfg.Backend]
 	openersMu.RUnlock()
 	if !ok {
-		switch cfg.Backend {
-		case BackendSQLite, BackendRedis, BackendDynamoDB:
-			return nil, fmt.Errorf("%w: %q (Phase 1 supports memory only)", ErrUnsupportedBackend, cfg.Backend)
-		default:
-			return nil, fmt.Errorf("%w: %q", ErrUnsupportedBackend, cfg.Backend)
-		}
+		return nil, fmt.Errorf("%w: %q (caller must blank-import the backend package)", ErrUnsupportedBackend, cfg.Backend)
 	}
 	return op(cfg)
 }
