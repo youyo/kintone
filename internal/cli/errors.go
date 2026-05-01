@@ -202,15 +202,48 @@ func MapToOutputError(err error) *output.Error {
 		}
 	}
 
+	// store init handled エラー（Phase 8）
+	// store init は RunE 内で output.Failure を直接書き込み済み。
+	// ExecuteWith が再度 output.Failure を書かないよう nil を返す（二重書き防止）。
+	type handledError interface {
+		IsHandled() bool
+	}
+	var he handledError
+	if errors.As(err, &he) && he.IsHandled() {
+		return nil
+	}
+
 	// store / idproxy の sentinel（Phase 6d）
 	// USAGE 系（設定ミス・未対応組合せ）
+	//
+	// errorWithDetails は store init 専用の handled エラーから details を取り出す interface。
+	// cli/store パッケージへの直接 import を避け、interface 経由で details を取得する。
+	type errorWithDetails interface {
+		error
+		DetailMap() map[string]any
+	}
 	switch {
 	case errors.Is(err, store.ErrTableNotFound):
-		return &output.Error{Code: "STORE_TABLE_NOT_FOUND", Message: err.Error()}
+		oe := &output.Error{Code: "STORE_TABLE_NOT_FOUND", Message: err.Error()}
+		var ed errorWithDetails
+		if errors.As(err, &ed) {
+			oe.Details = ed.DetailMap()
+		}
+		return oe
 	case errors.Is(err, store.ErrGSIMissing):
-		return &output.Error{Code: "STORE_GSI_MISSING", Message: err.Error()}
+		oe := &output.Error{Code: "STORE_GSI_MISSING", Message: err.Error()}
+		var ed errorWithDetails
+		if errors.As(err, &ed) {
+			oe.Details = ed.DetailMap()
+		}
+		return oe
 	case errors.Is(err, store.ErrTTLDisabled):
-		return &output.Error{Code: "STORE_TTL_DISABLED", Message: err.Error()}
+		oe := &output.Error{Code: "STORE_TTL_DISABLED", Message: err.Error()}
+		var ed errorWithDetails
+		if errors.As(err, &ed) {
+			oe.Details = ed.DetailMap()
+		}
+		return oe
 	case errors.Is(err, store.ErrMemoryOIDCForbidden):
 		return &output.Error{Code: "STORE_MEMORY_OIDC_FORBIDDEN", Message: err.Error()}
 	case errors.Is(err, store.ErrCacheBypassInvalid):

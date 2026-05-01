@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"fmt"
@@ -8,8 +9,12 @@ import (
 	"testing"
 	"time"
 
+	awsdynamodbtest "github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dynamodbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+
 	"github.com/youyo/kintone/internal/auth/oauth"
 	"github.com/youyo/kintone/internal/cli"
+	clistore "github.com/youyo/kintone/internal/cli/store"
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/idproxy"
 	"github.com/youyo/kintone/internal/kintoneapi"
@@ -392,4 +397,84 @@ func TestMapToOutputError_StorePrincipalNotFound(t *testing.T) {
 	if oe.Code != "RESOLVER_PRINCIPAL_NOT_FOUND" {
 		t.Errorf("Code=%q want RESOLVER_PRINCIPAL_NOT_FOUND", oe.Code)
 	}
+}
+
+// Phase 8: store init errStoreInitHandled の details 取り込みテスト
+
+// EP8-1: store init が STORE_GSI_MISSING で失敗した場合、
+// MapToOutputError は nil を返す（二重書き防止）
+func TestMapToOutputError_StoreInitHandled_ReturnsNil(t *testing.T) {
+	// RunInit に fake client で GSI 不足を起こし、errStoreInitHandled を返させる
+	opts := clistore.InitOptions{
+		Table:      "test-table",
+		Capability: "token",
+		Client:     &errTestFakeClient{missingGSI: true},
+	}
+	var buf bytes.Buffer
+	err := clistore.RunInit(context.Background(), &buf, opts)
+	if err == nil {
+		t.Fatal("expected error from RunInit")
+	}
+	// MapToOutputError は handled エラーを受け取ると nil を返す（二重書き防止）
+	oe := cli.MapToOutputError(err)
+	if oe != nil {
+		t.Errorf("expected nil from MapToOutputError for handled error, got %+v", oe)
+	}
+}
+
+// EP8-2: store init が STORE_TABLE_NOT_FOUND で失敗した場合、
+// out には details.table を含む JSON が書かれている
+func TestRunInit_TableNotFound_OutputContainsDetails(t *testing.T) {
+	opts := clistore.InitOptions{
+		Table:      "my-missing-table",
+		Capability: "full",
+		Client:     &errTestFakeClient{tableNotFound: true},
+	}
+	var buf bytes.Buffer
+	err := clistore.RunInit(context.Background(), &buf, opts)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	// MapToOutputError は nil を返す（handled）
+	oe := cli.MapToOutputError(err)
+	if oe != nil {
+		t.Errorf("expected nil output error for handled, got %v", oe)
+	}
+	// buf に書かれた JSON が空でないこと
+	if buf.Len() == 0 {
+		t.Fatal("expected output in buf")
+	}
+}
+
+// errTestFakeClient は errors_test.go 専用の最小 fake DynamoDB クライアント。
+// missingGSI=true なら pk のみ返し GSI なし（STORE_GSI_MISSING を起こす）。
+// tableNotFound=true なら ResourceNotFoundException を返す。
+type errTestFakeClient struct {
+	missingGSI    bool
+	tableNotFound bool
+}
+
+func (f *errTestFakeClient) DescribeTable(_ context.Context, _ *awsdynamodbtest.DescribeTableInput, _ ...func(*awsdynamodbtest.Options)) (*awsdynamodbtest.DescribeTableOutput, error) {
+	if f.tableNotFound {
+		return nil, &dynamodbtypes.ResourceNotFoundException{}
+	}
+	tableName := "test-table"
+	pkName := "pk"
+	return &awsdynamodbtest.DescribeTableOutput{
+		Table: &dynamodbtypes.TableDescription{
+			TableName: &tableName,
+			AttributeDefinitions: []dynamodbtypes.AttributeDefinition{
+				{AttributeName: &pkName, AttributeType: dynamodbtypes.ScalarAttributeTypeS},
+			},
+		},
+	}, nil
+}
+
+func (f *errTestFakeClient) DescribeTimeToLive(_ context.Context, _ *awsdynamodbtest.DescribeTimeToLiveInput, _ ...func(*awsdynamodbtest.Options)) (*awsdynamodbtest.DescribeTimeToLiveOutput, error) {
+	status := dynamodbtypes.TimeToLiveStatusEnabled
+	return &awsdynamodbtest.DescribeTimeToLiveOutput{
+		TimeToLiveDescription: &dynamodbtypes.TimeToLiveDescription{
+			TimeToLiveStatus: status,
+		},
+	}, nil
 }

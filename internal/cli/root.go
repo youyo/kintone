@@ -24,6 +24,7 @@ import (
 	clicompletion "github.com/youyo/kintone/internal/cli/completion"
 	climcp "github.com/youyo/kintone/internal/cli/mcp"
 	cliops "github.com/youyo/kintone/internal/cli/ops"
+	clistore "github.com/youyo/kintone/internal/cli/store"
 	"github.com/youyo/kintone/internal/output"
 	"github.com/youyo/kintone/internal/store"
 )
@@ -53,6 +54,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.AddCommand(clicache.NewCmd())
 	cmd.AddCommand(cliauth.NewCmd())
 	cmd.AddCommand(clicompletion.NewCmd(cmd))
+	cmd.AddCommand(clistore.NewCmd())
 	return cmd
 }
 
@@ -116,8 +118,11 @@ func ExecuteWith(args []string, out, errOut io.Writer) error {
 
 	if err := cmd.Execute(); err != nil {
 		oe := MapToOutputError(err)
-		payload, _ := output.Failure(oe)
-		_ = output.Write(out, payload) // 失敗 JSON は stdout（= out）に統一
+		// oe が nil の場合はすでに出力済み（store init 等が直接書き込んだケース）
+		if oe != nil {
+			payload, _ := output.Failure(oe)
+			_ = output.Write(out, payload) // 失敗 JSON は stdout（= out）に統一
+		}
 		return err
 	}
 	return nil
