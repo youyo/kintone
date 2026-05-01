@@ -2,13 +2,14 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/output"
-	"github.com/youyo/kintone/internal/tokenstore"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // statusEntry は `kintone auth status` の配列 1 要素。
@@ -47,13 +48,13 @@ func runStatus(ctx context.Context, out io.Writer, principalID string) error {
 		return err
 	}
 
-	store, err := openTokenStoreFn()
+	ts, cleanup, err := getTokenStore(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = store.Close() }()
+	defer cleanup()
 
-	entries, err := listOAuthTokens(ctx, store, r.Domain, principalID)
+	entries, err := listOAuthTokens(ctx, ts, r.Domain, principalID)
 	if err != nil {
 		return err
 	}
@@ -66,41 +67,28 @@ func runStatus(ctx context.Context, out io.Writer, principalID string) error {
 }
 
 // listOAuthTokens は TokenStore から OAuth エントリを取得して statusEntry に変換する。
-// principalID が空の場合は既知の全エントリを返す（M09 では全スキャン API がないため
-// 記録済みの principalID を全件スキャンする機能は SQLite の直接 SELECT で実装）。
-func listOAuthTokens(ctx context.Context, store tokenstore.Store, domain, principalID string) ([]statusEntry, error) {
-	// M09 では tokenstore.Store interface に ListByDomain は存在しない。
-	// SQLiteStore の直接 SQL は interface 外なので、Store interface 経由で
-	// 個別 Get しか呼べない。
-	// → principalID 指定なしの場合は SQLiteStore を型アサーションして直接 SQL を使う。
-	// テスト時は mockStore に ListByDomain メソッドがあれば使う（interface 拡張）。
-
-	type listable interface {
-		ListByDomain(ctx context.Context, domain string, authType tokenstore.AuthType) ([]*tokenstore.Token, error)
-	}
-
-	var tokens []*tokenstore.Token
+//
+// principalID 指定時は単一 Get、未指定時は ListByDomain で全件取得する。
+// store.TokenStore interface は ListByDomain をサポートするため、旧 SQLite 直接 SQL を
+// 経由する必要は無い。
+func listOAuthTokens(ctx context.Context, ts store.TokenStore, domain, principalID string) ([]statusEntry, error) {
+	var tokens []*store.Token
 
 	if principalID != "" {
-		// 特定 principal のみ
-		tok, err := store.Get(ctx, domain, principalID, tokenstore.AuthTypeOAuth)
+		tok, err := ts.Get(ctx, domain, principalID, store.AuthTypeOAuth)
 		if err != nil {
-			if err == tokenstore.ErrNotFound {
+			if errors.Is(err, store.ErrNotFound) {
 				return []statusEntry{}, nil
 			}
 			return nil, err
 		}
-		tokens = []*tokenstore.Token{tok}
-	} else if ls, ok := store.(listable); ok {
-		// ListByDomain が使えるとき（SQLiteStore + テスト用 store）
-		var err error
-		tokens, err = ls.ListByDomain(ctx, domain, tokenstore.AuthTypeOAuth)
+		tokens = []*store.Token{tok}
+	} else {
+		ts2, err := ts.ListByDomain(ctx, domain, store.AuthTypeOAuth)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		// interface が ListByDomain を持たない場合は空を返す（M09 制約）
-		tokens = []*tokenstore.Token{}
+		tokens = ts2
 	}
 
 	entries := make([]statusEntry, 0, len(tokens))

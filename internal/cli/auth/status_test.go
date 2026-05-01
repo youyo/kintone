@@ -3,40 +3,36 @@ package auth_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	cliauth "github.com/youyo/kintone/internal/cli/auth"
-	"github.com/youyo/kintone/internal/tokenstore"
+	"github.com/youyo/kintone/internal/store"
 )
-
-// Ensure tokenstore import is used
-var _ = tokenstore.Open
 
 // AS-1: TokenStore に複数 PrincipalID → 配列で出力
 func TestStatus_MultiplePrincipalIDs(t *testing.T) {
-	dbPath := t.TempDir() + "/tokens.db"
-
-	setupStore, err := tokenstore.Open(dbPath)
+	c := newMemoryContainer(t)
+	ts, err := c.Tokens()
 	if err != nil {
-		t.Fatalf("open setup store: %v", err)
+		t.Fatalf("Tokens: %v", err)
 	}
 	future := time.Now().Add(1 * time.Hour)
-	_ = setupStore.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain: "example.cybozu.com", PrincipalID: "oauth:alice",
-		AuthType: tokenstore.AuthTypeOAuth, AccessToken: "alice-token",
+		AuthType: store.AuthTypeOAuth, AccessToken: "alice-token",
 		RefreshToken: "alice-refresh", ExpiresAt: future,
 	})
-	_ = setupStore.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain: "example.cybozu.com", PrincipalID: "oauth:bob",
-		AuthType: tokenstore.AuthTypeOAuth, AccessToken: "bob-token",
+		AuthType: store.AuthTypeOAuth, AccessToken: "bob-token",
 		RefreshToken: "bob-refresh", ExpiresAt: future,
 	})
-	_ = setupStore.Close()
 
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return tokenstore.Open(dbPath) })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	t.Setenv("KINTONE_DOMAIN", "example.cybozu.com")
 
@@ -64,22 +60,20 @@ func TestStatus_MultiplePrincipalIDs(t *testing.T) {
 
 // AS-2: access_token がマスクされること
 func TestStatus_AccessTokenMasked(t *testing.T) {
-	dbPath := t.TempDir() + "/tokens.db"
-
-	setupStore, err := tokenstore.Open(dbPath)
+	c := newMemoryContainer(t)
+	ts, err := c.Tokens()
 	if err != nil {
-		t.Fatalf("open setup store: %v", err)
+		t.Fatalf("Tokens: %v", err)
 	}
 	future := time.Now().Add(1 * time.Hour)
-	_ = setupStore.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain: "example.cybozu.com", PrincipalID: "oauth:alice",
-		AuthType: tokenstore.AuthTypeOAuth, AccessToken: "super-secret-access-token-1234567890",
+		AuthType: store.AuthTypeOAuth, AccessToken: "super-secret-access-token-1234567890",
 		RefreshToken: "ref", ExpiresAt: future,
 	})
-	_ = setupStore.Close()
 
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return tokenstore.Open(dbPath) })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	t.Setenv("KINTONE_DOMAIN", "example.cybozu.com")
 
@@ -100,10 +94,9 @@ func TestStatus_AccessTokenMasked(t *testing.T) {
 
 // AS-3: TokenStore に該当なし → 空配列 / ok=true
 func TestStatus_Empty(t *testing.T) {
-	dbPath := t.TempDir() + "/tokens.db"
-
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return tokenstore.Open(dbPath) })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	c := newMemoryContainer(t)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	t.Setenv("KINTONE_DOMAIN", "example.cybozu.com")
 
@@ -126,12 +119,12 @@ func TestStatus_Empty(t *testing.T) {
 	}
 }
 
-// AS-4: DB オープン失敗 → INTERNAL
+// AS-4: Container オープン失敗 → 戻り値が non-nil error
 func TestStatus_DBOpenFail(t *testing.T) {
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) {
-		return nil, errDBFail
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) {
+		return nil, errors.New("backend unavailable")
 	})
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	t.Cleanup(restore)
 
 	t.Setenv("KINTONE_DOMAIN", "example.cybozu.com")
 
@@ -141,6 +134,3 @@ func TestStatus_DBOpenFail(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
-
-// errDBFail はテスト用 DB エラー。
-var errDBFail = bytes.ErrTooLarge

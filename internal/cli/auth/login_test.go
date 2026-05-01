@@ -9,17 +9,16 @@ import (
 
 	"github.com/youyo/kintone/internal/auth/oauth"
 	cliauth "github.com/youyo/kintone/internal/cli/auth"
-	"github.com/youyo/kintone/internal/tokenstore"
+	"github.com/youyo/kintone/internal/store"
+	_ "github.com/youyo/kintone/internal/store/memory"
 )
 
 // AL-1: OAuth.Login hook が呼ばれ、結果を TokenStore.Put すること。
 func TestLogin_Success(t *testing.T) {
-	// DB ファイルパスを共有して login 後に再オープンで確認する
-	dbPath := t.TempDir() + "/tokens.db"
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) {
-		return tokenstore.Open(dbPath)
-	})
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	// 同じ Container を test の中で共有して login 後に確認する
+	c := newMemoryContainer(t)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	loginCalled := false
 	cliauth.SetLoginFn(func(_ context.Context, cfg oauth.Config) (*oauth.Result, error) {
@@ -50,13 +49,12 @@ func TestLogin_Success(t *testing.T) {
 		t.Error("Login was not called")
 	}
 
-	// login 後に DB を再オープンして確認
-	store, err := tokenstore.Open(dbPath)
+	// login 後に同 Container から再取得して確認
+	ts, err := c.Tokens()
 	if err != nil {
-		t.Fatalf("reopen tokenstore: %v", err)
+		t.Fatalf("c.Tokens: %v", err)
 	}
-	defer func() { _ = store.Close() }()
-	tok, err := store.Get(t.Context(), "example.cybozu.com", "oauth:alice", tokenstore.AuthTypeOAuth)
+	tok, err := ts.Get(t.Context(), "example.cybozu.com", "oauth:alice", store.AuthTypeOAuth)
 	if err != nil {
 		t.Fatalf("TokenStore.Get: %v", err)
 	}
@@ -93,9 +91,9 @@ func TestLogin_MissingRequiredEnv(t *testing.T) {
 	t.Setenv("KINTONE_OAUTH_CLIENT_SECRET", "")
 	t.Setenv("KINTONE_OAUTH_REDIRECT_URL", "")
 
-	store := newTestStore(t)
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return store, nil })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	c := newMemoryContainer(t)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	var out, errOut bytes.Buffer
 	err := cliauth.ExecuteLoginWith([]string{"--oauth", "--principal-id", "oauth:alice"}, &out, &errOut)
@@ -119,9 +117,9 @@ func TestLogin_MissingRequiredEnv(t *testing.T) {
 
 // AL-3: OAuth.Login エラー（state mismatch）→ OAUTH_STATE_MISMATCH
 func TestLogin_StateMismatch(t *testing.T) {
-	store := newTestStore(t)
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return store, nil })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	c := newMemoryContainer(t)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	cliauth.SetLoginFn(func(_ context.Context, _ oauth.Config) (*oauth.Result, error) {
 		return nil, oauth.ErrStateMismatch
@@ -156,9 +154,9 @@ func TestLogin_StateMismatch(t *testing.T) {
 
 // AL-4: 成功時の JSON envelope に principal_id / expires_at / scope が含まれること。
 func TestLogin_OutputContainsPrincipalID(t *testing.T) {
-	store := newTestStore(t)
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return store, nil })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	c := newMemoryContainer(t)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	cliauth.SetLoginFn(func(_ context.Context, _ oauth.Config) (*oauth.Result, error) {
 		return &oauth.Result{
@@ -203,9 +201,9 @@ func TestLogin_OutputContainsPrincipalID(t *testing.T) {
 
 // AL-5: --oauth フラグ未指定 → USAGE
 func TestLogin_MissingOAuthFlag(t *testing.T) {
-	store := newTestStore(t)
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return store, nil })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	c := newMemoryContainer(t)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	t.Setenv("KINTONE_DOMAIN", "example.cybozu.com")
 	t.Setenv("KINTONE_OAUTH_CLIENT_ID", "id")
@@ -232,9 +230,9 @@ func TestLogin_MissingOAuthFlag(t *testing.T) {
 
 // AL-6: --no-browser フラグ指定 → NoBrowser=true が Login に渡されること。
 func TestLogin_NoBrowserFlag(t *testing.T) {
-	store := newTestStore(t)
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return store, nil })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	c := newMemoryContainer(t)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	var gotNoBrowser bool
 	cliauth.SetLoginFn(func(_ context.Context, cfg oauth.Config) (*oauth.Result, error) {
@@ -262,9 +260,9 @@ func TestLogin_NoBrowserFlag(t *testing.T) {
 
 // AL-7: --principal-id 未指定 → USAGE
 func TestLogin_MissingPrincipalID(t *testing.T) {
-	store := newTestStore(t)
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return store, nil })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	c := newMemoryContainer(t)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	t.Setenv("KINTONE_DOMAIN", "example.cybozu.com")
 	t.Setenv("KINTONE_AUTH", "oauth")
@@ -292,9 +290,9 @@ func TestLogin_MissingPrincipalID(t *testing.T) {
 
 // AL-8: --principal-id 空文字 → USAGE
 func TestLogin_EmptyPrincipalID(t *testing.T) {
-	store := newTestStore(t)
-	cliauth.SetOpenTokenStoreFn(func() (tokenstore.Store, error) { return store, nil })
-	t.Cleanup(cliauth.ResetOpenTokenStoreFn)
+	c := newMemoryContainer(t)
+	restore := cliauth.SetOpenStoreFn(func() (store.Container, error) { return c, nil })
+	t.Cleanup(restore)
 
 	t.Setenv("KINTONE_DOMAIN", "example.cybozu.com")
 	t.Setenv("KINTONE_AUTH", "oauth")
@@ -322,14 +320,16 @@ func TestLogin_EmptyPrincipalID(t *testing.T) {
 
 // --- test helpers ---
 
-// newTestStore は t.TempDir() ベースのインメモリ的な tokenstore を返す。
-func newTestStore(t *testing.T) tokenstore.Store {
+// newMemoryContainer は memory backend ベースの Container を返す。
+// テスト終了時に Close される。
+func newMemoryContainer(t *testing.T) store.Container {
 	t.Helper()
-	dir := t.TempDir()
-	store, err := tokenstore.Open(dir + "/tokens.db")
+	c, err := store.OpenFromConfig(&store.Config{Backend: store.BackendMemory})
 	if err != nil {
-		t.Fatalf("open tokenstore: %v", err)
+		t.Fatalf("OpenFromConfig(memory): %v", err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
-	return store
+	t.Cleanup(func() {
+		_ = c.Close(context.Background())
+	})
+	return c
 }
