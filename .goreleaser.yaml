@@ -88,6 +88,7 @@ brews:
       owner: youyo
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
     homepage: https://github.com/youyo/kintone
     description: "kintone CLI / MCP server"
     license: MIT
