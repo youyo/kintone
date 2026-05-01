@@ -8,40 +8,72 @@ import (
 	"sort"
 	"time"
 
-	"github.com/youyo/kintone/internal/cache"
 	"github.com/youyo/kintone/internal/kintoneapi"
+	"github.com/youyo/kintone/internal/store"
 )
+
+// CacheProvider は per-request lazy に store.CacheStore を解決する関数。
+//
+// MCP HTTP の長寿命プロセスでは、起動時に cache 接続を 1 度だけ確立する設計だと
+// 一時的な Redis/DynamoDB 障害が永続化する。CacheProvider 経由で各 API コールごとに
+// 現在の cache を取得することで、Container 側の lazy init / 自動回復ロジックが効く。
+//
+// 戻り値が (nil, err) または (nil, nil) のとき、CachingAPI は fail-open で
+// upstream を直接呼ぶ（既存の fail-open ポリシーと一貫）。
+type CacheProvider func() (store.CacheStore, error)
 
 // CachingAPI は service/api.API を decorator として実装する。
 //
-// apps / fields / list_apps の read 系メソッドを 1 年 TTL で SQLite cache に保存する。
+// apps / fields / list_apps の read 系メソッドを 1 年 TTL で cache に保存する。
 // records 系（read/write）・write 系は upstream に素通し。
 //
-// キャッシュキーは必ず "v1:" で始まる（バージョンプレフィックス / advisor 指摘 #3）。
+// キャッシュキーは必ず "v1:" で始まる（バージョンプレフィックス）。
 // domain を含めることで複数 profile 切り替え時のクロス汚染を防ぐ。
 type CachingAPI struct {
-	upstream API
-	store    cache.Store
-	domain   string
+	upstream      API
+	cacheProvider CacheProvider
+	domain        string
 }
 
 // NewCachingAPI は decorator を構築する。
 //
-// store == nil のときは upstream をそのまま返す（advisor 指摘 #4）。
-// これにより呼び出し側は KINTONE_CACHE_DISABLE=1 の場合でも同じ API 型として扱える。
-func NewCachingAPI(upstream API, store cache.Store, domain string) API {
-	if store == nil {
+// cacheProvider == nil のとき、または provider が常に (nil, nil) を返すときは
+// upstream をそのまま返す（CA-12 互換 / fail-open）。
+//
+// per-request lazy resolution: 各 method 内で cacheProvider() を呼び、
+// 解決失敗時は upstream にフォールバックする。
+func NewCachingAPI(upstream API, cacheProvider CacheProvider, domain string) API {
+	if cacheProvider == nil {
 		return upstream
 	}
-	return &CachingAPI{upstream: upstream, store: store, domain: domain}
+	return &CachingAPI{upstream: upstream, cacheProvider: cacheProvider, domain: domain}
+}
+
+// resolveCache は cacheProvider を呼び、現在のリクエストで使う CacheStore を返す。
+// fail-open: nil を返したときは caller が upstream を直接呼ぶ。
+func (c *CachingAPI) resolveCache() store.CacheStore {
+	if c.cacheProvider == nil {
+		return nil
+	}
+	cs, err := c.cacheProvider()
+	if err != nil {
+		// fail-open: cache 解決失敗はログを残さず upstream にフォールバック
+		// （Container 側で既に warn ログが出ている前提）
+		return nil
+	}
+	return cs
 }
 
 // GetApp は apps を 1 年 TTL でキャッシュする。
 // キャッシュミス or IO エラー時は upstream に フォールバック（fail-open）。
 func (c *CachingAPI) GetApp(ctx context.Context, req kintoneapi.GetAppRequest) (*kintoneapi.GetAppResponse, error) {
-	key := fmt.Sprintf("v1:app:%s:%d", c.domain, req.ID)
+	cs := c.resolveCache()
+	if cs == nil {
+		return c.upstream.GetApp(ctx, req)
+	}
+	key := fmt.Sprintf("%s%s:%d", store.KeyPrefixApps, c.domain, req.ID)
 
-	if resp, ok := c.getCached(ctx, key, new(kintoneapi.GetAppResponse)); ok {
+	if resp, ok := c.getCached(ctx, cs, key, new(kintoneapi.GetAppResponse)); ok {
 		return resp.(*kintoneapi.GetAppResponse), nil
 	}
 
@@ -49,19 +81,23 @@ func (c *CachingAPI) GetApp(ctx context.Context, req kintoneapi.GetAppRequest) (
 	if err != nil {
 		return nil, err
 	}
-	c.putCached(ctx, key, resp, cache.TTLApps)
+	c.putCached(ctx, cs, key, resp, store.TTLApps)
 	return resp, nil
 }
 
 // GetFormFields は fields を 1 年 TTL でキャッシュする。
 func (c *CachingAPI) GetFormFields(ctx context.Context, req kintoneapi.GetFormFieldsRequest) (*kintoneapi.GetFormFieldsResponse, error) {
+	cs := c.resolveCache()
+	if cs == nil {
+		return c.upstream.GetFormFields(ctx, req)
+	}
 	lang := req.Lang
 	if lang == "" {
 		lang = "default"
 	}
-	key := fmt.Sprintf("v1:fields:%s:%d:%s", c.domain, req.App, lang)
+	key := fmt.Sprintf("%s%s:%d:%s", store.KeyPrefixFields, c.domain, req.App, lang)
 
-	if resp, ok := c.getCached(ctx, key, new(kintoneapi.GetFormFieldsResponse)); ok {
+	if resp, ok := c.getCached(ctx, cs, key, new(kintoneapi.GetFormFieldsResponse)); ok {
 		return resp.(*kintoneapi.GetFormFieldsResponse), nil
 	}
 
@@ -69,16 +105,20 @@ func (c *CachingAPI) GetFormFields(ctx context.Context, req kintoneapi.GetFormFi
 	if err != nil {
 		return nil, err
 	}
-	c.putCached(ctx, key, resp, cache.TTLFields)
+	c.putCached(ctx, cs, key, resp, store.TTLFields)
 	return resp, nil
 }
 
 // ListApps は list_apps を 1 年 TTL でキャッシュする。
 // リクエストパラメータを正規化してキャッシュキーに SHA256 ハッシュを使う。
 func (c *CachingAPI) ListApps(ctx context.Context, req kintoneapi.ListAppsRequest) (*kintoneapi.ListAppsResponse, error) {
+	cs := c.resolveCache()
+	if cs == nil {
+		return c.upstream.ListApps(ctx, req)
+	}
 	key := c.listAppsCacheKey(req)
 
-	if resp, ok := c.getCached(ctx, key, new(kintoneapi.ListAppsResponse)); ok {
+	if resp, ok := c.getCached(ctx, cs, key, new(kintoneapi.ListAppsResponse)); ok {
 		return resp.(*kintoneapi.ListAppsResponse), nil
 	}
 
@@ -86,7 +126,7 @@ func (c *CachingAPI) ListApps(ctx context.Context, req kintoneapi.ListAppsReques
 	if err != nil {
 		return nil, err
 	}
-	c.putCached(ctx, key, resp, cache.TTLListApps)
+	c.putCached(ctx, cs, key, resp, store.TTLListApps)
 	return resp, nil
 }
 
@@ -143,15 +183,15 @@ func (c *CachingAPI) listAppsCacheKey(req kintoneapi.ListAppsRequest) string {
 	}
 	b, _ := json.Marshal(n)
 	h := sha256.Sum256(b)
-	return fmt.Sprintf("v1:list_apps:%s:%x", c.domain, h[:8])
+	return fmt.Sprintf("%s%s:%x", store.KeyPrefixListApps, c.domain, h[:8])
 }
 
 // getCached はキャッシュから値を取得して dst に Unmarshal する。
 //
 // ヒット時は (dst, true) を返す。ミス or IO エラー時は (nil, false)（fail-open）。
 // IO エラーは ErrCacheMiss と同様に upstream にフォールバックする（CA-10）。
-func (c *CachingAPI) getCached(ctx context.Context, key string, dst any) (any, bool) {
-	b, err := c.store.Get(ctx, key)
+func (c *CachingAPI) getCached(ctx context.Context, cs store.CacheStore, key string, dst any) (any, bool) {
+	b, err := cs.Get(ctx, key)
 	if err != nil {
 		// ErrCacheMiss および IO エラーは upstream にフォールバック（fail-open / CA-10）
 		return nil, false
@@ -166,12 +206,12 @@ func (c *CachingAPI) getCached(ctx context.Context, key string, dst any) (any, b
 // putCached は値を JSON シリアライズして cache に保存する。
 //
 // エラーは無視する（fail-silent on Put / CA-11）。
-func (c *CachingAPI) putCached(ctx context.Context, key string, v any, ttl time.Duration) {
+func (c *CachingAPI) putCached(ctx context.Context, cs store.CacheStore, key string, v any, ttl time.Duration) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return
 	}
-	_ = c.store.Put(ctx, key, b, ttl)
+	_ = cs.Put(ctx, key, b, ttl)
 }
 
 // GetRecords は upstream に素通し（records は変動するため非キャッシュ）。

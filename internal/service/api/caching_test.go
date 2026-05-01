@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/youyo/kintone/internal/cache"
 	"github.com/youyo/kintone/internal/kintoneapi"
 	serviceapi "github.com/youyo/kintone/internal/service/api"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // --- mock upstream ---
@@ -81,26 +83,119 @@ func (m *mockAPI) DeleteRecords(ctx context.Context, req kintoneapi.DeleteRecord
 	return nil
 }
 
-// openCacheStore はテスト用キャッシュストアを TempDir に作る。
-func openCacheStore(t *testing.T) cache.Store {
-	t.Helper()
-	s, err := cache.Open(t.TempDir() + "/cache.db")
-	if err != nil {
-		t.Fatalf("cache.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
+// --- fake CacheStore ---
+
+// memCacheEntry は memCache のエントリ（value + 期限）。
+type memCacheEntry struct {
+	value     []byte
+	expiresAt time.Time // zero なら無期限
 }
 
-// CA-0: 全 cached メソッドのキーが必ず v1: で始まること
-// （テスト観察: Put が呼ばれた後 key を store から Stats で確認するのではなく
-//  2 回目呼出しで upstream が呼ばれないことで "キャッシュが書かれた" を証明）
+// memCache は in-memory CacheStore 実装。test 専用。
+//
+// store.CacheStore interface を満たす。closed 時は IO エラーを返し、
+// CA-10/CA-11 fail-open 経路を検証可能にする。
+type memCache struct {
+	mu     sync.Mutex
+	data   map[string]memCacheEntry
+	closed bool
+	getErr error
+	putErr error
+	now    func() time.Time
+}
+
+func newMemCache() *memCache {
+	return &memCache{data: map[string]memCacheEntry{}, now: time.Now}
+}
+
+func (m *memCache) Get(_ context.Context, key string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return nil, errors.New("memcache: closed")
+	}
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	e, ok := m.data[key]
+	if !ok {
+		return nil, store.ErrCacheMiss
+	}
+	if !e.expiresAt.IsZero() && !m.now().Before(e.expiresAt) {
+		return nil, store.ErrCacheMiss
+	}
+	cp := make([]byte, len(e.value))
+	copy(cp, e.value)
+	return cp, nil
+}
+
+func (m *memCache) Put(_ context.Context, key string, value []byte, ttl time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return errors.New("memcache: closed")
+	}
+	if m.putErr != nil {
+		return m.putErr
+	}
+	cp := make([]byte, len(value))
+	copy(cp, value)
+	var exp time.Time
+	if ttl > 0 {
+		exp = m.now().Add(ttl)
+	}
+	m.data[key] = memCacheEntry{value: cp, expiresAt: exp}
+	return nil
+}
+
+func (m *memCache) Delete(_ context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.data, key)
+	return nil
+}
+
+func (m *memCache) DeleteByPrefix(_ context.Context, prefix string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for k := range m.data {
+		if strings.HasPrefix(k, prefix) {
+			delete(m.data, k)
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (m *memCache) Stats(_ context.Context) (store.Stats, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return store.Stats{
+		Backend:    "memory-test",
+		Location:   "memory://",
+		Reachable:  !m.closed,
+		EntryCount: int64(len(m.data)),
+	}, nil
+}
+
+func (m *memCache) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closed = true
+	return nil
+}
+
+// providerOf は memCache を返す CacheProvider を構築する。
+func providerOf(mc store.CacheStore) serviceapi.CacheProvider {
+	return func() (store.CacheStore, error) { return mc, nil }
+}
 
 // CA-1: GetApp ミス → upstream 呼ばれ cache に Put
 func TestCachingAPI_GetApp_Miss(t *testing.T) {
 	mock := &mockAPI{}
-	store := openCacheStore(t)
-	api := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
+	mc := newMemCache()
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
 
 	resp, err := api.GetApp(context.Background(), kintoneapi.GetAppRequest{ID: 42})
 	if err != nil {
@@ -117,8 +212,8 @@ func TestCachingAPI_GetApp_Miss(t *testing.T) {
 // CA-2: GetApp ヒット → upstream が呼ばれない
 func TestCachingAPI_GetApp_Hit(t *testing.T) {
 	mock := &mockAPI{}
-	store := openCacheStore(t)
-	api := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
+	mc := newMemCache()
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
 	ctx := context.Background()
 	req := kintoneapi.GetAppRequest{ID: 42}
 
@@ -138,18 +233,18 @@ func TestCachingAPI_GetApp_Hit(t *testing.T) {
 // CA-3: GetApp 期限切れ → upstream が再呼出しされる
 func TestCachingAPI_GetApp_Expired(t *testing.T) {
 	mock := &mockAPI{}
-	store := openCacheStore(t)
+	mc := newMemCache()
 	ctx := context.Background()
 
 	// TTL=1ns で期限切れエントリを直接 Put
 	key := "v1:app:example.cybozu.com:42"
-	if err := store.Put(ctx, key, []byte(`{"appId":"42","name":"cached"}`), 1*time.Nanosecond); err != nil {
+	if err := mc.Put(ctx, key, []byte(`{"appId":"42","name":"cached"}`), 1*time.Nanosecond); err != nil {
 		t.Fatalf("Put expired: %v", err)
 	}
 	// 1ns wait
 	time.Sleep(2 * time.Nanosecond)
 
-	api := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
 	if _, err := api.GetApp(ctx, kintoneapi.GetAppRequest{ID: 42}); err != nil {
 		t.Fatalf("GetApp: %v", err)
 	}
@@ -162,10 +257,10 @@ func TestCachingAPI_GetApp_Expired(t *testing.T) {
 func TestCachingAPI_GetApp_DomainIsolation(t *testing.T) {
 	mockA := &mockAPI{}
 	mockB := &mockAPI{}
-	store := openCacheStore(t)
+	mc := newMemCache()
 
-	apiA := serviceapi.NewCachingAPI(mockA, store, "domainA.cybozu.com")
-	apiB := serviceapi.NewCachingAPI(mockB, store, "domainB.cybozu.com")
+	apiA := serviceapi.NewCachingAPI(mockA, providerOf(mc), "domainA.cybozu.com")
+	apiB := serviceapi.NewCachingAPI(mockB, providerOf(mc), "domainB.cybozu.com")
 	ctx := context.Background()
 	req := kintoneapi.GetAppRequest{ID: 1}
 
@@ -184,8 +279,8 @@ func TestCachingAPI_GetApp_DomainIsolation(t *testing.T) {
 // CA-5: GetFormFields ヒット/ミス
 func TestCachingAPI_GetFormFields_HitMiss(t *testing.T) {
 	mock := &mockAPI{}
-	store := openCacheStore(t)
-	api := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
+	mc := newMemCache()
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
 	ctx := context.Background()
 	req := kintoneapi.GetFormFieldsRequest{App: 10, Lang: "ja"}
 
@@ -205,8 +300,8 @@ func TestCachingAPI_GetFormFields_HitMiss(t *testing.T) {
 // CA-6: ListApps は offset/limit 違いで別キャッシュエントリ
 func TestCachingAPI_ListApps_DifferentArgs(t *testing.T) {
 	mock := &mockAPI{}
-	store := openCacheStore(t)
-	api := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
+	mc := newMemCache()
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
 	ctx := context.Background()
 
 	if _, err := api.ListApps(ctx, kintoneapi.ListAppsRequest{Limit: 10, Offset: 0}); err != nil {
@@ -224,8 +319,8 @@ func TestCachingAPI_ListApps_DifferentArgs(t *testing.T) {
 // CA-6b: listAppsCacheKey 正規化 — IDs=[2,1] と IDs=[1,2] は同一キー
 func TestCachingAPI_ListApps_SliceNormalization(t *testing.T) {
 	mock := &mockAPI{}
-	store := openCacheStore(t)
-	api := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
+	mc := newMemCache()
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
 	ctx := context.Background()
 
 	if _, err := api.ListApps(ctx, kintoneapi.ListAppsRequest{IDs: []int64{2, 1}}); err != nil {
@@ -243,8 +338,8 @@ func TestCachingAPI_ListApps_SliceNormalization(t *testing.T) {
 // CA-6c: nil と 空配列は同一キー
 func TestCachingAPI_ListApps_NilVsEmpty(t *testing.T) {
 	mock := &mockAPI{}
-	store := openCacheStore(t)
-	api := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
+	mc := newMemCache()
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
 	ctx := context.Background()
 
 	if _, err := api.ListApps(ctx, kintoneapi.ListAppsRequest{IDs: nil}); err != nil {
@@ -262,8 +357,8 @@ func TestCachingAPI_ListApps_NilVsEmpty(t *testing.T) {
 // CA-7: GetRecords はキャッシュを介さず必ず upstream に行く
 func TestCachingAPI_GetRecords_Passthrough(t *testing.T) {
 	mock := &mockAPI{}
-	store := openCacheStore(t)
-	api := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
+	mc := newMemCache()
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
 	ctx := context.Background()
 
 	for range 3 {
@@ -279,8 +374,8 @@ func TestCachingAPI_GetRecords_Passthrough(t *testing.T) {
 // CA-8: InsertRecords はキャッシュを介さず upstream に行く
 func TestCachingAPI_InsertRecords_Passthrough(t *testing.T) {
 	mock := &mockAPI{}
-	store := openCacheStore(t)
-	api := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
+	mc := newMemCache()
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
 	ctx := context.Background()
 
 	for range 2 {
@@ -301,8 +396,8 @@ func TestCachingAPI_GetApp_UpstreamError(t *testing.T) {
 			return nil, upstreamErr
 		},
 	}
-	store := openCacheStore(t)
-	api := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
+	mc := newMemCache()
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
 	ctx := context.Background()
 
 	_, err := api.GetApp(ctx, kintoneapi.GetAppRequest{ID: 99})
@@ -322,15 +417,13 @@ func TestCachingAPI_GetApp_UpstreamError(t *testing.T) {
 // CA-10: cache.Get が IO エラー（miss 以外）→ upstream にフォールバック（fail-open）
 func TestCachingAPI_GetApp_CacheGetError_FailOpen(t *testing.T) {
 	mock := &mockAPI{}
-	// 閉じた store を使うと IO エラーになる
-	store := openCacheStore(t)
-	api := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
-	// store を Close してから呼ぶ
-	_ = store.Close()
+	mc := newMemCache()
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
+	// closed にすると Get/Put が IO エラーになる
+	_ = mc.Close()
 
 	// fail-open: エラーにならず upstream を呼ぶ
 	_, err := api.GetApp(context.Background(), kintoneapi.GetAppRequest{ID: 1})
-	// upstream 自体は動くのでエラーにならない
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -342,14 +435,13 @@ func TestCachingAPI_GetApp_CacheGetError_FailOpen(t *testing.T) {
 // CA-11: cache.Put エラーでも upstream レスポンスは返す（fail-silent on Put）
 func TestCachingAPI_GetApp_CachePutError_FailSilent(t *testing.T) {
 	mock := &mockAPI{}
-	store := openCacheStore(t)
+	mc := newMemCache()
 	ctx := context.Background()
-	// store を閉じて Put が失敗する状態にする
-	_ = store.Close()
-	// 閉じた store を持つ api
-	api2 := serviceapi.NewCachingAPI(mock, store, "example.cybozu.com")
+	// Put のみ失敗するように設定
+	mc.putErr = errors.New("put failed")
+	api := serviceapi.NewCachingAPI(mock, providerOf(mc), "example.cybozu.com")
 
-	resp, err := api2.GetApp(ctx, kintoneapi.GetAppRequest{ID: 5})
+	resp, err := api.GetApp(ctx, kintoneapi.GetAppRequest{ID: 5})
 	// Put が失敗しても upstream レスポンスを返す
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -359,8 +451,8 @@ func TestCachingAPI_GetApp_CachePutError_FailSilent(t *testing.T) {
 	}
 }
 
-// CA-12: nil store → upstream をそのまま返す
-func TestCachingAPI_NilStore(t *testing.T) {
+// CA-12: nil cacheProvider → upstream をそのまま返す
+func TestCachingAPI_NilProvider(t *testing.T) {
 	mock := &mockAPI{}
 	api := serviceapi.NewCachingAPI(mock, nil, "example.cybozu.com")
 
@@ -370,5 +462,42 @@ func TestCachingAPI_NilStore(t *testing.T) {
 	}
 	if mock.getAppCalls != 1 {
 		t.Errorf("upstream calls: want 1, got %d", mock.getAppCalls)
+	}
+}
+
+// CA-13: cacheProvider が (nil, err) を返す → fail-open
+func TestCachingAPI_CacheProviderError_FailOpen(t *testing.T) {
+	mock := &mockAPI{}
+	provider := serviceapi.CacheProvider(func() (store.CacheStore, error) {
+		return nil, errors.New("redis unreachable")
+	})
+	api := serviceapi.NewCachingAPI(mock, provider, "example.cybozu.com")
+
+	if _, err := api.GetApp(context.Background(), kintoneapi.GetAppRequest{ID: 1}); err != nil {
+		t.Fatalf("GetApp: %v", err)
+	}
+	if mock.getAppCalls != 1 {
+		t.Errorf("upstream calls: want 1 (provider error → fail-open), got %d", mock.getAppCalls)
+	}
+}
+
+// CA-14: per-request lazy resolution — provider が呼ばれるたびに評価される
+func TestCachingAPI_PerRequestLazy(t *testing.T) {
+	mock := &mockAPI{}
+	mc := newMemCache()
+	calls := 0
+	provider := serviceapi.CacheProvider(func() (store.CacheStore, error) {
+		calls++
+		return mc, nil
+	})
+	api := serviceapi.NewCachingAPI(mock, provider, "example.cybozu.com")
+
+	for range 3 {
+		if _, err := api.GetApp(context.Background(), kintoneapi.GetAppRequest{ID: 1}); err != nil {
+			t.Fatalf("GetApp: %v", err)
+		}
+	}
+	if calls != 3 {
+		t.Errorf("provider calls: want 3, got %d", calls)
 	}
 }

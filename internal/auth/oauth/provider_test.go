@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,29 +12,29 @@ import (
 
 	"github.com/youyo/kintone/internal/auth"
 	"github.com/youyo/kintone/internal/auth/oauth"
-	"github.com/youyo/kintone/internal/tokenstore"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // コンパイル時に oauth.Authenticator が auth.Authenticator を実装することを確認。
 var _ auth.Authenticator = (*oauth.Authenticator)(nil)
 
-// mockStore はテスト用の in-memory tokenstore.Store。
+// mockStore はテスト用の in-memory store.TokenStore。
 type mockStore struct {
 	mu     sync.Mutex
-	tokens map[string]*tokenstore.Token
+	tokens map[string]*store.Token
 	getErr error
 	putErr error
 }
 
 func newMockStore() *mockStore {
-	return &mockStore{tokens: make(map[string]*tokenstore.Token)}
+	return &mockStore{tokens: make(map[string]*store.Token)}
 }
 
-func (m *mockStore) key(domain, principalID string, t tokenstore.AuthType) string {
+func (m *mockStore) key(domain, principalID string, t store.AuthType) string {
 	return domain + "|" + principalID + "|" + string(t)
 }
 
-func (m *mockStore) Get(_ context.Context, domain, principalID string, t tokenstore.AuthType) (*tokenstore.Token, error) {
+func (m *mockStore) Get(_ context.Context, domain, principalID string, t store.AuthType) (*store.Token, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.getErr != nil {
@@ -41,14 +42,14 @@ func (m *mockStore) Get(_ context.Context, domain, principalID string, t tokenst
 	}
 	tok, ok := m.tokens[m.key(domain, principalID, t)]
 	if !ok {
-		return nil, tokenstore.ErrNotFound
+		return nil, store.ErrNotFound
 	}
 	// コピーを返す
 	cp := *tok
 	return &cp, nil
 }
 
-func (m *mockStore) Put(_ context.Context, tok tokenstore.Token) error {
+func (m *mockStore) Put(_ context.Context, tok store.Token) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.putErr != nil {
@@ -59,11 +60,25 @@ func (m *mockStore) Put(_ context.Context, tok tokenstore.Token) error {
 	return nil
 }
 
-func (m *mockStore) Delete(_ context.Context, domain, principalID string, t tokenstore.AuthType) error {
+func (m *mockStore) Delete(_ context.Context, domain, principalID string, t store.AuthType) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.tokens, m.key(domain, principalID, t))
 	return nil
+}
+
+func (m *mockStore) ListByDomain(_ context.Context, domain string, t store.AuthType) ([]*store.Token, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*store.Token, 0)
+	for _, tok := range m.tokens {
+		if tok.Domain == domain && tok.AuthType == t {
+			cp := *tok
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PrincipalID < out[j].PrincipalID })
+	return out, nil
 }
 
 func (m *mockStore) Close() error { return nil }
@@ -86,17 +101,17 @@ func (mr *mockRefresher) Refresh(_ context.Context, _ string) (*oauth.Result, er
 // PR-1: access_token 有効 → req に Bearer ヘッダ付与
 func TestAuthenticator_Apply_ValidToken(t *testing.T) {
 	t.Parallel()
-	store := newMockStore()
+	ts := newMockStore()
 	future := time.Now().Add(1 * time.Hour)
-	_ = store.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain:      "example.cybozu.com",
 		PrincipalID: "oauth:alice",
-		AuthType:    tokenstore.AuthTypeOAuth,
+		AuthType:    store.AuthTypeOAuth,
 		AccessToken: "valid-access-token",
 		ExpiresAt:   future,
 	})
 
-	a := oauth.NewAuthenticator(store, "example.cybozu.com", "oauth:alice", nil, nil)
+	a := oauth.NewAuthenticator(ts, "example.cybozu.com", "oauth:alice", nil, nil)
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.cybozu.com/k/v1/records.json", nil)
 	if err := a.Apply(t.Context(), req); err != nil {
@@ -110,12 +125,12 @@ func TestAuthenticator_Apply_ValidToken(t *testing.T) {
 // PR-2: 期限切れ → refresh が呼ばれて TokenStore 更新 → Bearer ヘッダ
 func TestAuthenticator_Apply_ExpiredToken_Refresh(t *testing.T) {
 	t.Parallel()
-	store := newMockStore()
+	ts := newMockStore()
 	past := time.Now().Add(-1 * time.Hour)
-	_ = store.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain:       "example.cybozu.com",
 		PrincipalID:  "oauth:alice",
-		AuthType:     tokenstore.AuthTypeOAuth,
+		AuthType:     store.AuthTypeOAuth,
 		AccessToken:  "expired-access-token",
 		RefreshToken: "my-refresh-token",
 		ExpiresAt:    past,
@@ -128,7 +143,7 @@ func TestAuthenticator_Apply_ExpiredToken_Refresh(t *testing.T) {
 			ExpiresAt:    time.Now().Add(1 * time.Hour),
 		},
 	}
-	a := oauth.NewAuthenticator(store, "example.cybozu.com", "oauth:alice", mr, nil)
+	a := oauth.NewAuthenticator(ts, "example.cybozu.com", "oauth:alice", mr, nil)
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.cybozu.com/k/v1/records.json", nil)
 	if err := a.Apply(t.Context(), req); err != nil {
@@ -138,7 +153,7 @@ func TestAuthenticator_Apply_ExpiredToken_Refresh(t *testing.T) {
 		t.Errorf("Authorization: got %q", got)
 	}
 	// TokenStore が更新されていること
-	stored, _ := store.Get(t.Context(), "example.cybozu.com", "oauth:alice", tokenstore.AuthTypeOAuth)
+	stored, _ := ts.Get(t.Context(), "example.cybozu.com", "oauth:alice", store.AuthTypeOAuth)
 	if stored.AccessToken != "new-access-token" {
 		t.Errorf("stored access_token: got %q", stored.AccessToken)
 	}
@@ -147,12 +162,12 @@ func TestAuthenticator_Apply_ExpiredToken_Refresh(t *testing.T) {
 // PR-3: 並行 Apply → refresh は 1 回のみ（mutex 動作）
 func TestAuthenticator_Apply_ConcurrentRefresh(t *testing.T) {
 	t.Parallel()
-	store := newMockStore()
+	ts := newMockStore()
 	past := time.Now().Add(-1 * time.Hour)
-	_ = store.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain:       "example.cybozu.com",
 		PrincipalID:  "oauth:alice",
-		AuthType:     tokenstore.AuthTypeOAuth,
+		AuthType:     store.AuthTypeOAuth,
 		AccessToken:  "expired-access-token",
 		RefreshToken: "my-refresh-token",
 		ExpiresAt:    past,
@@ -178,7 +193,7 @@ func TestAuthenticator_Apply_ConcurrentRefresh(t *testing.T) {
 		},
 	}
 
-	a := oauth.NewAuthenticator(store, "example.cybozu.com", "oauth:alice", countRefresher, nil)
+	a := oauth.NewAuthenticator(ts, "example.cybozu.com", "oauth:alice", countRefresher, nil)
 
 	const goroutines = 10
 	var wg sync.WaitGroup
@@ -213,19 +228,19 @@ func (c *countingRefresher) Refresh(_ context.Context, _ string) (*oauth.Result,
 // PR-4: refresh エラー → ErrRefreshTokenRevoked → req 未変更
 func TestAuthenticator_Apply_RefreshError(t *testing.T) {
 	t.Parallel()
-	store := newMockStore()
+	ts := newMockStore()
 	past := time.Now().Add(-1 * time.Hour)
-	_ = store.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain:       "example.cybozu.com",
 		PrincipalID:  "oauth:alice",
-		AuthType:     tokenstore.AuthTypeOAuth,
+		AuthType:     store.AuthTypeOAuth,
 		AccessToken:  "expired",
 		RefreshToken: "revoked",
 		ExpiresAt:    past,
 	})
 
 	mr := &mockRefresher{err: oauth.ErrRefreshTokenRevoked}
-	a := oauth.NewAuthenticator(store, "example.cybozu.com", "oauth:alice", mr, nil)
+	a := oauth.NewAuthenticator(ts, "example.cybozu.com", "oauth:alice", mr, nil)
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.cybozu.com/k/v1/records.json", nil)
 	err := a.Apply(t.Context(), req)
@@ -244,10 +259,10 @@ func TestAuthenticator_Apply_RefreshError(t *testing.T) {
 // PR-5: TokenStore.Get 失敗 → エラー伝播
 func TestAuthenticator_Apply_StoreGetError(t *testing.T) {
 	t.Parallel()
-	store := newMockStore()
-	store.getErr = errors.New("db error")
+	ts := newMockStore()
+	ts.getErr = errors.New("db error")
 
-	a := oauth.NewAuthenticator(store, "example.cybozu.com", "oauth:alice", nil, nil)
+	a := oauth.NewAuthenticator(ts, "example.cybozu.com", "oauth:alice", nil, nil)
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.cybozu.com", nil)
 	err := a.Apply(t.Context(), req)
@@ -269,13 +284,13 @@ func TestAuthenticator_Apply_NilRequest(t *testing.T) {
 // PR-7: skew 内（now + skew >= expires_at）→ refresh トリガ
 func TestAuthenticator_Apply_SkewTriggersRefresh(t *testing.T) {
 	t.Parallel()
-	store := newMockStore()
+	ts := newMockStore()
 	// 30 秒後に期限切れ（デフォルト skew は 60s → refresh トリガ）
 	soonExpiry := time.Now().Add(30 * time.Second)
-	_ = store.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain:       "example.cybozu.com",
 		PrincipalID:  "oauth:alice",
-		AuthType:     tokenstore.AuthTypeOAuth,
+		AuthType:     store.AuthTypeOAuth,
 		AccessToken:  "soon-expired",
 		RefreshToken: "refresh-token",
 		ExpiresAt:    soonExpiry,
@@ -288,7 +303,7 @@ func TestAuthenticator_Apply_SkewTriggersRefresh(t *testing.T) {
 			ExpiresAt:    time.Now().Add(1 * time.Hour),
 		},
 	}
-	a := oauth.NewAuthenticator(store, "example.cybozu.com", "oauth:alice", mr, nil)
+	a := oauth.NewAuthenticator(ts, "example.cybozu.com", "oauth:alice", mr, nil)
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.cybozu.com", nil)
 	if err := a.Apply(t.Context(), req); err != nil {
@@ -302,12 +317,12 @@ func TestAuthenticator_Apply_SkewTriggersRefresh(t *testing.T) {
 // PR-8: refresh 後の new refresh_token を TokenStore に保存すること
 func TestAuthenticator_Apply_StoresNewRefreshToken(t *testing.T) {
 	t.Parallel()
-	store := newMockStore()
+	ts := newMockStore()
 	past := time.Now().Add(-1 * time.Hour)
-	_ = store.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain:       "example.cybozu.com",
 		PrincipalID:  "oauth:alice",
-		AuthType:     tokenstore.AuthTypeOAuth,
+		AuthType:     store.AuthTypeOAuth,
 		AccessToken:  "expired",
 		RefreshToken: "old-refresh",
 		ExpiresAt:    past,
@@ -320,12 +335,12 @@ func TestAuthenticator_Apply_StoresNewRefreshToken(t *testing.T) {
 			ExpiresAt:    time.Now().Add(1 * time.Hour),
 		},
 	}
-	a := oauth.NewAuthenticator(store, "example.cybozu.com", "oauth:alice", mr, nil)
+	a := oauth.NewAuthenticator(ts, "example.cybozu.com", "oauth:alice", mr, nil)
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.cybozu.com", nil)
 	_ = a.Apply(t.Context(), req)
 
-	stored, _ := store.Get(t.Context(), "example.cybozu.com", "oauth:alice", tokenstore.AuthTypeOAuth)
+	stored, _ := ts.Get(t.Context(), "example.cybozu.com", "oauth:alice", store.AuthTypeOAuth)
 	if stored.RefreshToken != "brand-new-refresh" {
 		t.Errorf("stored refresh_token: got %q, want %q", stored.RefreshToken, "brand-new-refresh")
 	}
@@ -334,12 +349,12 @@ func TestAuthenticator_Apply_StoresNewRefreshToken(t *testing.T) {
 // PR-9: refresh レスポンスに refresh_token なし → 旧 refresh_token を維持
 func TestAuthenticator_Apply_KeepsOldRefreshToken(t *testing.T) {
 	t.Parallel()
-	store := newMockStore()
+	ts := newMockStore()
 	past := time.Now().Add(-1 * time.Hour)
-	_ = store.Put(t.Context(), tokenstore.Token{
+	_ = ts.Put(t.Context(), store.Token{
 		Domain:       "example.cybozu.com",
 		PrincipalID:  "oauth:alice",
-		AuthType:     tokenstore.AuthTypeOAuth,
+		AuthType:     store.AuthTypeOAuth,
 		AccessToken:  "expired",
 		RefreshToken: "original-refresh",
 		ExpiresAt:    past,
@@ -352,12 +367,12 @@ func TestAuthenticator_Apply_KeepsOldRefreshToken(t *testing.T) {
 			ExpiresAt:    time.Now().Add(1 * time.Hour),
 		},
 	}
-	a := oauth.NewAuthenticator(store, "example.cybozu.com", "oauth:alice", mr, nil)
+	a := oauth.NewAuthenticator(ts, "example.cybozu.com", "oauth:alice", mr, nil)
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.cybozu.com", nil)
 	_ = a.Apply(t.Context(), req)
 
-	stored, _ := store.Get(t.Context(), "example.cybozu.com", "oauth:alice", tokenstore.AuthTypeOAuth)
+	stored, _ := ts.Get(t.Context(), "example.cybozu.com", "oauth:alice", store.AuthTypeOAuth)
 	if stored.RefreshToken != "original-refresh" {
 		t.Errorf("stored refresh_token: got %q, want original-refresh", stored.RefreshToken)
 	}

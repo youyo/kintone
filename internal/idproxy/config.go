@@ -2,9 +2,6 @@ package idproxy
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -15,12 +12,17 @@ import (
 
 	upstream "github.com/youyo/idproxy"
 	idstore "github.com/youyo/idproxy/store"
+
+	"github.com/youyo/kintone/internal/store"
 )
 
 // Env は env / CLI から読み取った idproxy 構成のパラメータ。
 //
 // CookieSecret は hex 文字列（>= 64 hex chars = 32 bytes）として保持し、
 // Validate 時にデコード結果を CookieSecretDecoded に格納する。
+//
+// M12 Phase 6c で SigningKeyPEM / SigningKeyAutoGenerate / StoreBackend を追加。
+// これらは BuildAuth 内で ResolveSigningKey に渡される。
 type Env struct {
 	Issuer         string   // KINTONE_MCP_OIDC_ISSUER（必須）
 	ClientID       string   // KINTONE_MCP_OIDC_CLIENT_ID（必須）
@@ -32,6 +34,13 @@ type Env struct {
 
 	// CookieSecretDecoded は Validate 後にバイナリ化された Cookie シークレット。
 	CookieSecretDecoded []byte
+
+	// SigningKeyPEM は KINTONE_MCP_SIGNING_KEY_PEM の値。空のとき env からの注入なし。
+	SigningKeyPEM string
+	// SigningKeyAutoGenerate は KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE=1 のオプトイン。
+	SigningKeyAutoGenerate bool
+	// StoreBackend は backend × authMode 禁止組合せ検証で使う backend 名。
+	StoreBackend string
 }
 
 // LoadEnvFromOS は os.Getenv で Env を構築する。Validate は呼ばない。
@@ -50,14 +59,18 @@ func LoadEnvFromOS() Env {
 		}
 		return out
 	}
+	storeCfg := store.LoadFromEnv()
 	return Env{
-		Issuer:         os.Getenv("KINTONE_MCP_OIDC_ISSUER"),
-		ClientID:       os.Getenv("KINTONE_MCP_OIDC_CLIENT_ID"),
-		ClientSecret:   os.Getenv("KINTONE_MCP_OIDC_CLIENT_SECRET"),
-		ExternalURL:    os.Getenv("KINTONE_MCP_EXTERNAL_URL"),
-		CookieSecret:   os.Getenv("KINTONE_MCP_COOKIE_SECRET"),
-		AllowedDomains: csv(os.Getenv("KINTONE_MCP_ALLOWED_DOMAINS")),
-		AllowedEmails:  csv(os.Getenv("KINTONE_MCP_ALLOWED_EMAILS")),
+		Issuer:                 os.Getenv("KINTONE_MCP_OIDC_ISSUER"),
+		ClientID:               os.Getenv("KINTONE_MCP_OIDC_CLIENT_ID"),
+		ClientSecret:           os.Getenv("KINTONE_MCP_OIDC_CLIENT_SECRET"),
+		ExternalURL:            os.Getenv("KINTONE_MCP_EXTERNAL_URL"),
+		CookieSecret:           os.Getenv("KINTONE_MCP_COOKIE_SECRET"),
+		AllowedDomains:         csv(os.Getenv("KINTONE_MCP_ALLOWED_DOMAINS")),
+		AllowedEmails:          csv(os.Getenv("KINTONE_MCP_ALLOWED_EMAILS")),
+		SigningKeyPEM:          storeCfg.SigningKeyPEM,
+		SigningKeyAutoGenerate: storeCfg.SigningKeyAutoGenerate,
+		StoreBackend:           storeCfg.Backend,
 	}
 }
 
@@ -114,10 +127,14 @@ func isExternalURLValid(s string) bool {
 //
 // Validate 済みであることが前提。Validate を呼んでいない場合は内部で呼ぶ。
 //
-// Store は MemoryStore を採用する（M10 スコープ）。SQLite / Redis 切替は M11+。
-// SigningKey は ephemeral ES256 を生成する（development デフォルト）。
-// 永続鍵対応は M11+。
-func BuildAuth(ctx context.Context, e *Env) (*upstream.Auth, error) {
+// M12 Phase 6c から:
+//   - SigningKey は ResolveSigningKey 経由で env > Storage > ephemeral の順で解決
+//   - idproxy の Store は container.IDProxyStore() で取得（auth=oidc 必須）
+//   - container == nil かつ authMode == "oidc" は ErrSigningKeyRequired で fail-fast
+//
+// authZMode は idproxy 自身では使わないが、上位の判断と整合させるためシグネチャに残す。
+func BuildAuth(ctx context.Context, e *Env, authMode string, authZMode string, container store.Container) (*upstream.Auth, error) {
+	_ = authZMode // idproxy の関心事ではない（upstream kintone への認可方式）
 	if e == nil {
 		return nil, errors.New("idproxy: nil Env")
 	}
@@ -126,10 +143,33 @@ func BuildAuth(ctx context.Context, e *Env) (*upstream.Auth, error) {
 			return nil, err
 		}
 	}
-	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
+	// SigningKey 解決（env > Storage > ephemeral）
+	signingKey, err := ResolveSigningKey(
+		ctx,
+		e.SigningKeyPEM,
+		e.SigningKeyAutoGenerate,
+		AuthMode(authMode),
+		e.StoreBackend,
+		container,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("idproxy: generate signing key: %w", err)
+		return nil, fmt.Errorf("idproxy: resolve signing key: %w", err)
 	}
+
+	// idproxy の Store: auth=oidc では Container.IDProxyStore を使う
+	var idpStore upstream.Store
+	if container != nil && AuthMode(authMode) == AuthModeOIDC {
+		s, err := container.IDProxyStore()
+		if err != nil {
+			return nil, fmt.Errorf("idproxy: get idproxy store: %w", err)
+		}
+		idpStore = s
+	} else {
+		// fallback: Memory（auth=none / container 不在の development 経路）
+		idpStore = idstore.NewMemoryStore()
+	}
+
 	cfg := upstream.Config{
 		Providers: []upstream.OIDCProvider{{
 			Issuer:       e.Issuer,
@@ -140,7 +180,7 @@ func BuildAuth(ctx context.Context, e *Env) (*upstream.Auth, error) {
 		AllowedEmails:   e.AllowedEmails,
 		ExternalURL:     e.ExternalURL,
 		CookieSecret:    e.CookieSecretDecoded,
-		Store:           idstore.NewMemoryStore(),
+		Store:           idpStore,
 		OAuth:           &upstream.OAuthConfig{SigningKey: signingKey},
 		SessionMaxAge:   24 * time.Hour,
 		AccessTokenTTL:  1 * time.Hour,
