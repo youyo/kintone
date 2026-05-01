@@ -27,6 +27,10 @@ type Config struct {
 	DynamoDBRegion string
 	CacheBypass    bool
 	SigningKeyPEM  string
+	// SigningKeyAutoGenerate は KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE=1 のオプトインで、
+	// SigningKey が env / Storage に未保存のとき新規生成・保存を許可するフラグ。
+	// 未設定（false）かつ env も未設定の場合、auth=oidc では fail-fast する。
+	SigningKeyAutoGenerate bool
 }
 
 // LoadFromEnv は os 環境変数から Config を構築する。
@@ -34,15 +38,16 @@ type Config struct {
 // 呼び出し側は明示的に Backend = BackendMemory を指定するか KINTONE_STORE_BACKEND=memory を設定する必要がある。
 func LoadFromEnv() *Config {
 	return &Config{
-		Backend:        getenvDefault("KINTONE_STORE_BACKEND", BackendSQLite),
-		SQLiteDir:      os.Getenv("KINTONE_STORE_SQLITE_DIR"),
-		RedisURL:       os.Getenv("KINTONE_STORE_REDIS_URL"),
-		RedisTLS:       boolEnv("KINTONE_STORE_REDIS_TLS"),
-		RedisPassword:  os.Getenv("KINTONE_STORE_REDIS_PASSWORD"),
-		DynamoDBTable:  os.Getenv("KINTONE_STORE_DYNAMODB_TABLE"),
-		DynamoDBRegion: os.Getenv("KINTONE_STORE_DYNAMODB_REGION"),
-		CacheBypass:    boolEnv("KINTONE_STORE_CACHE_BYPASS"),
-		SigningKeyPEM:  os.Getenv("KINTONE_MCP_SIGNING_KEY_PEM"),
+		Backend:                getenvDefault("KINTONE_STORE_BACKEND", BackendSQLite),
+		SQLiteDir:              os.Getenv("KINTONE_STORE_SQLITE_DIR"),
+		RedisURL:               os.Getenv("KINTONE_STORE_REDIS_URL"),
+		RedisTLS:               boolEnv("KINTONE_STORE_REDIS_TLS"),
+		RedisPassword:          os.Getenv("KINTONE_STORE_REDIS_PASSWORD"),
+		DynamoDBTable:          os.Getenv("KINTONE_STORE_DYNAMODB_TABLE"),
+		DynamoDBRegion:         os.Getenv("KINTONE_STORE_DYNAMODB_REGION"),
+		CacheBypass:            boolEnv("KINTONE_STORE_CACHE_BYPASS"),
+		SigningKeyPEM:          os.Getenv("KINTONE_MCP_SIGNING_KEY_PEM"),
+		SigningKeyAutoGenerate: boolEnv("KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE"),
 	}
 }
 

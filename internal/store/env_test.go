@@ -5,12 +5,16 @@ import "testing"
 func TestLoadFromEnv_Defaults(t *testing.T) {
 	t.Setenv("KINTONE_STORE_BACKEND", "")
 	t.Setenv("KINTONE_STORE_CACHE_BYPASS", "")
+	t.Setenv("KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE", "")
 	cfg := LoadFromEnv()
 	if cfg.Backend != BackendSQLite {
 		t.Fatalf("default backend = %q, want %q", cfg.Backend, BackendSQLite)
 	}
 	if cfg.CacheBypass {
 		t.Fatalf("default cache_bypass should be false")
+	}
+	if cfg.SigningKeyAutoGenerate {
+		t.Fatalf("default signing_key_auto_generate should be false")
 	}
 }
 
@@ -24,6 +28,7 @@ func TestLoadFromEnv_Overrides(t *testing.T) {
 	t.Setenv("KINTONE_STORE_DYNAMODB_REGION", "ap-northeast-1")
 	t.Setenv("KINTONE_STORE_CACHE_BYPASS", "1")
 	t.Setenv("KINTONE_MCP_SIGNING_KEY_PEM", "PEM-DATA")
+	t.Setenv("KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE", "true")
 
 	cfg := LoadFromEnv()
 	if cfg.Backend != BackendMemory {
@@ -52,6 +57,9 @@ func TestLoadFromEnv_Overrides(t *testing.T) {
 	}
 	if cfg.SigningKeyPEM != "PEM-DATA" {
 		t.Errorf("SigningKeyPEM got=%q", cfg.SigningKeyPEM)
+	}
+	if !cfg.SigningKeyAutoGenerate {
+		t.Errorf("SigningKeyAutoGenerate should be true")
 	}
 }
 
