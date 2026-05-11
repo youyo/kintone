@@ -43,6 +43,10 @@ type Container struct {
 	signing     *SQLiteSigningKeyStore
 	signingErr  error
 
+	stateOnce sync.Once
+	state     *SQLiteStateStore
+	stateErr  error
+
 	idproxyOnce  sync.Once
 	idproxyStore idproxy.Store
 	idproxyErr   error
@@ -137,6 +141,22 @@ func (c *Container) SigningKey() (store.SigningKeyStore, error) {
 	return c.signing, nil
 }
 
+// StateStore は SQLiteStateStore を lazy 初期化して返す。
+func (c *Container) StateStore() (store.StateStore, error) {
+	c.stateOnce.Do(func() {
+		db, err := c.initDB()
+		if err != nil {
+			c.stateErr = err
+			return
+		}
+		c.state = NewStateStore(db)
+	})
+	if c.stateErr != nil {
+		return nil, c.stateErr
+	}
+	return c.state, nil
+}
+
 // IDProxyStore は idproxy 用 SQLite store を lazy 初期化して返す。
 //
 // 初回呼び出し時のみ idproxy.db ファイルを作成する。`kintone auth login` のような
@@ -182,6 +202,9 @@ func (c *Container) Close(_ context.Context) error {
 		}
 		if c.signing != nil {
 			_ = c.signing.Close()
+		}
+		if c.state != nil {
+			_ = c.state.Close()
 		}
 		if c.db != nil {
 			if err := c.db.Close(); err != nil {

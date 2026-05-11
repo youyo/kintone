@@ -16,24 +16,13 @@ func mapOAuthError(err error) *output.Error {
 		return nil
 	}
 
-	// sentinel エラー
-	if errors.Is(err, oauth.ErrStateMismatch) {
-		return &output.Error{Code: "OAUTH_STATE_MISMATCH", Message: err.Error()}
-	}
-	if errors.Is(err, oauth.ErrCallbackTimeout) {
-		return &output.Error{Code: "OAUTH_CALLBACK_TIMEOUT", Message: err.Error()}
-	}
+	// sentinel エラー（M14 で loopback 関連の sentinel は削除済み。
+	// 残るのは refresh / token expiry のみ）
 	if errors.Is(err, oauth.ErrRefreshTokenRevoked) {
 		return &output.Error{Code: "OAUTH_REFRESH_REVOKED", Message: err.Error()}
 	}
 	if errors.Is(err, oauth.ErrTokenExpired) {
 		return &output.Error{Code: "KINTONE_UNAUTHORIZED", Message: err.Error()}
-	}
-	if errors.Is(err, oauth.ErrInvalidRedirectURL) {
-		return &output.Error{Code: "USAGE", Message: err.Error()}
-	}
-	if errors.Is(err, oauth.ErrMissingClientCredentials) {
-		return &output.Error{Code: "USAGE", Message: err.Error()}
 	}
 
 	// *OAuthError

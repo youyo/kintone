@@ -21,13 +21,9 @@ import (
 	"github.com/youyo/kintone/internal/store"
 )
 
-// OAuth エラーのヘルパー関数群
-func oauthErrStateMismatch() error      { return oauth.ErrStateMismatch }
-func oauthErrCallbackTimeout() error    { return oauth.ErrCallbackTimeout }
-func oauthErrRefreshRevoked() error     { return oauth.ErrRefreshTokenRevoked }
-func oauthErrTokenExpired() error       { return oauth.ErrTokenExpired }
-func oauthErrInvalidRedirectURL() error { return oauth.ErrInvalidRedirectURL }
-func oauthErrMissingCredentials() error { return oauth.ErrMissingClientCredentials }
+// OAuth エラーのヘルパー関数群（M14 で loopback 関連 sentinel は削除済み）
+func oauthErrRefreshRevoked() error { return oauth.ErrRefreshTokenRevoked }
+func oauthErrTokenExpired() error   { return oauth.ErrTokenExpired }
 func oauthProviderError() error {
 	return &oauth.OAuthError{Code: "invalid_scope", Description: "scope is invalid", HTTPStatus: 400}
 }
@@ -231,23 +227,7 @@ func TestMapToOutputError_WrappedAPIError(t *testing.T) {
 	}
 }
 
-// OAuth エラーマッピングテスト（M09）
-
-// EO-1: ErrStateMismatch → OAUTH_STATE_MISMATCH
-func TestMapToOutputError_OAuthStateMismatch(t *testing.T) {
-	oe := cli.MapToOutputError(oauthErrStateMismatch())
-	if oe.Code != "OAUTH_STATE_MISMATCH" {
-		t.Errorf("Code=%q want OAUTH_STATE_MISMATCH", oe.Code)
-	}
-}
-
-// EO-2: ErrCallbackTimeout → OAUTH_CALLBACK_TIMEOUT
-func TestMapToOutputError_OAuthCallbackTimeout(t *testing.T) {
-	oe := cli.MapToOutputError(oauthErrCallbackTimeout())
-	if oe.Code != "OAUTH_CALLBACK_TIMEOUT" {
-		t.Errorf("Code=%q want OAUTH_CALLBACK_TIMEOUT", oe.Code)
-	}
-}
+// OAuth エラーマッピングテスト（M09 導入、M14 で loopback 関連を削除）
 
 // EO-3: ErrRefreshTokenRevoked → OAUTH_REFRESH_REVOKED
 func TestMapToOutputError_OAuthRefreshRevoked(t *testing.T) {
@@ -262,22 +242,6 @@ func TestMapToOutputError_OAuthTokenExpired(t *testing.T) {
 	oe := cli.MapToOutputError(oauthErrTokenExpired())
 	if oe.Code != "KINTONE_UNAUTHORIZED" {
 		t.Errorf("Code=%q want KINTONE_UNAUTHORIZED", oe.Code)
-	}
-}
-
-// EO-5: ErrInvalidRedirectURL → USAGE
-func TestMapToOutputError_OAuthInvalidRedirectURL(t *testing.T) {
-	oe := cli.MapToOutputError(oauthErrInvalidRedirectURL())
-	if oe.Code != "USAGE" {
-		t.Errorf("Code=%q want USAGE", oe.Code)
-	}
-}
-
-// EO-6: ErrMissingClientCredentials → USAGE
-func TestMapToOutputError_OAuthMissingCredentials(t *testing.T) {
-	oe := cli.MapToOutputError(oauthErrMissingCredentials())
-	if oe.Code != "USAGE" {
-		t.Errorf("Code=%q want USAGE", oe.Code)
 	}
 }
 

@@ -28,3 +28,10 @@ func TestMemorySigningKeyStore_Conformance(t *testing.T) {
 		return s, func() { _ = s.Close() }
 	})
 }
+
+func TestMemoryStateStore_Conformance(t *testing.T) {
+	storetest.RunStateStoreConformance(t, func() (store.StateStore, func()) {
+		s := memory.NewStateStore()
+		return s, func() { _ = s.Close() }
+	})
+}

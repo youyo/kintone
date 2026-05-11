@@ -9,12 +9,12 @@
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
 | 最終更新 | 2026-05-12 |
-| ステータス | 全 M1-M13 完了 / v0.3.0 リリース準備完了 |
+| ステータス | M1-M14 完了 (v0.4.0 リリース準備完了) |
 
 ## Current Focus
-- **マイルストーン**: なし（全マイルストーン完了）
-- **直近の決定**: M13 完了（commit 88791d0）。リモート MCP サーバホスト型 OAuth callback を `internal/mcp/oauthcallback` 専用パッケージで実装し、PKCE S256 + state cookie + CSRF 三重保護 + 構造化 AuthRequiredError による AUTH_REQUIRED envelope の authorize_url 注入で完成。
-- **次のアクション**: v0.3.0 リリース（タグ push で GoReleaser ワークフロー起動）。M14 候補は StateStore Storage 拡張・multi-domain・`auth/oauth/flow.go` 物理削除。
+- **マイルストーン**: M14（StateStore 統合 Storage 拡張 + loopback flow 物理削除）
+- **直近の決定**: M13 の `MemoryStateStore` は multi-replica MCP に未対応のため、`internal/store` 4 backend（Memory/SQLite/Redis/DynamoDB）に統合し `KINTONE_STORE_BACKEND` 単一設定で kintone Token + Cache + idproxy session + OAuth state を同一 backend に格納する設計を採用。あわせて M13 で deprecated 化した OAuth loopback サーバを物理削除する。
+- **次のアクション**: M14 を `/devflow:cycle` で planning-agent → AI 審査ゲート → implementer → code-reviewer の自律ループ実行 → v0.4.0 リリース。
 
 ## Progress
 
@@ -184,7 +184,21 @@ kintone OAuth は redirect_uri に https を強制するため、ローカル CL
 - [x] E2E: `internal/testsupport/kintonefake` を `/oauth2/authorization` 追加で拡張し、start → authorize → callback → Token 永続化のフローを build tag `e2e` で検証（CSRF 異常系も）
 - [x] ドキュメント: README.md / README.ja.md / docs/specs / CHANGELOG.md 更新
 - 詳細: plans/kintone-m13-remote-mcp-oauth-callback.md
-- ブランチ: feat-auth-model-cli-apitoken-mcp-oauth（v0.3.0 リリース準備完了）
+- ブランチ: feat-auth-model-cli-apitoken-mcp-oauth（v0.3.0 リリース完了 / merged）
+
+### M14: StateStore 統合 Storage 拡張 + loopback flow 物理削除 ✅ 完了
+M13 で in-memory に閉じた OAuth `StateStore` を `internal/store` の 4 backend（Memory/SQLite/Redis/DynamoDB）に統合し、`KINTONE_STORE_BACKEND` 単一設定で kintone Token + Cache + idproxy session + OAuth state を同一 backend に格納できるようにする（multi-replica MCP サーバ対応）。あわせて M13 で deprecated 化した OAuth loopback サーバの物理削除を実施する。
+- [x] `internal/store` に `StateStore` interface を移設（または mirror）し、`Container.StateStore()` メソッドを追加
+- [x] Memory backend: 既存 `oauthcallback.MemoryStateStore` を `internal/store/memory` に移植し register
+- [x] SQLite backend: `kintone_oauth_state` テーブル追加、`DELETE ... RETURNING` で one-shot Take atomic
+- [x] Redis backend: `kintone:oauthstate:<state>` hash + EXPIRE TTL、HGETALL+DEL を Lua script で atomic
+- [x] DynamoDB backend: 既存単一テーブルに `pk=kintone:oauthstate:<state>` で相乗り、`DeleteItem ReturnValues=ALL_OLD` で atomic Take
+- [x] `internal/mcp/oauthcallback` の Handler コンストラクタを `Container.StateStore()` 経由に切替
+- [x] Conformance テスト追加: `RunStateStoreConformance`（並行 Take 単一勝者保証 N=20 含む）を 4 backend で実行
+- [x] `internal/auth/oauth/{flow,callback,browser}.go` の loopback サーバ部分を物理削除
+- [x] ドキュメント: README.md / README.ja.md / docs/specs/kintone_spec.md / CHANGELOG.md 更新
+- [x] 後方互換: `oauthcallback.NewHandler` / `MemoryStateStore` / `StateEntry` / `ErrStateNotFound` は型エイリアス + ラッパーで API 維持
+- 詳細: plans/kintone-m14-statestore-storage-integration.md
 
 ## Blockers
 なし

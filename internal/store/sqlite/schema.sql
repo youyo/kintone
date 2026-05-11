@@ -27,3 +27,16 @@ CREATE TABLE IF NOT EXISTS kintone_signing_keys (
     pem        TEXT NOT NULL,
     created_at INTEGER NOT NULL
 );
+
+-- M14: OAuth Authorization Code フロー用 state ↔ session map
+-- state は authorize 開始時に Put され、callback 受信時に Take で取り出される（one-shot）。
+-- TTL は DefaultStateTTL（10 分）。expires_at は Unix epoch nanoseconds。
+CREATE TABLE IF NOT EXISTS kintone_oauth_state (
+    state        TEXT PRIMARY KEY,
+    principal_id TEXT NOT NULL,
+    verifier     TEXT NOT NULL,
+    method       TEXT NOT NULL DEFAULT 'S256',
+    created_at   INTEGER NOT NULL,
+    expires_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kintone_oauth_state_expires ON kintone_oauth_state(expires_at);

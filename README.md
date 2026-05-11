@@ -175,8 +175,11 @@ kintone CLI/MCP stores authentication credentials, cache, and OIDC state in a si
 | redis    | k8s / Fargate scale-out        | `KINTONE_STORE_REDIS_URL=rediss://...`               |
 | dynamodb | Lambda / serverless            | `KINTONE_STORE_DYNAMODB_TABLE=...`                   |
 
-All backends share a single connection for kintone TokenStore, Cache, OIDC SigningKey, and idproxy session/refresh_token
+All backends share a single connection for kintone TokenStore, Cache, OIDC SigningKey, OAuth State, and idproxy session/refresh_token
 (logically separated by key prefix; SQLite uses 2 separate files in the same directory).
+
+Since M14 the OAuth Authorization Code `StateStore` is unified into the same Storage backend, so multi-replica MCP
+deployments must use `sqlite` / `redis` / `dynamodb` (the `memory` backend is rejected at startup when `auth=oidc`).
 
 ### Backend configuration examples
 
@@ -331,9 +334,9 @@ Security:
 
 - CSRF triple-check: idproxy OIDC Principal + `kintone_oauth_state` cookie + state-map PrincipalID match
 - state TTL: 10 minutes, one-shot consumption (OAuth 2.0 spec)
-- state map is in-memory (M13). Multi-replica deployments must rely on user retry until M14 adds Storage-backed state
+- state map is unified into the Storage backend (memory / sqlite / redis / dynamodb) since M14, so multi-replica MCP deployments are fully supported (the `memory` backend is rejected at startup when `auth=oidc`)
 
-> Known M13 limitations: in-memory state means process restart / multi-replica routing may invalidate an in-flight authorization; the user simply re-clicks the authorize URL. Single domain per server (multi-domain routing is planned for M14).
+> Single domain per server (multi-domain routing is a future enhancement).
 
 > The CLI no longer offers a way to obtain OAuth tokens directly. `kintone auth status` / `kintone auth logout` remain as auxiliary tools that inspect or delete tokens stored by the remote MCP server.
 
