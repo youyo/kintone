@@ -124,7 +124,7 @@ func TestE2E_OAuthRefreshFlow_SQLite(t *testing.T) {
 //  2. sqlite Container 起動
 //  3. oauthcallback.Handler を /oauth/kintone/start, /callback で公開
 //  4. cookiejar 付き http.Client（CheckRedirect 制御）で:
-//       /start → 302 → kintonefake /authorize → 302 → /callback → 200
+//     /start → 302 → kintonefake /authorize → 302 → /callback → 200
 //  5. TokenStore に Token が永続化されたことを確認
 //
 // idproxy 経由の Principal は test 用 middleware で context に直接注入する。
