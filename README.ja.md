@@ -175,8 +175,12 @@ kintone CLI/MCP は認証情報・キャッシュ・OIDC 状態を 1 つの Stor
 | redis    | k8s / Fargate scale-out       | `KINTONE_STORE_REDIS_URL=rediss://...`               |
 | dynamodb | Lambda / serverless           | `KINTONE_STORE_DYNAMODB_TABLE=...`                   |
 
-全 backend で kintone TokenStore / Cache / OIDC SigningKey / idproxy session・refresh_token が
+全 backend で kintone TokenStore / Cache / OIDC SigningKey / OAuth State / idproxy session・refresh_token が
 1 接続で共存します（key prefix で論理分離。SQLite のみ同ディレクトリ・2 ファイル分離）。
+
+M14 以降、OAuth Authorization Code フローの `StateStore` も同じ Storage backend に統合されました。
+multi-replica な MCP サーバ配置では `sqlite` / `redis` / `dynamodb` を選択してください（`memory` は
+`auth=oidc` 時に起動時拒否されます）。
 
 ### Backend 別設定例
 
@@ -333,9 +337,9 @@ MCP サーバの必須環境変数:
 
 - CSRF 三重保護: idproxy OIDC Principal + `kintone_oauth_state` cookie + state map の PrincipalID 比較（constant-time）
 - state TTL: 10 分、one-shot（OAuth 2.0 仕様準拠）
-- state map は in-memory（M13）。multi-replica 環境はユーザの再試行で吸収する想定（M14 で Storage backend に拡張予定）
+- state map は M14 で `internal/store` の 4 backend（memory / sqlite / redis / dynamodb）に統合され、`KINTONE_STORE_BACKEND` の選択でそのまま multi-replica MCP に対応できます（memory backend は `auth=oidc` 時に起動拒否）
 
-> M13 既知の制約: state は in-memory のためプロセス再起動・multi-replica routing で進行中の認可が失効する場合があります（ユーザーが authorize URL を再度クリックすれば回復します）。1 サーバ＝1 kintone domain 前提（multi-domain 切替は M14）。
+> 1 サーバ＝1 kintone domain 前提（multi-domain 切替は将来対応）。
 
 > ローカル CLI で OAuth トークンを直接取得する手段は提供しません。`kintone auth status` / `kintone auth logout` は、リモート MCP サーバが TokenStore に保存したトークンを参照・削除するための補助コマンドとして残しています。
 

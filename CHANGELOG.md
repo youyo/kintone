@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### 機能追加 — StateStore 統合 Storage 拡張 + loopback flow 物理削除（M14 / v0.4.0）
+
+- OAuth Authorization Code フロー用 `StateStore` を `internal/store` の 4 backend（memory / sqlite / redis / dynamodb）に統合。`KINTONE_STORE_BACKEND` 単一設定で kintone Token + Cache + idproxy session + OAuth state を同一 backend に格納可能になり、multi-replica MCP サーバ配置に対応
+- `Container.StateStore()` メソッドを追加。`internal/mcp/oauthcallback` は `StateStore` / `StateEntry` / `ErrStateNotFound` を `internal/store` への型エイリアスとして再エクスポート（既存 API 後方互換）
+- **atomic Take 契約**を全 backend で保証:
+  - SQLite: `DELETE ... RETURNING` 単一文（SQLite 3.35+）
+  - Redis: HGETALL + DEL を Lua script で atomic 実行
+  - DynamoDB: `DeleteItem` with `ReturnValues=ALL_OLD`
+  - Memory: `sync.Mutex` + `delete()` のクリティカルセクション
+- Conformance テスト `storetest.RunStateStoreConformance` を新設し 4 backend 共通検証（Put/Take roundtrip、不在 Take、空 state、**並行 Take の単一勝者保証 (N=20)**、Close 冪等性）
+- SQLite schema に `kintone_oauth_state` テーブルを追加（`schema.sql` は `IF NOT EXISTS` のため既存 DB も自動マイグレーション）
+- DynamoDB は単一テーブルに `pk=kintone:oauthstate:<state>` で相乗り（GSI 追加なし）
+- Redis は `kintone:oauthstate:<state>` 配下に hash で格納し EXPIRE で自動失効
+
+### 削除 — OAuth loopback サーバ実装（v0.4.0）
+
+- `internal/auth/oauth/flow.go` / `callback.go` / `browser.go` および各 `*_test.go` を物理削除（M13 で deprecated 化済み）
+- 関連 sentinel error を削除: `ErrStateMismatch` / `ErrAuthorizationCodeMissing` / `ErrCallbackTimeout` / `ErrInvalidRedirectURL` / `ErrMissingClientCredentials`
+- 関連エラーコード `OAUTH_STATE_MISMATCH` / `OAUTH_CALLBACK_TIMEOUT` のマッピングも削除（kintone OAuth は HTTPS redirect_uri 必須のため CLI loopback フローは仕様上不可能であり、MCP サーバホスト型 callback に一本化）
+- 保持: `pkce.go` / `state.go` (state generator) / `token.go` / `provider.go` / `refresh.go` / `OAuthError` / `ErrRefreshTokenRevoked` / `ErrTokenExpired`
+
 ### 機能追加 — Remote MCP 用サーバホスト型 OAuth callback（M13 / v0.3.0）
 
 - 新規エンドポイント: `mcp serve --listen ... --auth oidc --authz oauth` 起動時に以下を公開

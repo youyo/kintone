@@ -26,7 +26,12 @@ type oauthSetup struct {
 	StateStore  oauthcallback.StateStore // close 用
 }
 
-// closeStates は StateStore.Close を呼ぶ（OAuth 時のみ非 nil）。
+// closeStates は M13 までの互換のために残された no-op 寄りのフック。
+//
+// M14 以降、StateStore は Container が所有するため、Container.Close() で一括 Close
+// されることが保証されている。本メソッドは Container.Close より先に呼ばれた場合の
+// 防御 Close として動作するが、Container 経由の Close と二重になっても StateStore.Close
+// は冪等であるため害はない。
 func (s *oauthSetup) closeStates() {
 	if s == nil || s.StateStore == nil {
 		return
@@ -110,8 +115,13 @@ func buildOAuthSetup(ctx context.Context, resolved *config.Resolved, container s
 		return startBaseURL + "?principal_id=" + url.QueryEscape(principalID)
 	}
 
-	// state store
-	states := oauthcallback.NewMemoryStateStore()
+	// state store: M14 から Container.StateStore() 経由で取得する。
+	// memory backend は auth=oidc では ErrMemoryOIDCForbidden で Container open
+	// 時点に拒否されるため、ここで multi-replica 安全性を別途検証する必要はない。
+	states, err := container.StateStore()
+	if err != nil {
+		return nil, fmt.Errorf("mcp serve: get StateStore: %w", err)
+	}
 	scopes := resolved.OAuthScopes
 	_ = allowPlaintext // 検証は ValidateRedirectURL で完結し、handler 側は ExternalURL の scheme で cookie Secure を判定
 	handler, err := oauthcallback.NewHandler(oauthcallback.HandlerConfig{
@@ -125,7 +135,7 @@ func buildOAuthSetup(ctx context.Context, resolved *config.Resolved, container s
 		Tokens:       tokens,
 	})
 	if err != nil {
-		_ = states.Close()
+		// states は Container 所有のため Close 不要（Container.Close() で一括解放）
 		return nil, fmt.Errorf("mcp serve: build OAuth callback handler: %w", err)
 	}
 

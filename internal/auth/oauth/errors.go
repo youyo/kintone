@@ -2,12 +2,14 @@
 //
 // 主要コンポーネント:
 //   - PKCE 生成 (pkce.go)
-//   - state 生成・検証 (state.go)
+//   - state 生成（state.go、storage は internal/store の StateStore に委譲）
 //   - token endpoint クライアント (token.go)
-//   - loopback callback サーバ (callback.go)
-//   - Authorization Code Grant フロー (flow.go)
 //   - refresh_token grant + 自動更新 Authenticator (refresh.go, provider.go)
-//   - クロスプラットフォームブラウザ起動 (browser.go)
+//
+// 補足: M14 で OAuth loopback サーバ実装（旧 flow.go / callback.go / browser.go）は
+// 物理削除した。kintone OAuth は redirect_uri に HTTPS を強制するため CLI loopback
+// フローは成立せず、代わりに MCP サーバホスト型 callback (internal/mcp/oauthcallback)
+// を使う。
 package oauth
 
 import (
@@ -17,20 +19,10 @@ import (
 
 // sentinel エラー群。
 var (
-	// ErrStateMismatch は callback の state パラメータが期待値と不一致のとき。
-	ErrStateMismatch = errors.New("oauth: state mismatch")
-	// ErrAuthorizationCodeMissing は callback に code パラメータがないとき。
-	ErrAuthorizationCodeMissing = errors.New("oauth: authorization code missing")
-	// ErrCallbackTimeout は loopback サーバが timeout 内に callback を受信できなかったとき。
-	ErrCallbackTimeout = errors.New("oauth: callback timeout")
 	// ErrRefreshTokenRevoked は refresh_token が無効（invalid_grant）のとき。
 	ErrRefreshTokenRevoked = errors.New("oauth: refresh token revoked")
 	// ErrTokenExpired は access_token が期限切れで refresh_token もないとき。
 	ErrTokenExpired = errors.New("oauth: access token expired and no refresh token")
-	// ErrInvalidRedirectURL は redirect_url が loopback http でないとき。
-	ErrInvalidRedirectURL = errors.New("oauth: redirect URL must be loopback http://127.0.0.1:<port>/callback")
-	// ErrMissingClientCredentials は client_id / client_secret / redirect_url のいずれかが未設定のとき。
-	ErrMissingClientCredentials = errors.New("oauth: client_id / client_secret / redirect_url must be set")
 )
 
 // OAuthError は kintone OAuth エンドポイントからのエラーレスポンスを表す。

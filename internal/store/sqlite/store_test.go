@@ -65,6 +65,21 @@ func TestSQLiteSigningKeyStore_Conformance(t *testing.T) {
 	})
 }
 
+func TestSQLiteStateStore_Conformance(t *testing.T) {
+	storetest.RunStateStoreConformance(t, func() (store.StateStore, func()) {
+		path, _ := makeDB(t)
+		db, err := sqlitestore.OpenDB(context.Background(), path)
+		if err != nil {
+			t.Fatalf("OpenDB: %v", err)
+		}
+		ss := sqlitestore.NewStateStore(db)
+		return ss, func() {
+			_ = ss.Close()
+			_ = db.Close()
+		}
+	})
+}
+
 func TestSQLiteSigningKeyStore_PersistsAcrossOpen(t *testing.T) {
 	path, _ := makeDB(t)
 

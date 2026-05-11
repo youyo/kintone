@@ -34,6 +34,9 @@ type Container struct {
 	signingOnce sync.Once
 	signing     *RedisSigningKeyStore
 
+	stateOnce sync.Once
+	state     *RedisStateStore
+
 	idproxyOnce  sync.Once
 	idproxyStore idproxy.Store
 }
@@ -76,6 +79,12 @@ func (c *Container) SigningKey() (store.SigningKeyStore, error) {
 	return c.signing, nil
 }
 
+// StateStore は RedisStateStore を lazy 初期化して返す。
+func (c *Container) StateStore() (store.StateStore, error) {
+	c.stateOnce.Do(func() { c.state = NewStateStore(c.client) })
+	return c.state, nil
+}
+
 // IDProxyStore は idproxy 用 Redis store を lazy 初期化して返す。
 //
 // 内部で `idproxy/store/redis.NewWithClient(client, "idproxy:")` を呼び、
@@ -109,6 +118,9 @@ func (c *Container) Close(_ context.Context) error {
 		}
 		if c.signing != nil {
 			_ = c.signing.Close()
+		}
+		if c.state != nil {
+			_ = c.state.Close()
 		}
 		// 最後に共有 client を閉じる
 		if c.client != nil {

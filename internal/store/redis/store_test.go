@@ -86,6 +86,19 @@ func TestRedisSigningKeyStore_Conformance(t *testing.T) {
 	})
 }
 
+func TestRedisStateStore_Conformance(t *testing.T) {
+	storetest.RunStateStoreConformance(t, func() (store.StateStore, func()) {
+		mr, client, stop := startMiniredis(t)
+		ss := redisstore.NewStateStore(client)
+		return ss, func() {
+			stop()
+			_ = ss.Close()
+			_ = client.Close()
+			mr.Close()
+		}
+	})
+}
+
 func TestRedisSigningKeyStore_PersistsAcrossClientRecreate(t *testing.T) {
 	mr := miniredis.RunT(t)
 

@@ -22,6 +22,8 @@ type Container struct {
 	cache       store.CacheStore
 	signingOnce sync.Once
 	signing     store.SigningKeyStore
+	stateOnce   sync.Once
+	state       store.StateStore
 	idpOnce     sync.Once
 	idp         idproxy.Store
 
@@ -62,6 +64,12 @@ func (c *Container) SigningKey() (store.SigningKeyStore, error) {
 	return c.signing, nil
 }
 
+// StateStore は StateStore を返す (lazy)。
+func (c *Container) StateStore() (store.StateStore, error) {
+	c.stateOnce.Do(func() { c.state = newStateStore(c.client, c.table) })
+	return c.state, nil
+}
+
 // IDProxyStore は idproxy.Store を返す (lazy)。
 func (c *Container) IDProxyStore() (idproxy.Store, error) {
 	c.idpOnce.Do(func() { c.idp = newIDProxyStore(c.client, c.table) })
@@ -88,6 +96,9 @@ func (c *Container) Close(ctx context.Context) error {
 		}
 		if c.signing != nil {
 			_ = c.signing.Close()
+		}
+		if c.state != nil {
+			_ = c.state.Close()
 		}
 	})
 	return nil

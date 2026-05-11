@@ -35,6 +35,9 @@ type Container struct {
 	signingOnce sync.Once
 	signing     *MemorySigningKeyStore
 
+	stateOnce sync.Once
+	state     *MemoryStateStore
+
 	idproxyOnce  sync.Once
 	idproxyStore idproxy.Store
 }
@@ -84,6 +87,12 @@ func (c *Container) SigningKey() (store.SigningKeyStore, error) {
 	return c.signing, nil
 }
 
+// StateStore は MemoryStateStore を lazy 初期化して返す。
+func (c *Container) StateStore() (store.StateStore, error) {
+	c.stateOnce.Do(func() { c.state = NewStateStore() })
+	return c.state, nil
+}
+
 // IDProxyStore は idproxy 用 MemoryStore を lazy 初期化して返す。
 func (c *Container) IDProxyStore() (idproxy.Store, error) {
 	c.idproxyOnce.Do(func() { c.idproxyStore = newIDProxyMemoryStore() })
@@ -128,6 +137,11 @@ func (c *Container) Close(ctx context.Context) error {
 		}
 		if c.signing != nil {
 			if err := c.signing.Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if c.state != nil {
+			if err := c.state.Close(); err != nil {
 				errs = append(errs, err)
 			}
 		}

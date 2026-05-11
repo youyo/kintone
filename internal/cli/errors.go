@@ -164,25 +164,12 @@ func MapToOutputError(err error) *output.Error {
 		return &output.Error{Code: "INTERNAL", Message: err.Error()}
 	}
 
-	// OAuth エラーマッピング（M09）
-	// sentinel 順序: 具体的なもの → 汎用なもの
-	if errors.Is(err, oauth.ErrStateMismatch) {
-		return &output.Error{Code: "OAUTH_STATE_MISMATCH", Message: err.Error()}
-	}
-	if errors.Is(err, oauth.ErrCallbackTimeout) {
-		return &output.Error{Code: "OAUTH_CALLBACK_TIMEOUT", Message: err.Error()}
-	}
+	// OAuth エラーマッピング（M09 で導入、M14 で loopback 関連 sentinel を削除）
 	if errors.Is(err, oauth.ErrRefreshTokenRevoked) {
 		return &output.Error{Code: "OAUTH_REFRESH_REVOKED", Message: err.Error()}
 	}
 	if errors.Is(err, oauth.ErrTokenExpired) {
 		return &output.Error{Code: "KINTONE_UNAUTHORIZED", Message: err.Error()}
-	}
-	if errors.Is(err, oauth.ErrInvalidRedirectURL) {
-		return &output.Error{Code: "USAGE", Message: err.Error()}
-	}
-	if errors.Is(err, oauth.ErrMissingClientCredentials) {
-		return &output.Error{Code: "USAGE", Message: err.Error()}
 	}
 
 	// *OAuthError（provider からのエラーレスポンス）

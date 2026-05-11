@@ -1,153 +1,110 @@
 // Package oauthcallback は MCP サーバホスト型 kintone OAuth callback を提供する。
 //
-// M13 で導入。kintone OAuth は redirect_uri に HTTPS を強制するため、ローカル CLI の
-// loopback http フローは成立しない。代わりに MCP サーバ自身が OAuth client として振る舞い、
+// M13 で導入、M14 で StateStore を internal/store に移設し multi-replica 対応化。
+// kintone OAuth は redirect_uri に HTTPS を強制するため、ローカル CLI の loopback
+// http フローは成立しない。代わりに MCP サーバ自身が OAuth client として振る舞い、
 // /oauth/kintone/start で authorize URL に誘導し /oauth/kintone/callback で
 // authorization_code を token に交換して TokenStore に保存する。
 //
-// 設計判断:
-//   - state map は in-memory + sync.Mutex（M13）。M14 で Redis/DynamoDB に拡張可能な
-//     interface（StateStore）を提供する。
+// 設計判断（M14）:
+//   - StateStore interface / StateEntry / ErrStateNotFound は `internal/store` に正準定義し、
+//     本パッケージは型エイリアスで再エクスポートする（API 後方互換）。
+//   - 物理実装は memory / sqlite / redis / dynamodb の 4 backend に移植され、
+//     `Container.StateStore()` 経由で取得する。
 //   - state は 10 分 TTL（SSO + MFA を考慮）。Take は one-shot（OAuth 2.0 仕様準拠）。
 //   - CSRF は三重保護: idproxy Principal + state cookie + state map の PrincipalID 比較。
 package oauthcallback
 
 import (
 	"context"
-	"errors"
-	"sync"
 	"time"
+
+	"github.com/youyo/kintone/internal/store"
+	memorystore "github.com/youyo/kintone/internal/store/memory"
 )
 
-// DefaultStateTTL は state の有効期限既定値。
-const DefaultStateTTL = 10 * time.Minute
+// DefaultStateTTL は state の有効期限既定値（store パッケージから再エクスポート）。
+const DefaultStateTTL = store.DefaultStateTTL
 
 // ErrStateNotFound は state map に該当エントリがない（または期限切れ）ときに返される。
-var ErrStateNotFound = errors.New("oauthcallback: state not found")
+// store.ErrStateNotFound のエイリアス。
+var ErrStateNotFound = store.ErrStateNotFound
 
-// StateEntry は state ↔ session の対応情報を保持する。
-//
-// State / PrincipalID / Verifier は CSRF 検証および token exchange で使う。
-// CreatedAt は TTL チェック用。
-type StateEntry struct {
-	State       string // 乱数（base64url）
-	PrincipalID string // OIDC principal_id（issuer:subject）
-	Verifier    string // PKCE code_verifier（callback で token exchange に渡す）
-	Method      string // 通常 "S256"
-	CreatedAt   time.Time
-}
+// StateEntry は state ↔ session の対応情報を保持する（store.StateEntry の型エイリアス）。
+type StateEntry = store.StateEntry
 
-// StateStore は state ↔ session map の抽象。
-//
-// M13 では MemoryStateStore のみを提供。M14 で Redis/DynamoDB 実装を追加する設計余地を残す。
-type StateStore interface {
-	// Put は新しい entry を保存する。同 state の上書きは許容（衝突確率は天文学的に低い）。
-	Put(ctx context.Context, entry StateEntry) error
-	// Take は state に対応する entry を取り出し、同時に削除する（one-shot semantics）。
-	// 期限切れ entry はその場で削除し ErrStateNotFound を返す。
-	Take(ctx context.Context, state string) (*StateEntry, error)
-	// Close は内部リソースを解放する。冪等。
-	Close() error
-}
+// StateStore は state ↔ session map の抽象（store.StateStore の型エイリアス）。
+type StateStore = store.StateStore
 
 // MemoryStateStore は in-memory な StateStore 実装。
 //
-// プロセス再起動・multi-replica で state が共有されないことに注意（README で明記）。
-// goroutine 安全。Now を差し替えて TTL テスト可能。
+// プロセス再起動・multi-replica で state が共有されないことに注意。
+// M14 以降、multi-replica の MCP では sqlite / redis / dynamodb backend を使うこと。
+// 本型は test / single-process 用途として後方互換のために残されている。
+//
+// 内部実装は memorystore.MemoryStateStore に委譲する。
 type MemoryStateStore struct {
-	mu    sync.Mutex
-	store map[string]*StateEntry
-	ttl   time.Duration
-	now   func() time.Time
+	inner *memorystore.MemoryStateStore
 }
 
 // MemoryStateStoreOption は MemoryStateStore のコンストラクタオプション。
-type MemoryStateStoreOption func(*MemoryStateStore)
+type MemoryStateStoreOption func(*memoryStateStoreConfig)
+
+type memoryStateStoreConfig struct {
+	ttl time.Duration
+	now func() time.Time
+}
 
 // WithTTL は TTL を上書きする。
 func WithTTL(d time.Duration) MemoryStateStoreOption {
-	return func(s *MemoryStateStore) { s.ttl = d }
+	return func(c *memoryStateStoreConfig) { c.ttl = d }
 }
 
 // WithNow は現在時刻関数を差し替える（テスト用）。
 func WithNow(now func() time.Time) MemoryStateStoreOption {
-	return func(s *MemoryStateStore) { s.now = now }
+	return func(c *memoryStateStoreConfig) { c.now = now }
 }
 
 // NewMemoryStateStore は MemoryStateStore を構築する。
+//
+// option を内部の memorystore.NewStateStore に橋渡しする。
 func NewMemoryStateStore(opts ...MemoryStateStoreOption) *MemoryStateStore {
-	s := &MemoryStateStore{
-		store: make(map[string]*StateEntry),
-		ttl:   DefaultStateTTL,
-		now:   time.Now,
-	}
+	cfg := &memoryStateStoreConfig{}
 	for _, opt := range opts {
-		opt(s)
+		opt(cfg)
 	}
-	return s
+	var innerOpts []memorystore.MemoryStateStoreOption
+	if cfg.ttl != 0 {
+		innerOpts = append(innerOpts, memorystore.WithTTL(cfg.ttl))
+	}
+	if cfg.now != nil {
+		innerOpts = append(innerOpts, memorystore.WithNow(cfg.now))
+	}
+	return &MemoryStateStore{inner: memorystore.NewStateStore(innerOpts...)}
 }
 
-// Put は entry を保存する。CreatedAt が zero の場合は Now を埋める。
-func (s *MemoryStateStore) Put(_ context.Context, entry StateEntry) error {
+// Put は state を保存する。空 state は明示エラーを返す（後方互換のため store.ErrStateNotFound とは別エラー）。
+func (s *MemoryStateStore) Put(ctx context.Context, entry StateEntry) error {
 	if entry.State == "" {
-		return errors.New("oauthcallback: empty state")
+		return errEmptyState
 	}
-	if entry.CreatedAt.IsZero() {
-		entry.CreatedAt = s.now()
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// 期限切れエントリの GC（put のタイミングで実施、別 goroutine 不要）
-	s.gcLocked()
-	cp := entry
-	s.store[entry.State] = &cp
-	return nil
+	return s.inner.Put(ctx, entry)
 }
 
-// Take は state に対応する entry を取り出し削除する。
-func (s *MemoryStateStore) Take(_ context.Context, state string) (*StateEntry, error) {
-	if state == "" {
-		return nil, ErrStateNotFound
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry, ok := s.store[state]
-	if !ok {
-		return nil, ErrStateNotFound
-	}
-	delete(s.store, state)
-	if s.expired(entry) {
-		return nil, ErrStateNotFound
-	}
-	cp := *entry
-	return &cp, nil
+// Take は state を取り出し削除する（one-shot）。
+func (s *MemoryStateStore) Take(ctx context.Context, state string) (*StateEntry, error) {
+	return s.inner.Take(ctx, state)
 }
 
 // Close は内部 map をクリアする。冪等。
-func (s *MemoryStateStore) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.store = make(map[string]*StateEntry)
-	return nil
-}
+func (s *MemoryStateStore) Close() error { return s.inner.Close() }
 
-// expired は entry が期限切れかを判定する。
-func (s *MemoryStateStore) expired(entry *StateEntry) bool {
-	if s.ttl <= 0 {
-		return false
-	}
-	return s.now().Sub(entry.CreatedAt) > s.ttl
-}
+// errEmptyState は Put に空 state が渡された場合のエラー（M13 互換）。
+var errEmptyState = emptyStateError("oauthcallback: empty state")
 
-// gcLocked は期限切れ entry を削除する。呼び出し側で mu 取得済みであること。
-func (s *MemoryStateStore) gcLocked() {
-	if s.ttl <= 0 {
-		return
-	}
-	cutoff := s.now().Add(-s.ttl)
-	for k, v := range s.store {
-		if v.CreatedAt.Before(cutoff) {
-			delete(s.store, k)
-		}
-	}
-}
+type emptyStateError string
+
+func (e emptyStateError) Error() string { return string(e) }
+
+// 静的チェック
+var _ StateStore = (*MemoryStateStore)(nil)

@@ -8,6 +8,19 @@ import (
 	"time"
 )
 
+// Result は refresh_token grant の成功結果。
+//
+// M09 では Login（loopback フロー）の戻り値としても使われていたが、M14 で
+// loopback 実装が削除されたため、現在は Refresher.Refresh の戻り値専用となる。
+type Result struct {
+	PrincipalID  string
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    time.Time
+	ExpiresIn    int
+	Scope        string
+}
+
 // RefresherConfig は Refresher の設定。
 type RefresherConfig struct {
 	TokenEndpoint string

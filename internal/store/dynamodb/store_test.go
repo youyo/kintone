@@ -106,8 +106,18 @@ func (f *fakeDDB) DeleteItem(ctx context.Context, p *awsdynamodb.DeleteItemInput
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	pk := pkOf(p.Key)
+	out := &awsdynamodb.DeleteItemOutput{}
+	if p.ReturnValues == types.ReturnValueAllOld {
+		if existing, ok := f.items[pk]; ok {
+			cp := map[string]types.AttributeValue{}
+			for k, v := range existing {
+				cp[k] = v
+			}
+			out.Attributes = cp
+		}
+	}
 	delete(f.items, pk)
-	return &awsdynamodb.DeleteItemOutput{}, nil
+	return out, nil
 }
 
 func (f *fakeDDB) Query(ctx context.Context, p *awsdynamodb.QueryInput, opts ...func(*awsdynamodb.Options)) (*awsdynamodb.QueryOutput, error) {

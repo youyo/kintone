@@ -19,6 +19,10 @@ type Container interface {
 	CacheForDecorator() (CacheStore, error)
 	CacheForAdmin() (CacheStore, error)
 	SigningKey() (SigningKeyStore, error)
+	// StateStore は OAuth Authorization Code フロー用 state ↔ session map を返す。
+	// M14 で導入。multi-replica MCP 配置では memory backend 利用不可（ErrMemoryOIDCForbidden で
+	// Container open 時点に拒否される）。
+	StateStore() (StateStore, error)
 	IDProxyStore() (idproxy.Store, error)
 	// LocationString は backend 種別を示す URL 風文字列を返す（例: "memory://" / "file:///path/to/dir/"）。
 	// CLI / MCP の `cache stats` 等の表示に利用する。

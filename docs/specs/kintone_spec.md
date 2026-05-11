@@ -209,8 +209,10 @@ CSRF 三重保護:
 3. state map の PrincipalID ↔ request Principal の constant-time 照合
 
 state 管理:
-- in-memory `MemoryStateStore`（TTL=10 分、one-shot Take）
-- multi-replica 対応は M14 で Storage backend に拡張予定（StateStore interface 化済み）
+- M14 で `store.StateStore` interface に統合（TTL=10 分、one-shot Take）
+- backend: memory / sqlite (`DELETE ... RETURNING`) / redis (Lua script で HGETALL+DEL atomic) / dynamodb (`DeleteItem ReturnValues=ALL_OLD`)
+- 並行 Take は **ちょうど 1 つだけ** が winner（atomic Take 契約、conformance test で全 backend を検証）
+- multi-replica MCP では `sqlite` / `redis` / `dynamodb` を選択。`memory` は `auth=oidc` 時に起動拒否（`STORE_MEMORY_OIDC_FORBIDDEN`）
 
 AUTH_REQUIRED envelope:
 - 構造化 `AuthRequiredError` を facade.MapError が認識し、`{"ok":false,"error":{"code":"AUTH_REQUIRED","details":{"principal_id":"...","domain":"...","authorize_url":"..."}}}` を返す
