@@ -8,13 +8,13 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-05-02 00:30 |
-| ステータス | 全 M11 + M12 完了 / M13（Remote MCP OAuth callback）を新規追加 |
+| 最終更新 | 2026-05-12 |
+| ステータス | 全 M1-M13 完了 / v0.3.0 リリース準備完了 |
 
 ## Current Focus
-- **マイルストーン**: M13（Remote MCP 用サーバホスト型 OAuth callback）
-- **直近の決定**: kintone OAuth が redirect_uri に https を強制する事実が確定（gyuma 実装で裏付け、cybozu 公式ドキュメント確認）。ローカル CLI の loopback http フローは技術的に成立しないため廃止し、認証モデルを「ローカル CLI = API Token」「Remote MCP = OAuth」の二系統に整理（v0.3.0）。
-- **次のアクション**: M13（Remote MCP サーバ上の OAuth callback 実装）に着手。`/devflow:plan` で詳細設計を生成 → `/devflow:implement` で実装。
+- **マイルストーン**: なし（全マイルストーン完了）
+- **直近の決定**: M13 完了（commit 88791d0）。リモート MCP サーバホスト型 OAuth callback を `internal/mcp/oauthcallback` 専用パッケージで実装し、PKCE S256 + state cookie + CSRF 三重保護 + 構造化 AuthRequiredError による AUTH_REQUIRED envelope の authorize_url 注入で完成。
+- **次のアクション**: v0.3.0 リリース（タグ push で GoReleaser ワークフロー起動）。M14 候補は StateStore Storage 拡張・multi-domain・`auth/oauth/flow.go` 物理削除。
 
 ## Progress
 
