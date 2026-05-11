@@ -30,9 +30,18 @@ func failureResult(e *output.Error) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultText(string(payload)), nil
 }
 
-// errorResult は任意 error を MapError で *output.Error 化し failureResult を返す。
+// errorResult は任意 error を MapError（builder なし）で *output.Error 化し failureResult を返す。
+//
+// AUTH_REQUIRED envelope に authorize_url を含めたい呼び出し元は errorResultWithDeps を使う。
 func errorResult(err error) (*mcp.CallToolResult, error) {
 	return failureResult(MapError(err))
+}
+
+// errorResultWithDeps は ToolDeps の AuthorizeURLBuilder を渡して MapError する（M13）。
+//
+// AuthRequiredError 発生時に details.authorize_url を envelope に含める。
+func errorResultWithDeps(err error, deps ToolDeps) (*mcp.CallToolResult, error) {
+	return failureResult(MapErrorWithBuilder(err, deps.AuthorizeURLBuilder))
 }
 
 // invalidParams は引数 parse / バリデーション失敗時の envelope を作る。

@@ -80,7 +80,7 @@ func appsSearchHandler(deps ToolDeps) func(context.Context, mcp.CallToolRequest)
 
 		api, err := resolveAPI(ctx, deps)
 		if err != nil {
-			return errorResult(err)
+			return errorResultWithDeps(err, deps)
 		}
 		resp, err := api.ListApps(ctx, kintoneapi.ListAppsRequest{
 			IDs:      ids,
@@ -91,7 +91,7 @@ func appsSearchHandler(deps ToolDeps) func(context.Context, mcp.CallToolRequest)
 			Offset:   offset,
 		})
 		if err != nil {
-			return errorResult(err)
+			return errorResultWithDeps(err, deps)
 		}
 		return successResult(map[string]any{"apps": resp.Apps})
 	}

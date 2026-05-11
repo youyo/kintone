@@ -10,7 +10,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/youyo/kintone/internal/config"
+	"github.com/youyo/kintone/internal/mcp/facade"
 	mcpserver "github.com/youyo/kintone/internal/mcp/server"
+	serviceapi "github.com/youyo/kintone/internal/service/api"
+	"github.com/youyo/kintone/internal/store"
 )
 
 // NewCmd は `kintone mcp` サブコマンドツリーを構築する。
@@ -76,13 +80,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	srv := mcpserver.New(api)
 
 	switch serveMode {
 	case mcpserver.ServeModeStdio:
+		srv := mcpserver.New(api)
 		return mcpserver.ServeStdio(srv)
 	case mcpserver.ServeModeHTTP:
-		return runHTTP(cmd.Context(), srv, listenAddr, auth, authz)
+		// --profile / --config を反映して再 Load し、runHTTP に渡す（OAuth setup で参照）
+		cli := readCLIConfig(cmd)
+		resolved, err := config.Load(config.LoadOptions{CLI: cli})
+		if err != nil {
+			return err
+		}
+		return runHTTP(cmd.Context(), api, resolved, listenAddr, auth, authz)
 	default:
 		return fmt.Errorf("mcp serve: unsupported serve mode")
 	}
@@ -91,8 +101,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 // runHTTP は HTTP モードで MCP server を起動する。
 //
 // auth=oidc の場合は internal/idproxy パッケージで idproxy.Auth.Wrap を構築して挟む。
+// authz=oauth の場合は PrincipalAPIFactory + OAuth callback handler を組み立て、
+// /oauth/kintone/start, /callback を ExtraRoutes として登録する（M13）。
 // SIGINT / SIGTERM で graceful shutdown する。
-func runHTTP(ctx context.Context, srv *mcpserver.MCPServer, addr string, auth mcpserver.AuthMode, authz mcpserver.AuthZMode) error {
+func runHTTP(ctx context.Context, api serviceapi.API, resolved *config.Resolved, addr string, auth mcpserver.AuthMode, authz mcpserver.AuthZMode) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -104,9 +116,26 @@ func runHTTP(ctx context.Context, srv *mcpserver.MCPServer, addr string, auth mc
 		return err
 	}
 
+	// AuthZ=oauth では PrincipalAPIFactory と OAuth callback handler を組み立てる（M13）。
+	container := store.ContainerFromContext(ctx)
+	setup, err := buildOAuthSetup(ctx, resolved, container, authz)
+	if err != nil {
+		return err
+	}
+
+	deps := facade.ToolDeps{API: api}
+	var extraRoutes []mcpserver.RouteEntry
+	if setup != nil {
+		deps = setup.Deps
+		extraRoutes = setup.ExtraRoutes
+		defer setup.closeStates()
+	}
+	srv := mcpserver.NewWithDeps(deps)
+
 	return mcpserver.ServeHTTP(ctx, srv, mcpserver.HTTPServeOptions{
-		Addr:       addr,
-		Middleware: mw,
+		Addr:        addr,
+		Middleware:  mw,
+		ExtraRoutes: extraRoutes,
 	})
 }
 

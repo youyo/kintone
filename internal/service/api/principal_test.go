@@ -145,6 +145,56 @@ func TestPrincipalAPIFactory_ForContext_OAuth_NoToken(t *testing.T) {
 	}
 }
 
+func TestPrincipalAPIFactory_ForContext_OAuth_NoToken_ReturnsStructuredError(t *testing.T) {
+	t.Parallel()
+	fb := &fakeFallbackAPI{}
+	fs := newFakeStore()
+	f, err := NewPrincipalAPIFactory(PrincipalAPIFactoryConfig{
+		Base: baseResolved(), Mode: AuthZModeOAuth, Store: fs, Fallback: fb,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	pid := "https://accounts.google.com:user-1"
+	ctx := idproxy.WithPrincipal(context.Background(), &idproxy.Principal{ID: pid})
+	_, err = f.ForContext(ctx)
+
+	var are *AuthRequiredError
+	if !errors.As(err, &are) {
+		t.Fatalf("expected *AuthRequiredError, got %T (%v)", err, err)
+	}
+	if are.PrincipalID != pid {
+		t.Errorf("AuthRequiredError.PrincipalID = %q, want %q", are.PrincipalID, pid)
+	}
+	if are.Domain == "" {
+		t.Errorf("AuthRequiredError.Domain is empty")
+	}
+	// errors.Is(err, ErrAuthRequired) も同時に成立すること（後方互換）
+	if !errors.Is(err, ErrAuthRequired) {
+		t.Errorf("AuthRequiredError should unwrap to ErrAuthRequired")
+	}
+}
+
+func TestAuthRequiredError_ErrorMessageHasContext(t *testing.T) {
+	t.Parallel()
+	e := &AuthRequiredError{PrincipalID: "issuer:user-1", Domain: "example.cybozu.com"}
+	msg := e.Error()
+	if msg == "" {
+		t.Errorf("Error() returned empty")
+	}
+	if !errors.Is(e, ErrAuthRequired) {
+		t.Errorf("AuthRequiredError must unwrap to ErrAuthRequired")
+	}
+}
+
+func TestAuthRequiredError_NilSafe(t *testing.T) {
+	t.Parallel()
+	var e *AuthRequiredError
+	if got := e.Error(); got != "" {
+		t.Errorf("nil receiver Error() = %q, want empty", got)
+	}
+}
+
 func TestPrincipalAPIFactory_ForContext_OAuth_BuildsClient(t *testing.T) {
 	t.Parallel()
 	fb := &fakeFallbackAPI{}

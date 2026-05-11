@@ -185,6 +185,37 @@ AuthZ:
 - oauth
 - api-token
 
+### サーバホスト型 OAuth callback（M13 / Remote MCP + AuthZ=oauth）
+
+kintone OAuth は redirect_uri に HTTPS 完全一致を強制するため、ローカル CLI の
+loopback http フローは成立しない。Remote MCP サーバ自身が OAuth client として振る舞い、
+以下のエンドポイントを公開する:
+
+| Path | 目的 |
+|------|------|
+| `GET /oauth/kintone/start` | OIDC 認証済みユーザーを kintone authorize URL に 302 リダイレクト。state cookie 発行 + PKCE S256 |
+| `GET /oauth/kintone/callback` | authorization code を `/oauth2/token` で交換し、TokenStore に `Domain + PrincipalID + AuthType=oauth` で保存 |
+
+必須環境変数:
+- `KINTONE_OAUTH_CLIENT_ID` / `KINTONE_OAUTH_CLIENT_SECRET`
+- `KINTONE_OAUTH_REDIRECT_URL`（HTTPS。`KINTONE_MCP_EXTERNAL_URL + /oauth/kintone/callback` と完全一致）
+- `KINTONE_MCP_EXTERNAL_URL`（idproxy 用と兼用）
+- 任意: `KINTONE_OAUTH_SCOPES`（既定: kintone 6 scope）
+- 任意: `KINTONE_OAUTH_ALLOW_PLAINTEXT_REDIRECT=1`（dev only、localhost http を opt-in 許容）
+
+CSRF 三重保護:
+1. OIDC Principal 認証（idproxy.Auth.Wrap、SameSite=Lax cookie が kintone→callback の top-level GET に同伴）
+2. `kintone_oauth_state` cookie ↔ URL state の constant-time 照合
+3. state map の PrincipalID ↔ request Principal の constant-time 照合
+
+state 管理:
+- in-memory `MemoryStateStore`（TTL=10 分、one-shot Take）
+- multi-replica 対応は M14 で Storage backend に拡張予定（StateStore interface 化済み）
+
+AUTH_REQUIRED envelope:
+- 構造化 `AuthRequiredError` を facade.MapError が認識し、`{"ok":false,"error":{"code":"AUTH_REQUIRED","details":{"principal_id":"...","domain":"...","authorize_url":"..."}}}` を返す
+- LLM クライアントは `details.authorize_url` を UI に表示し、ユーザがブラウザで kintone 認可を完了後に再度ツール呼び出しを行う
+
 ---
 
 ## レイヤー

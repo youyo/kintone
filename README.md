@@ -293,7 +293,7 @@ fit our distribution model, so OAuth is now restricted to **remote MCP servers o
 | Use case | Authentication |
 |---|---|
 | Local CLI (`api`/`ops`/`mcp serve` stdio) | API Token |
-| Remote MCP server (`mcp serve --listen ...`) | OAuth (server-hosted callback, planned in M13) |
+| Remote MCP server (`mcp serve --listen ...`) | OAuth (server-hosted callback, available since M13) |
 
 ### Server-hosted OAuth flow (M13)
 
@@ -303,13 +303,37 @@ For a remote MCP server published at `https://mcp.example.com`, register the OAu
 - **scopes**: `k:app_record:read k:app_record:write k:app_settings:read k:app_settings:write k:file:read k:file:write`
 - **Step-by-step guide**: [cybozu developer network — Adding an OAuth client](https://cybozu.dev/en/common/docs/oauth-client/add-client/)
 
+Required environment variables on the MCP server:
+
+- `KINTONE_OAUTH_CLIENT_ID` / `KINTONE_OAUTH_CLIENT_SECRET`
+- `KINTONE_OAUTH_REDIRECT_URL` (HTTPS, must equal `KINTONE_MCP_EXTERNAL_URL + /oauth/kintone/callback`)
+- `KINTONE_MCP_EXTERNAL_URL` (shared with idproxy)
+- Optional: `KINTONE_OAUTH_SCOPES`
+- Optional (dev only): `KINTONE_OAUTH_ALLOW_PLAINTEXT_REDIRECT=1` permits `http://localhost`
+
+Endpoints (`auth=oidc + authz=oauth`):
+
+| Path | Purpose |
+|------|---------|
+| `GET /oauth/kintone/start` | OIDC-authenticated user is 302-redirected to kintone authorize URL with PKCE S256 + state cookie |
+| `GET /oauth/kintone/callback` | Exchanges authorization code → token, stores in TokenStore (`Domain + PrincipalID + AuthType=oauth`) |
+
 Flow:
 
 1. User signs in to the MCP server with OIDC (`--auth oidc`)
-2. When an MCP tool call detects the user has no kintone token, the server returns the kintone authorize URL
-3. User approves on kintone in the browser; the server's `/oauth/kintone/callback` receives the authorization code
-4. Server exchanges the code, then stores the access token in TokenStore keyed by `Domain + OIDC sub + AuthType=oauth`
-5. Subsequent MCP calls go through `PrincipalAPIFactory`, which fetches the per-user token automatically
+2. When an MCP tool call detects the user has no kintone token, the server returns an `AUTH_REQUIRED` envelope containing `details.authorize_url`
+3. The LLM client surfaces the URL to the user; the user opens it in a browser
+4. The MCP server's `/oauth/kintone/start` redirects to kintone's authorize endpoint
+5. After kintone approval, `/oauth/kintone/callback` exchanges the code and stores the access/refresh tokens
+6. Subsequent MCP calls go through `PrincipalAPIFactory`, which fetches the per-user token automatically; refresh is performed transparently
+
+Security:
+
+- CSRF triple-check: idproxy OIDC Principal + `kintone_oauth_state` cookie + state-map PrincipalID match
+- state TTL: 10 minutes, one-shot consumption (OAuth 2.0 spec)
+- state map is in-memory (M13). Multi-replica deployments must rely on user retry until M14 adds Storage-backed state
+
+> Known M13 limitations: in-memory state means process restart / multi-replica routing may invalidate an in-flight authorization; the user simply re-clicks the authorize URL. Single domain per server (multi-domain routing is planned for M14).
 
 > The CLI no longer offers a way to obtain OAuth tokens directly. `kintone auth status` / `kintone auth logout` remain as auxiliary tools that inspect or delete tokens stored by the remote MCP server.
 

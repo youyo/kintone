@@ -25,9 +25,14 @@ type APIResolver interface {
 // per-user API を解決する（remote MCP / OIDC + OAuth 経路）。nil の場合は API を直接使う
 // （stdio / api-token 経路の後方互換）。Factory が ErrAuthRequired を返した場合、
 // 呼び出し元は MapError 経由で AUTH_REQUIRED envelope を返す。
+//
+// AuthorizeURLBuilder はオプショナル: 設定されている場合、AuthRequiredError 発生時に
+// AUTH_REQUIRED envelope の details.authorize_url を組み立てる（M13）。
+// AuthZ=oauth + listen 経由のときのみ非 nil。nil のときは Code=AUTH_REQUIRED のみ返す。
 type ToolDeps struct {
-	API     serviceapi.API
-	Factory APIResolver
+	API                 serviceapi.API
+	Factory             APIResolver
+	AuthorizeURLBuilder func(principalID string) string
 }
 
 // resolveAPI は ctx の Principal を見て使用する API を決定する。

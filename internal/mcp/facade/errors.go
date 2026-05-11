@@ -24,18 +24,51 @@ import (
 
 // MapError は facade 経路の任意 error を *output.Error に変換する。
 //
+// authorize URL builder は nil 渡しで M11 互換セマンティクス（AUTH_REQUIRED に details なし）。
+func MapError(err error) *output.Error {
+	return MapErrorWithBuilder(err, nil)
+}
+
+// MapErrorWithBuilder は MapError の拡張版（M13）。
+//
+// builder != nil の場合、AuthRequiredError を捕捉して AUTH_REQUIRED envelope の
+// details に authorize_url / principal_id / domain を含める。
+// builder == nil の場合、details なしで Code=AUTH_REQUIRED のみ返す（M11 互換）。
+//
 // CLI 経路の cli.MapToOutputError と同じ意味論を持ちつつ、cobra/USAGE 概念は持たない。
 // 操作上のバリデーションエラー（operations.Err*）は INVALID_PARAMS、
 // kintone REST のエラーは KINTONE_*、ネットワーク系は KINTONE_NETWORK、
 // それ以外は INTERNAL に分類する。
 //
 // nil を渡すと nil を返す。
-func MapError(err error) *output.Error {
+func MapErrorWithBuilder(err error, builder func(principalID string) string) *output.Error {
 	if err == nil {
 		return nil
 	}
 
-	// PrincipalAPIFactory が Principal 不在で返す ErrAuthRequired → AUTH_REQUIRED（M11）
+	// 構造化 AuthRequiredError → AUTH_REQUIRED + details（M13）
+	var authReq *serviceapi.AuthRequiredError
+	if errors.As(err, &authReq) {
+		details := map[string]any{}
+		if authReq.PrincipalID != "" {
+			details["principal_id"] = authReq.PrincipalID
+		}
+		if authReq.Domain != "" {
+			details["domain"] = authReq.Domain
+		}
+		if builder != nil && authReq.PrincipalID != "" {
+			if url := builder(authReq.PrincipalID); url != "" {
+				details["authorize_url"] = url
+			}
+		}
+		out := &output.Error{Code: "AUTH_REQUIRED", Message: err.Error()}
+		if len(details) > 0 {
+			out.Details = details
+		}
+		return out
+	}
+
+	// PrincipalAPIFactory が Principal 不在で返す plain ErrAuthRequired → AUTH_REQUIRED（M11 互換）
 	if errors.Is(err, serviceapi.ErrAuthRequired) {
 		return &output.Error{Code: "AUTH_REQUIRED", Message: err.Error()}
 	}

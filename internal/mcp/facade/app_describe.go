@@ -52,7 +52,7 @@ func appDescribeHandler(deps ToolDeps) func(context.Context, mcp.CallToolRequest
 		}
 		api, err := resolveAPI(ctx, deps)
 		if err != nil {
-			return errorResult(err)
+			return errorResultWithDeps(err, deps)
 		}
 		r := resolver.New(api)
 		out, err := operations.AppDescribe(ctx, api, r, operations.AppDescribeInput{
@@ -61,7 +61,7 @@ func appDescribeHandler(deps ToolDeps) func(context.Context, mcp.CallToolRequest
 			Lang:   lang,
 		})
 		if err != nil {
-			return errorResult(err)
+			return errorResultWithDeps(err, deps)
 		}
 		return successResult(out)
 	}

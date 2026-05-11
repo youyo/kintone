@@ -97,7 +97,7 @@ func recordUpdateHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 		}
 		api, err := resolveAPI(ctx, deps)
 		if err != nil {
-			return errorResult(err)
+			return errorResultWithDeps(err, deps)
 		}
 		r := resolver.New(api)
 		out, err := operations.RecordUpdate(ctx, api, r, operations.RecordUpdateInput{
@@ -111,7 +111,7 @@ func recordUpdateHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 			Record:            record,
 		})
 		if err != nil {
-			return errorResult(err)
+			return errorResultWithDeps(err, deps)
 		}
 		return successResult(out)
 	}
