@@ -209,6 +209,98 @@ func TestMapError_StorePlaintextForbidden(t *testing.T) {
 }
 
 // FSE-9: store.ErrPrincipalNotFound → RESOLVER_PRINCIPAL_NOT_FOUND
+// M13: AuthRequiredError + builder → details.authorize_url を含む。
+func TestMapErrorWithBuilder_AuthRequiredHasAuthorizeURL(t *testing.T) {
+	t.Parallel()
+
+	authErr := &serviceapi.AuthRequiredError{
+		PrincipalID: "https://issuer:user-1",
+		Domain:      "example.cybozu.com",
+	}
+	builder := func(pid string) string {
+		return "https://mcp.example.com/oauth/kintone/start?principal_id=" + url.QueryEscape(pid)
+	}
+	got := facade.MapErrorWithBuilder(authErr, builder)
+	if got == nil {
+		t.Fatal("got nil")
+	}
+	if got.Code != "AUTH_REQUIRED" {
+		t.Errorf("Code = %q, want AUTH_REQUIRED", got.Code)
+	}
+	if got.Details == nil {
+		t.Fatal("Details is nil")
+	}
+	if got.Details["principal_id"] != "https://issuer:user-1" {
+		t.Errorf("details.principal_id = %v", got.Details["principal_id"])
+	}
+	if got.Details["domain"] != "example.cybozu.com" {
+		t.Errorf("details.domain = %v", got.Details["domain"])
+	}
+	authzURL, _ := got.Details["authorize_url"].(string)
+	if authzURL == "" || !contains(authzURL, "principal_id=") {
+		t.Errorf("details.authorize_url = %q", authzURL)
+	}
+}
+
+// M13: AuthRequiredError + builder=nil → details に authorize_url 含まれない。
+func TestMapErrorWithBuilder_AuthRequiredNoBuilder(t *testing.T) {
+	t.Parallel()
+
+	authErr := &serviceapi.AuthRequiredError{
+		PrincipalID: "issuer:sub",
+		Domain:      "example.cybozu.com",
+	}
+	got := facade.MapErrorWithBuilder(authErr, nil)
+	if got.Code != "AUTH_REQUIRED" {
+		t.Errorf("Code = %q, want AUTH_REQUIRED", got.Code)
+	}
+	if got.Details != nil {
+		if _, ok := got.Details["authorize_url"]; ok {
+			t.Errorf("authorize_url should not be present when builder is nil")
+		}
+	}
+}
+
+// M13: plain ErrAuthRequired → AUTH_REQUIRED + details なし（M11 後方互換）。
+func TestMapErrorWithBuilder_PlainErrAuthRequired(t *testing.T) {
+	t.Parallel()
+
+	builder := func(string) string { return "https://example.com/start" }
+	got := facade.MapErrorWithBuilder(serviceapi.ErrAuthRequired, builder)
+	if got.Code != "AUTH_REQUIRED" {
+		t.Errorf("Code = %q", got.Code)
+	}
+	if got.Details != nil {
+		t.Errorf("plain ErrAuthRequired should not produce details, got %+v", got.Details)
+	}
+}
+
+// M13: MapError (M11 互換) は AuthRequiredError でも details なしで code のみ返す。
+func TestMapError_AuthRequiredErrorBackwardCompat(t *testing.T) {
+	t.Parallel()
+
+	authErr := &serviceapi.AuthRequiredError{PrincipalID: "p", Domain: "d"}
+	got := facade.MapError(authErr)
+	if got.Code != "AUTH_REQUIRED" {
+		t.Errorf("Code = %q", got.Code)
+	}
+	// MapError は builder なし → details に authorize_url なし
+	if got.Details != nil {
+		if _, ok := got.Details["authorize_url"]; ok {
+			t.Errorf("MapError(builder=nil): authorize_url should be absent")
+		}
+	}
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMapError_StorePrincipalNotFound(t *testing.T) {
 	t.Parallel()
 	got := facade.MapError(store.ErrPrincipalNotFound)

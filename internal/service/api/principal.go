@@ -17,6 +17,31 @@ import (
 // facade で AUTH_REQUIRED にマップする想定。CLI 単発実行（stdio + apitoken）では発生しない。
 var ErrAuthRequired = errors.New("api: authentication required")
 
+// AuthRequiredError は ErrAuthRequired の構造化版（M13）。
+//
+// AuthZMode=oauth + Principal あり + TokenStore に該当なし のときに返される。
+// facade.MapError は errors.As でこの型を捕捉し、AUTH_REQUIRED envelope の
+// details に principal_id / domain を含める。authorize URL の組立は facade 側の
+// AuthorizeURLBuilder が担う（service/api は HTTP 公開 URL を知らない）。
+type AuthRequiredError struct {
+	PrincipalID string
+	Domain      string
+}
+
+// Error は人間可読なエラーメッセージを返す。
+func (e *AuthRequiredError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.PrincipalID == "" {
+		return "api: authentication required (no principal token)"
+	}
+	return fmt.Sprintf("api: authentication required for principal %q (domain %q)", e.PrincipalID, e.Domain)
+}
+
+// Unwrap は errors.Is(err, ErrAuthRequired) を満たすため ErrAuthRequired を返す。
+func (e *AuthRequiredError) Unwrap() error { return ErrAuthRequired }
+
 // AuthZMode は upstream kintone への認証方式。
 type AuthZMode string
 
@@ -108,12 +133,12 @@ func (f *PrincipalAPIFactory) ForContext(ctx context.Context) (API, error) {
 	tok, err := f.tokens.Get(ctx, f.base.Domain, p.ID, store.AuthTypeOAuth)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, fmt.Errorf("%w: principal %q has no token", ErrAuthRequired, p.ID)
+			return nil, &AuthRequiredError{PrincipalID: p.ID, Domain: f.base.Domain}
 		}
 		return nil, fmt.Errorf("api: PrincipalAPIFactory: get token: %w", err)
 	}
 	if tok == nil {
-		return nil, fmt.Errorf("%w: principal %q has no token", ErrAuthRequired, p.ID)
+		return nil, &AuthRequiredError{PrincipalID: p.ID, Domain: f.base.Domain}
 	}
 
 	authn := oauth.NewAuthenticator(f.tokens, f.base.Domain, p.ID, f.refresher, nil)

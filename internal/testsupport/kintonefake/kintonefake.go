@@ -3,8 +3,9 @@
 // E2E テスト専用。本番コードから import してはならない。
 //
 // 提供 endpoint:
-//   - POST /oauth2/token: refresh_token grant に応答（rotation: 毎回新しい refresh_token）
-//   - GET /k/v1/records.json: Bearer access_token 検証 → 401(expired) または 200(records)
+//   - GET  /oauth2/authorization: authorize endpoint（M13）— redirect_uri に code/state を付与し 302
+//   - POST /oauth2/token: authorization_code / refresh_token grant に応答（rotation）
+//   - GET  /k/v1/records.json: Bearer access_token 検証 → 401(expired) または 200(records)
 //
 // 「初回 access_token は expired を返し、refresh 後は OK」シナリオを再現する。
 package kintonefake
@@ -16,6 +17,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 )
@@ -25,23 +27,37 @@ type Server struct {
 	httpServer *httptest.Server
 
 	mu             sync.Mutex
+	authzCodes     map[string]string // code -> principalID（M13）
 	refreshTokens  map[string]string // refresh_token -> principalID
 	validAccess    map[string]bool   // access_token -> true
 	expiredOnceFor map[string]bool   // principalID -> 「最初の records 呼び出しは 401 を返す」フラグ
+
+	// authorizePrincipalID は /oauth2/authorization で発行する code に紐付ける principalID。
+	authorizePrincipalID string
 }
 
 // New は新しい kintone fake を起動する。
 func New() *Server {
 	s := &Server{
-		refreshTokens:  map[string]string{},
-		validAccess:    map[string]bool{},
-		expiredOnceFor: map[string]bool{},
+		authzCodes:           map[string]string{},
+		refreshTokens:        map[string]string{},
+		validAccess:          map[string]bool{},
+		expiredOnceFor:       map[string]bool{},
+		authorizePrincipalID: "user-1",
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth2/authorization", s.handleAuthorize)
 	mux.HandleFunc("/oauth2/token", s.handleToken)
 	mux.HandleFunc("/k/v1/records.json", s.handleRecords)
 	s.httpServer = httptest.NewServer(mux)
 	return s
+}
+
+// SetAuthorizePrincipalID は /oauth2/authorization で発行する code に紐付ける principalID を設定する（M13）。
+func (s *Server) SetAuthorizePrincipalID(pid string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authorizePrincipalID = pid
 }
 
 // URL は base URL を返す。
@@ -64,10 +80,46 @@ func (s *Server) SeedTokenFor(principalID string) (refreshToken string) {
 
 // --- handlers ---
 
+// handleAuthorize は kintone OAuth /oauth2/authorization mock（M13）。
+//
+// UI を介さず即座に code / state を redirect_uri に付与して 302 を返す。
+// テスト簡略化のため client_id / scope 等の追加検証は行わない（redirect_uri と
+// state の往復のみを担保する）。
+func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	q := r.URL.Query()
+	redirect := q.Get("redirect_uri")
+	state := q.Get("state")
+	if redirect == "" {
+		http.Error(w, "missing redirect_uri", http.StatusBadRequest)
+		return
+	}
+	code := mustRandom(16)
+	s.mu.Lock()
+	s.authzCodes[code] = s.authorizePrincipalID
+	s.mu.Unlock()
+
+	dest, err := url.Parse(redirect)
+	if err != nil {
+		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+		return
+	}
+	qq := dest.Query()
+	qq.Set("code", code)
+	if state != "" {
+		qq.Set("state", state)
+	}
+	dest.RawQuery = qq.Encode()
+	http.Redirect(w, r, dest.String(), http.StatusFound)
+}
+
 // handleToken は kintone OAuth /oauth2/token mock。
 //
-// refresh_token grant の場合、新しい access_token / refresh_token を発行し、
-// 旧 refresh_token を無効化する（rotation）。
+// authorization_code grant: code を消費し新規 access_token + refresh_token を返す（M13）。
+// refresh_token grant: 旧 refresh_token を無効化し新規発行（rotation）。
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -78,22 +130,43 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	grant := r.PostForm.Get("grant_type")
-	if grant != "refresh_token" {
+	switch grant {
+	case "authorization_code":
+		code := r.PostForm.Get("code")
+		s.mu.Lock()
+		principalID, ok := s.authzCodes[code]
+		if ok {
+			delete(s.authzCodes, code)
+		}
+		s.mu.Unlock()
+		if !ok {
+			writeJSONError(w, http.StatusBadRequest, "invalid_grant", "unknown code")
+			return
+		}
+		s.issueTokens(w, principalID)
+		return
+	case "refresh_token":
+		old := r.PostForm.Get("refresh_token")
+		s.mu.Lock()
+		principalID, ok := s.refreshTokens[old]
+		if ok {
+			delete(s.refreshTokens, old)
+		}
+		s.mu.Unlock()
+		if !ok {
+			writeJSONError(w, http.StatusBadRequest, "invalid_grant", "unknown refresh_token")
+			return
+		}
+		s.issueTokens(w, principalID)
+		return
+	default:
 		writeJSONError(w, http.StatusBadRequest, "unsupported_grant_type", grant)
 		return
 	}
-	old := r.PostForm.Get("refresh_token")
-	s.mu.Lock()
-	principalID, ok := s.refreshTokens[old]
-	if ok {
-		delete(s.refreshTokens, old)
-	}
-	s.mu.Unlock()
-	if !ok {
-		writeJSONError(w, http.StatusBadRequest, "invalid_grant", "unknown refresh_token")
-		return
-	}
+}
 
+// issueTokens は新規 access_token / refresh_token を発行し principalID に紐付ける。
+func (s *Server) issueTokens(w http.ResponseWriter, principalID string) {
 	access := mustRandom(24)
 	newRefresh := mustRandom(24)
 	s.mu.Lock()

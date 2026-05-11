@@ -56,7 +56,7 @@ func isStoreSkippedCommand(cmd *cobra.Command) bool {
 }
 
 // isStoreRequiredCommand は store が mandatory なコマンドを判定する。
-// auth login/status/logout, cache stats/clear, mcp serve が対象。
+// auth status/logout, cache stats/clear, mcp serve が対象。
 func isStoreRequiredCommand(cmd *cobra.Command) bool {
 	name := commandPath(cmd)
 	prefixes := []string{

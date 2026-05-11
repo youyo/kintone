@@ -150,6 +150,142 @@ func TestServeHTTP_Middleware_Rejects(t *testing.T) {
 	<-done
 }
 
+// M13: ExtraRoutes の正常動作
+func TestServeHTTP_AdditionalRoutes(t *testing.T) {
+	t.Parallel()
+	addr := freePort(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	hit := make(chan struct{}, 1)
+	extra := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit <- struct{}{}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	done := make(chan error, 1)
+	go func() {
+		done <- ServeHTTP(ctx, newTestMCP(), HTTPServeOptions{
+			Addr: addr,
+			ExtraRoutes: []RouteEntry{
+				{Path: "/oauth/kintone/start", Handler: extra},
+			},
+		})
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		c, err := net.Dial("tcp", addr)
+		if err == nil {
+			_ = c.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	resp, err := http.Get("http://" + addr + "/oauth/kintone/start")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d", resp.StatusCode)
+	}
+	select {
+	case <-hit:
+	case <-time.After(time.Second):
+		t.Fatal("extra handler not invoked")
+	}
+	cancel()
+	<-done
+}
+
+// M13: ExtraRoutes と /mcp の重複 → error
+func TestServeHTTP_AdditionalRoutes_DuplicatePathRejected(t *testing.T) {
+	t.Parallel()
+	err := ServeHTTP(context.Background(), newTestMCP(), HTTPServeOptions{
+		Addr: ":0",
+		ExtraRoutes: []RouteEntry{
+			{Path: "/mcp", Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("expected duplicate path error, got %v", err)
+	}
+}
+
+// M13: ExtraRoutes 同士の重複 → error
+func TestServeHTTP_AdditionalRoutes_SelfDuplicateRejected(t *testing.T) {
+	t.Parallel()
+	dummy := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	err := ServeHTTP(context.Background(), newTestMCP(), HTTPServeOptions{
+		Addr: ":0",
+		ExtraRoutes: []RouteEntry{
+			{Path: "/x", Handler: dummy},
+			{Path: "/x", Handler: dummy},
+		},
+	})
+	if err == nil {
+		t.Errorf("expected duplicate path error")
+	}
+}
+
+// M13: ExtraRoutes に nil handler を渡すと error
+func TestServeHTTP_AdditionalRoutes_NilHandlerRejected(t *testing.T) {
+	t.Parallel()
+	err := ServeHTTP(context.Background(), newTestMCP(), HTTPServeOptions{
+		Addr: ":0",
+		ExtraRoutes: []RouteEntry{
+			{Path: "/x", Handler: nil},
+		},
+	})
+	if err == nil {
+		t.Errorf("expected nil handler error")
+	}
+}
+
+// M13: ExtraRoutes にも middleware が適用される
+func TestServeHTTP_AdditionalRoutes_MiddlewareApplied(t *testing.T) {
+	t.Parallel()
+	addr := freePort(t)
+	called := 0
+	mw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called++
+			next.ServeHTTP(w, r)
+		})
+	}
+	extra := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- ServeHTTP(ctx, newTestMCP(), HTTPServeOptions{
+			Addr:       addr,
+			Middleware: mw,
+			ExtraRoutes: []RouteEntry{
+				{Path: "/oauth/kintone/start", Handler: extra},
+			},
+		})
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		c, err := net.Dial("tcp", addr)
+		if err == nil {
+			_ = c.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	resp, err := http.Get("http://" + addr + "/oauth/kintone/start")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	_ = resp.Body.Close()
+	cancel()
+	<-done
+	if called == 0 {
+		t.Errorf("middleware was not applied to extra route")
+	}
+}
+
 // noopMiddleware が露出している重複定義に対する sanity check
 func TestServeHTTP_NoopMiddleware(t *testing.T) {
 	t.Parallel()

@@ -8,13 +8,13 @@
 | 制約 | Go 1.26 / 仕様書（docs/specs/kintone_spec.md）準拠 / multi-user 対応 / profile + env override / 配布形態 4 種 |
 | 対象リポジトリ | /Users/youyo/src/github.com/youyo/kintone |
 | 作成日 | 2026-04-29 |
-| 最終更新 | 2026-05-01 18:30 |
-| ステータス | 全 M11 + M12 完了（リリース準備完了） |
+| 最終更新 | 2026-05-12 |
+| ステータス | 全 M1-M13 完了 / v0.3.0 リリース準備完了 |
 
 ## Current Focus
-- **マイルストーン**: M12（統合 Storage バックエンド）全 11 フェーズ完了
-- **直近の完了**: M12 Phase 8.5（in-process E2E ハーネス基盤、oidcstub + kintonefake + SeedTokenForE2E + e2e build tag テスト）
-- **次のアクション**: M12 を main へ merge → タグ push（`git tag v0.2.0 && git push origin v0.2.0`）で GoReleaser ワークフロー起動。M13+ で CI matrix 統合 / KMS 連携 / principal alias 等を検討
+- **マイルストーン**: なし（全マイルストーン完了）
+- **直近の決定**: M13 完了（commit 88791d0）。リモート MCP サーバホスト型 OAuth callback を `internal/mcp/oauthcallback` 専用パッケージで実装し、PKCE S256 + state cookie + CSRF 三重保護 + 構造化 AuthRequiredError による AUTH_REQUIRED envelope の authorize_url 注入で完成。
+- **次のアクション**: v0.3.0 リリース（タグ push で GoReleaser ワークフロー起動）。M14 候補は StateStore Storage 拡張・multi-domain・`auth/oauth/flow.go` 物理削除。
 
 ## Progress
 
@@ -171,6 +171,20 @@
 - [x] Phase 9: ドキュメント更新（README / spec / CHANGELOG）
 - 詳細: plans/binary-imagining-lemur.md
 - ブランチ: feat-m12-unified-storage-phase01
+
+### M13: Remote MCP 用 サーバホスト型 OAuth callback ✅ 完了
+kintone OAuth は redirect_uri に https を強制するため、ローカル CLI loopback フローは廃止（v0.3.0）。リモート MCP サーバ自身が OAuth client として振る舞い、ユーザの kintone トークンをサーバ側で取得・保存する。
+- [x] `mcp serve --listen` 時に `/oauth/kintone/start` と `/oauth/kintone/callback` ハンドラを追加（専用パッケージ `internal/mcp/oauthcallback`）
+- [x] `state` パラメータに OIDC `sub` を紐付け（`StateStore` interface + in-memory 実装 / TTL 10 分 / one-shot Take semantics）
+- [x] callback で受信した authorization code を kintone token endpoint に交換し、TokenStore に `Domain + sub + AuthType=oauth` で保存（既存スキーマ流用）
+- [x] PrincipalAPIFactory が token 不在を検知した場合、構造化 `AuthRequiredError` を返し facade が `AUTH_REQUIRED` envelope の `details.authorize_url` に authorize URL を含める
+- [x] redirect_uri は MCP サーバの公開 https URL 1 つに固定 + 起動時 fail-fast 検証（HTTPS 強制 + ExternalURL 完全一致 / `KINTONE_OAUTH_ALLOW_PLAINTEXT_REDIRECT=1` で localhost http opt-in 許容）
+- [x] CSRF 三重保護: idproxy OIDC Principal + state cookie + state map の PrincipalID 比較（constant-time compare）
+- [x] `internal/auth/oauth/` の token exchange / refresh ロジックは流用、loopback サーバ部分は deprecated（unexport / 物理削除は M14）
+- [x] E2E: `internal/testsupport/kintonefake` を `/oauth2/authorization` 追加で拡張し、start → authorize → callback → Token 永続化のフローを build tag `e2e` で検証（CSRF 異常系も）
+- [x] ドキュメント: README.md / README.ja.md / docs/specs / CHANGELOG.md 更新
+- 詳細: plans/kintone-m13-remote-mcp-oauth-callback.md
+- ブランチ: feat-auth-model-cli-apitoken-mcp-oauth（v0.3.0 リリース準備完了）
 
 ## Blockers
 なし

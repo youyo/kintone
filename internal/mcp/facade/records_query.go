@@ -66,7 +66,7 @@ func recordsQueryHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 		}
 		api, err := resolveAPI(ctx, deps)
 		if err != nil {
-			return errorResult(err)
+			return errorResultWithDeps(err, deps)
 		}
 		r := resolver.New(api)
 		out, err := operations.RecordsQuery(ctx, api, r, operations.RecordsQueryInput{
@@ -77,7 +77,7 @@ func recordsQueryHandler(deps ToolDeps) func(context.Context, mcp.CallToolReques
 			TotalCount: totalCount,
 		})
 		if err != nil {
-			return errorResult(err)
+			return errorResultWithDeps(err, deps)
 		}
 		return successResult(out)
 	}

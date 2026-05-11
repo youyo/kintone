@@ -63,9 +63,11 @@ go build -o /usr/local/bin/kintone ./cmd/kintone
 
 | Method | Use case | Required setup | Command |
 |---|---|---|---|
-| **API Token** | One-off CLI / single-user MCP / simple automation | `KINTONE_DOMAIN` + `KINTONE_API_TOKEN` (or config.toml) | `kintone api/ops/mcp serve` (default) |
-| **OAuth 2.0** | Per-user authorization / multi-user | Register OAuth client + `kintone auth login --oauth --principal-id <id>` | `kintone api/ops ...` (uses stored token automatically) |
+| **API Token** | Local CLI / single-user MCP (stdio) / simple automation | `KINTONE_DOMAIN` + `KINTONE_API_TOKEN` (or config.toml) | `kintone api/ops/mcp serve` (default) |
+| **OAuth 2.0** (Remote MCP only) | Per-user authorization on a hosted MCP server / multi-user | Register OAuth client (redirect_uri = MCP server's public https URL) + server-hosted callback flow (planned in M13) | Browser consent through the remote MCP web flow; server stores tokens in TokenStore |
 | **OIDC remote (idproxy)** | Remote MCP server + multiple users + identity provider | OIDC Issuer / Client / Cookie Secret etc. | `kintone mcp serve --listen :8080 --auth oidc --authz oauth` |
+
+> **Note (v0.3.0+)**: kintone OAuth requires `https` for the redirect URI, so the local CLI loopback flow (`kintone auth login --oauth`) has been removed. **Local CLI usage is API Token only**, and **OAuth is reserved for remote MCP servers**.
 
 ## Usage
 
@@ -259,9 +261,9 @@ For dev/test, set `KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE=1` to allow auto-genera
 
 ### Multi-user MCP principal_id convention
 
-When sharing tokens between the OIDC MCP HTTP server and the CLI,
-provision tokens with `kintone auth login --oauth --principal-id <issuer>:<sub>` format.
-Example: `--principal-id "https://accounts.google.com:1234567890"`
+In OIDC mode, each user's principal_id is stored in the format `<issuer>:<sub>`
+(e.g. `https://accounts.google.com:1234567890`). The server-hosted OAuth callback (M13)
+maps the OIDC `sub` claim into the TokenStore key automatically — no manual provisioning is needed.
 
 ### Memory backend restriction
 
@@ -277,72 +279,63 @@ The `X-Cybozu-API-Token` header is attached automatically.
 
 For how to issue an API Token, see [kintone REST API Common Spec — Authentication](https://cybozu.dev/en/kintone/docs/rest-api/overview/authentication/).
 
-## OAuth Authentication
+## OAuth Authentication (Remote MCP server only)
 
-Supports kintone's OAuth 2.0 Authorization Code Grant + PKCE (S256) flow.
-Set `KINTONE_AUTH=oauth` to use OAuth access tokens instead of an API Token.
-Token expiration (typically 1 hour) is detected automatically and transparently refreshed using the refresh token.
+kintone OAuth 2.0 Authorization Code Grant + PKCE (S256) is supported, but
+**as of v0.3.0 the local CLI OAuth login flow has been removed**.
 
-### Prerequisites (cybozu.com administrator setup)
+Reason: kintone OAuth requires `https` for the redirect URI (loopback http is rejected).
+Running a self-signed https loopback server from a CLI binary degrades UX and does not
+fit our distribution model, so OAuth is now restricted to **remote MCP servers only**.
 
-To use OAuth, **a cybozu.com administrator must register an OAuth client first**.
-Follow the official procedure below:
+### Auth model
 
-1. **Add an OAuth client**
-   Register from cybozu.com System Administration > External Service Integration > OAuth Client.
-   - Step-by-step guide: [cybozu developer network — Adding an OAuth client](https://cybozu.dev/en/common/docs/oauth-client/add-client/) (Japanese: [OAuth クライアントを追加する](https://cybozu.dev/ja/common/docs/oauth-client/add-client/))
-   - cybozu.com help: [Adding OAuth clients](https://jp.cybozu.help/general/en/admin/list_externalservices/add_oauth_client.html)
+| Use case | Authentication |
+|---|---|
+| Local CLI (`api`/`ops`/`mcp serve` stdio) | API Token |
+| Remote MCP server (`mcp serve --listen ...`) | OAuth (server-hosted callback, available since M13) |
 
-2. **Register the redirect URI as `http://127.0.0.1:<port>/callback`**
-   This CLI uses the loopback redirect flow, so the URI must exactly match the port the CLI listens on (default: `http://127.0.0.1:18080/callback`).
+### Server-hosted OAuth flow (M13)
 
-3. **Grant the required scopes**
-   The defaults requested are below. Adjust to your application's needs.
-   - `k:app_record:read` / `k:app_record:write`
-   - `k:app_settings:read` / `k:app_settings:write`
-   - `k:file:read` / `k:file:write`
-   - Full list: [cybozu developer network — kintone OAuth scopes](https://cybozu.dev/en/common/docs/oauth-client/scope-kintone/) (Japanese: [kintone の OAuth スコープ](https://cybozu.dev/ja/common/docs/oauth-client/scope-kintone/))
+For a remote MCP server published at `https://mcp.example.com`, register the OAuth client as:
 
-4. **Allow users to use the OAuth client in "User settings"**
-   The OAuth client ID/secret and the list of allowed users are managed in separate screens. The authorization flow will fail until users are explicitly allowed.
+- **redirect URI**: `https://mcp.example.com/oauth/kintone/callback` (public https / shared by all users / exact match)
+- **scopes**: `k:app_record:read k:app_record:write k:app_settings:read k:app_settings:write k:file:read k:file:write`
+- **Step-by-step guide**: [cybozu developer network — Adding an OAuth client](https://cybozu.dev/en/common/docs/oauth-client/add-client/)
 
-For an overview of the OAuth client concept, see [cybozu developer network — OAuth Client](https://cybozu.dev/en/common/docs/oauth-client/) (Japanese: [OAuth クライアント](https://cybozu.dev/ja/common/docs/oauth-client/)).
+Required environment variables on the MCP server:
 
-### CLI-side setup
+- `KINTONE_OAUTH_CLIENT_ID` / `KINTONE_OAUTH_CLIENT_SECRET`
+- `KINTONE_OAUTH_REDIRECT_URL` (HTTPS, must equal `KINTONE_MCP_EXTERNAL_URL + /oauth/kintone/callback`)
+- `KINTONE_MCP_EXTERNAL_URL` (shared with idproxy)
+- Optional: `KINTONE_OAUTH_SCOPES`
+- Optional (dev only): `KINTONE_OAUTH_ALLOW_PLAINTEXT_REDIRECT=1` permits `http://localhost`
 
-Set the client ID / secret / redirect URI via environment variables:
+Endpoints (`auth=oidc + authz=oauth`):
 
-```bash
-export KINTONE_DOMAIN=example.cybozu.com
-export KINTONE_AUTH=oauth
-export KINTONE_OAUTH_CLIENT_ID=your-client-id
-export KINTONE_OAUTH_CLIENT_SECRET=your-client-secret
-export KINTONE_OAUTH_REDIRECT_URL=http://127.0.0.1:18080/callback
-```
+| Path | Purpose |
+|------|---------|
+| `GET /oauth/kintone/start` | OIDC-authenticated user is 302-redirected to kintone authorize URL with PKCE S256 + state cookie |
+| `GET /oauth/kintone/callback` | Exchanges authorization code → token, stores in TokenStore (`Domain + PrincipalID + AuthType=oauth`) |
 
-### Login (Authorization Code Flow)
+Flow:
 
-```bash
-$ kintone auth login --oauth --principal-id oauth:alice
-```
+1. User signs in to the MCP server with OIDC (`--auth oidc`)
+2. When an MCP tool call detects the user has no kintone token, the server returns an `AUTH_REQUIRED` envelope containing `details.authorize_url`
+3. The LLM client surfaces the URL to the user; the user opens it in a browser
+4. The MCP server's `/oauth/kintone/start` redirects to kintone's authorize endpoint
+5. After kintone approval, `/oauth/kintone/callback` exchanges the code and stores the access/refresh tokens
+6. Subsequent MCP calls go through `PrincipalAPIFactory`, which fetches the per-user token automatically; refresh is performed transparently
 
-- A browser opens the kintone authorization page
-- After the user consents, the browser is redirected to `http://127.0.0.1:<port>/callback` and an access token is obtained
-- The token is stored in `~/.local/state/kintone/kintone.db` (file permission 0600)
+Security:
 
-In environments without a browser (SSH / CI), use `--no-browser` to print the authorization URL to stderr:
+- CSRF triple-check: idproxy OIDC Principal + `kintone_oauth_state` cookie + state-map PrincipalID match
+- state TTL: 10 minutes, one-shot consumption (OAuth 2.0 spec)
+- state map is in-memory (M13). Multi-replica deployments must rely on user retry until M14 adds Storage-backed state
 
-```bash
-$ kintone auth login --oauth --principal-id oauth:alice --no-browser
-```
+> Known M13 limitations: in-memory state means process restart / multi-replica routing may invalidate an in-flight authorization; the user simply re-clicks the authorize URL. Single domain per server (multi-domain routing is planned for M14).
 
-For multiple users on the same domain, specify `--principal-id` individually:
-
-```bash
-$ kintone auth login --oauth --principal-id oauth:bob
-```
-
-> `--principal-id` is the key in the TokenStore. Different users on the same domain must use different values.
+> The CLI no longer offers a way to obtain OAuth tokens directly. `kintone auth status` / `kintone auth logout` remain as auxiliary tools that inspect or delete tokens stored by the remote MCP server.
 
 ### Check login status
 
@@ -686,8 +679,9 @@ $ KINTONE_DOMAIN=example.cybozu.com \
 
 When `auth=oidc`, [github.com/youyo/idproxy](https://github.com/youyo/idproxy) is embedded.
 It validates an OIDC-based Bearer JWT per request and extracts `principal_id = "<issuer>:<sub>"`.
-Each user must pre-register their upstream kintone OAuth token via
-`kintone auth login --oauth --principal-id "<issuer>:<sub>"` to the TokenStore.
+Upstream kintone OAuth tokens are obtained on demand via the server-hosted OAuth callback flow
+(planned in M13): the user is redirected to kintone for consent on first MCP call, and the server
+saves the resulting token into the TokenStore keyed by the OIDC `sub`.
 
 ```bash
 $ KINTONE_DOMAIN=example.cybozu.com \
