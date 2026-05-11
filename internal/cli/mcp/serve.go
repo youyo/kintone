@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/youyo/kintone/internal/cli/clierr"
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/mcp/facade"
 	mcpserver "github.com/youyo/kintone/internal/mcp/server"
@@ -73,12 +74,32 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	serveMode := mcpserver.PickServeMode(listenAddr)
 	if err := mcpserver.ValidateModes(serveMode, auth, authz); err != nil {
+		// stdio + authz=oauth は server 層で typed sentinel として返るので、CLI 層で
+		// 復旧手順を含む UsageError にラップし `USAGE` envelope に分類されるようにする（M15）。
+		if errors.Is(err, mcpserver.ErrStdioOAuthUnsupported) {
+			return clierr.NewUsageError(
+				"mcp serve: authz=oauth is not supported on stdio transport " +
+					"(stdio runs in a single-user process; OAuth requires per-request " +
+					"principal binding which is only available with --listen for HTTP). " +
+					"Fix: drop --authz=oauth (or unset KINTONE_MCP_AUTHZ_MODE) to use API Token, " +
+					"or specify --listen <addr> --auth oidc --authz oauth for multi-user HTTP mode.",
+			)
+		}
 		return err
 	}
 
-	api, err := buildAPI(cmd)
-	if err != nil {
-		return err
+	// HTTP + authz=oauth では PrincipalAPIFactory が per-request にユーザー別 token から
+	// API client を生成するため、起動時の固定 API client は不要かつ誤動作の原因。
+	// このパスでは buildAPI を skip し、runHTTP に nil を渡して OAuth setup に委譲する（M15）。
+	skipBuildAPI := serveMode == mcpserver.ServeModeHTTP && authz == mcpserver.AuthZModeOAuth
+
+	var api serviceapi.API
+	if !skipBuildAPI {
+		built, err := buildAPI(cmd)
+		if err != nil {
+			return err
+		}
+		api = built
 	}
 
 	switch serveMode {
@@ -123,12 +144,23 @@ func runHTTP(ctx context.Context, api serviceapi.API, resolved *config.Resolved,
 		return err
 	}
 
-	deps := facade.ToolDeps{API: api}
+	// 不変条件（M15）:
+	//   - authz=api-token: api != nil（runServe で buildAPI を必ず呼ぶ）
+	//   - authz=oauth     : api == nil & setup != nil（PrincipalAPIFactory が deps を提供）
+	// この invariant により、deps.API が nil で NewWithDeps に渡るのは setup が deps を
+	// 上書きする場合のみ。将来 wiring が変更されても fail-fast できるよう defensive に検証する。
+	deps := facade.ToolDeps{}
+	if api != nil {
+		deps.API = api
+	}
 	var extraRoutes []mcpserver.RouteEntry
 	if setup != nil {
 		deps = setup.Deps
 		extraRoutes = setup.ExtraRoutes
 		defer setup.closeStates()
+	}
+	if deps.API == nil && deps.Factory == nil {
+		return errors.New("mcp serve: internal error - neither API nor Factory configured (wiring bug)")
 	}
 	srv := mcpserver.NewWithDeps(deps)
 

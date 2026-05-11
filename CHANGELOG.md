@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 修正 — MCP serve wiring hardening（M15 / v0.4.1）
+
+- **`mcp serve --authz=oauth` を stdio で指定した場合に fail-fast**（過去は silent no-op で OAuth が無視され API Token で稼働する事故が起こっていた）。`clierr.UsageError` で `USAGE` envelope を返し、復旧手順（`--listen <addr> --auth oidc --authz oauth` への切り替え、または `--authz=oauth` の解除）を含むメッセージを表示する
+- **HTTP + authz=oauth で起動時 `buildAPI` を skip**。OAuth 構成では `PrincipalAPIFactory` が per-request にユーザー別トークンから API client を生成するため、固定 API Token を必要としない。config.toml に API Token が無い OAuth 専用デプロイで起動できるようになった
+- `internal/mcp/server` に `ErrStdioOAuthUnsupported` typed sentinel を追加し、層分離を維持（user-facing メッセージは CLI 層で構築）
+- `runHTTP` に `deps.API == nil && deps.Factory == nil` の defensive check を追加（将来 wiring が変更されたときの NPE 防止）
+- 認証マトリクス全 4 経路（stdio+api-token / stdio+oauth / http+api-token / http+oauth）を網羅するテーブルテスト追加
+- 後方互換性: stdio + api-token / HTTP + api-token / HTTP + auth=oidc + authz=oauth は完全無影響
+
 ### 機能追加 — StateStore 統合 Storage 拡張 + loopback flow 物理削除（M14 / v0.4.0）
 
 - OAuth Authorization Code フロー用 `StateStore` を `internal/store` の 4 backend（memory / sqlite / redis / dynamodb）に統合。`KINTONE_STORE_BACKEND` 単一設定で kintone Token + Cache + idproxy session + OAuth state を同一 backend に格納可能になり、multi-replica MCP サーバ配置に対応

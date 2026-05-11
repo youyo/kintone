@@ -185,6 +185,23 @@ AuthZ:
 - oauth
 - api-token
 
+### サポートされる wiring（M15）
+
+`mcp serve` は起動時に (transport, auth, authz) の組み合わせを検証し、矛盾する組み合わせは fail-fast（`USAGE` envelope）で拒否する。
+
+| Transport | auth | authz       | 動作                                                                |
+|-----------|------|-------------|---------------------------------------------------------------------|
+| stdio     | none | api-token   | OK（既定構成）                                                       |
+| stdio     | none | **oauth**   | **USAGE エラー**（stdio は single-user process で OAuth per-request binding 不可） |
+| stdio     | oidc | any         | USAGE エラー（OIDC は HTTP transport 必須）                          |
+| HTTP      | none | api-token   | OK（信頼 LAN）                                                       |
+| HTTP      | oidc | api-token   | OK（multi-user で共通 API Token）                                    |
+| HTTP      | oidc | oauth       | OK（multi-user で per-user kintone OAuth）— `PrincipalAPIFactory` が per-request にユーザー別 token から API client を生成 |
+
+実装メモ:
+- HTTP + authz=oauth では起動時の固定 `buildAPI` を skip する（Factory が per-request 生成するため）。これにより config.toml に API Token が無い OAuth 専用デプロイで起動できる
+- stdio + authz=oauth は M15 以前は silent no-op として API Token に degrade していたが、運用事故を排除するため fail-fast に変更
+
 ### サーバホスト型 OAuth callback（M13 / Remote MCP + AuthZ=oauth）
 
 kintone OAuth は redirect_uri に HTTPS 完全一致を強制するため、ローカル CLI の

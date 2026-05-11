@@ -77,8 +77,10 @@ func TestValidateModes(t *testing.T) {
 		wantErr string
 	}{
 		{"stdio+none+apitoken", ServeModeStdio, AuthModeNone, AuthZModeAPIToken, ""},
-		{"stdio+none+oauth", ServeModeStdio, AuthModeNone, AuthZModeOAuth, ""},
-		{"stdio+oidc rejected", ServeModeStdio, AuthModeOIDC, AuthZModeOAuth, "stdio"},
+		// M15: stdio + authz=oauth は OAuth の per-request principal binding が不可のため fail-fast。
+		{"stdio+none+oauth (rejected)", ServeModeStdio, AuthModeNone, AuthZModeOAuth, "HTTP transport"},
+		{"stdio+oidc rejected", ServeModeStdio, AuthModeOIDC, AuthZModeAPIToken, "stdio"},
+		{"stdio+oidc+oauth rejected", ServeModeStdio, AuthModeOIDC, AuthZModeOAuth, "stdio"},
 		{"http+none+apitoken", ServeModeHTTP, AuthModeNone, AuthZModeAPIToken, ""},
 		{"http+oidc+oauth", ServeModeHTTP, AuthModeOIDC, AuthZModeOAuth, ""},
 		{"http+oidc+apitoken (allowed)", ServeModeHTTP, AuthModeOIDC, AuthZModeAPIToken, ""},
