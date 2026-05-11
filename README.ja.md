@@ -673,6 +673,17 @@ MCP（Model Context Protocol）サーバーを起動します。
 | `--auth` / `KINTONE_MCP_AUTH_MODE` | `none` / `oidc` | `none` | リクエスト前段の認証 |
 | `--authz` / `KINTONE_MCP_AUTHZ_MODE` | `api-token` / `oauth` | `api-token` | upstream kintone への認証 |
 
+### サポートされる組み合わせ（M15）
+
+| Transport | `--auth` | `--authz`   | 状態                                                            |
+|-----------|----------|-------------|-----------------------------------------------------------------|
+| stdio     | `none`   | `api-token` | OK（既定）                                                      |
+| stdio     | `none`   | `oauth`     | **USAGE エラー**（OAuth は per-request principal binding が必須で HTTP transport を要する） |
+| stdio     | `oidc`   | any         | USAGE エラー（OIDC は HTTP transport を要する）                  |
+| HTTP      | `none`   | `api-token` | OK（信頼 LAN 内）                                                |
+| HTTP      | `oidc`   | `api-token` | OK（multi-user で共通 API Token）                                |
+| HTTP      | `oidc`   | `oauth`     | OK（multi-user で per-user kintone OAuth）                       |
+
 ### stdio + API Token
 
 ```bash
@@ -748,8 +759,10 @@ LLM 側から `JSON.parse` するだけで CLI と同じ意味論で結果を扱
 }
 ```
 
-> stdio モードでは認証モードは `api-token` / `oauth`（単一ユーザー）に対応。
-> HTTP + OIDC による multi-user remote MCP は上記参照。
+> stdio モードでは `api-token` 認証のみ対応します。stdio に `--authz=oauth` を指定すると
+> 起動時に USAGE エラーで拒否されます（OAuth は per-request principal binding が必須で
+> HTTP transport を要するため）。multi-user OAuth は上記の `--listen <addr> --auth oidc
+> --authz oauth` を使ってください。
 
 ## JSON 出力規約
 

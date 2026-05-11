@@ -73,14 +73,24 @@ func PickServeMode(listenAddr string) ServeMode {
 	return ServeModeHTTP
 }
 
+// ErrStdioOAuthUnsupported は stdio transport で authz=oauth が指定された場合に返される
+// 型付き sentinel エラー。
+//
+// stdio は単一プロセス・単一認証文脈で動作するため OAuth の per-request principal binding
+// と矛盾する。M15 以前は silent no-op として API Token に degrade していたが、運用事故
+// （OAuth で動いていると誤認する）を排除するため fail-fast に変更した。
+//
+// 復旧手順を含む user-facing メッセージは CLI 層（cli/mcp）が `clierr.UsageError` で
+// ラップして返す。本 sentinel は短い理由のみ保持する。
+var ErrStdioOAuthUnsupported = errors.New("server: authz=oauth requires HTTP transport (--listen)")
+
 // ValidateModes は (mode, auth, authz) の組み合わせを検証する。
 //
 //   - stdio + auth=oidc は不正（stdio に HTTP 認証は不要かつ不可能）
+//   - stdio + authz=oauth は不正（OAuth は per-request principal binding が必須で
+//     HTTP transport を要する。M15）
 //   - http + auth=oidc + authz=api-token は許容（multi-user だが共通 API Token）
 func ValidateModes(serve ServeMode, auth AuthMode, authz AuthZMode) error {
-	if serve == ServeModeStdio && auth == AuthModeOIDC {
-		return errors.New("server: AuthMode=oidc is not supported on stdio (use --listen for HTTP mode)")
-	}
 	switch authz {
 	case AuthZModeAPIToken, AuthZModeOAuth:
 	default:
@@ -90,6 +100,12 @@ func ValidateModes(serve ServeMode, auth AuthMode, authz AuthZMode) error {
 	case AuthModeNone, AuthModeOIDC:
 	default:
 		return fmt.Errorf("server: invalid AuthMode %q", auth)
+	}
+	if serve == ServeModeStdio && auth == AuthModeOIDC {
+		return errors.New("server: AuthMode=oidc is not supported on stdio (use --listen for HTTP mode)")
+	}
+	if serve == ServeModeStdio && authz == AuthZModeOAuth {
+		return ErrStdioOAuthUnsupported
 	}
 	return nil
 }

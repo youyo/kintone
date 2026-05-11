@@ -669,6 +669,17 @@ Starts an MCP (Model Context Protocol) server for operating kintone from LLM cli
 | `--auth` / `KINTONE_MCP_AUTH_MODE` | `none` / `oidc` | `none` | Front-end authentication for incoming requests |
 | `--authz` / `KINTONE_MCP_AUTHZ_MODE` | `api-token` / `oauth` | `api-token` | Authentication to upstream kintone |
 
+### Supported combinations (M15)
+
+| Transport | `--auth` | `--authz`   | Status                                                      |
+|-----------|----------|-------------|-------------------------------------------------------------|
+| stdio     | `none`   | `api-token` | OK (default)                                                |
+| stdio     | `none`   | `oauth`     | **USAGE error** (OAuth requires HTTP for per-request principal binding) |
+| stdio     | `oidc`   | any         | USAGE error (OIDC requires HTTP transport)                  |
+| HTTP      | `none`   | `api-token` | OK (trusted LAN)                                            |
+| HTTP      | `oidc`   | `api-token` | OK (multi-user with shared API Token)                       |
+| HTTP      | `oidc`   | `oauth`     | OK (multi-user with per-user kintone OAuth)                 |
+
 ### stdio + API Token
 
 ```bash
@@ -745,8 +756,10 @@ LLM clients can `JSON.parse` the result and work with the same semantics as the 
 }
 ```
 
-> stdio mode supports `api-token` / `oauth` (single user) authentication.
-> HTTP + OIDC multi-user remote MCP is described above.
+> stdio mode supports only `api-token` authentication. `authz=oauth` on stdio is
+> rejected at startup with a USAGE error (OAuth requires per-request principal
+> binding which only HTTP transport provides). Use `--listen <addr> --auth oidc
+> --authz oauth` for multi-user OAuth, described above.
 
 ## JSON Output Convention
 
