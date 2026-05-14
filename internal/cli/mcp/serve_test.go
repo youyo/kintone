@@ -179,6 +179,41 @@ func TestServeCmd_HTTPOAuth_SkipsBuildAPI(t *testing.T) {
 	}
 }
 
+// issue-7: HTTP + auth=none + authz=oauth は起動時に clierr.UsageError で fail-fast し、
+// buildAPI は呼ばれないことを確認する。
+func TestServeCmd_HTTPNoneOAuth_RejectedAsUsageError(t *testing.T) {
+	isolateMCPEnv(t)
+
+	called := false
+	old := climcp.NewAPIBuilder
+	climcp.NewAPIBuilder = func(in climcp.LoaderInput) (serviceapi.API, error) {
+		called = true
+		return nil, errStub("must not be called")
+	}
+	t.Cleanup(func() { climcp.NewAPIBuilder = old })
+
+	cmd := climcp.NewCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"serve", "--listen=127.0.0.1:0", "--auth=none", "--authz=oauth"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected UsageError, got nil")
+	}
+	var ue *clierr.UsageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *clierr.UsageError, got %T: %v", err, err)
+	}
+	if !strings.Contains(ue.Error(), "oidc") {
+		t.Errorf("UsageError should mention --auth oidc recovery hint, got: %q", ue.Error())
+	}
+	if called {
+		t.Error("buildAPI must NOT be called for HTTP+none+oauth (fail-fast before buildAPI)")
+	}
+}
+
 // M15-3: HTTP + authz=api-token は従来通り buildAPI を呼ぶ（後方互換）。
 func TestServeCmd_HTTPAPIToken_CallsBuildAPI(t *testing.T) {
 	isolateMCPEnv(t)

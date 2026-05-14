@@ -85,6 +85,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 					"or specify --listen <addr> --auth oidc --authz oauth for multi-user HTTP mode.",
 			)
 		}
+		if errors.Is(err, mcpserver.ErrHTTPNoneOAuthUnsupported) {
+			return clierr.NewUsageError(
+				"mcp serve: authz=oauth requires auth=oidc " +
+					"(auth=none provides no Principal injection, so /oauth/kintone/start always returns 401). " +
+					"Fix: add --auth oidc (and set KINTONE_MCP_OIDC_ISSUER / KINTONE_MCP_OIDC_CLIENT_ID etc.), " +
+					"or drop --authz=oauth to use API Token instead.",
+			)
+		}
 		return err
 	}
 
