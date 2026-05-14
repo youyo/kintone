@@ -372,7 +372,14 @@ func TestE2E_CascadeMiddleware_OAuthCallbackFlow_SQLite(t *testing.T) {
 	}
 
 	// 6) 2 回目の GET "/" では cascade がトークン存在を確認して次へ委譲（404 を返す）
-	resp2, err := client.Get(httpSrv.URL + "/")
+	// Accept: text/html を付けないと cascade が token チェックをスキップするため、
+	// 必ず HTML accept を設定して「token あり → pass-through」ブランチを踏む。
+	req2, err := http.NewRequest(http.MethodGet, httpSrv.URL+"/", nil)
+	if err != nil {
+		t.Fatalf("NewRequest GET / 2nd: %v", err)
+	}
+	req2.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	resp2, err := client.Do(req2)
 	if err != nil {
 		t.Fatalf("GET / 2nd: %v", err)
 	}
