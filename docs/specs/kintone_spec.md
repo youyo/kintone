@@ -235,6 +235,13 @@ AUTH_REQUIRED envelope:
 - 構造化 `AuthRequiredError` を facade.MapError が認識し、`{"ok":false,"error":{"code":"AUTH_REQUIRED","details":{"principal_id":"...","domain":"...","authorize_url":"..."}}}` を返す
 - LLM クライアントは `details.authorize_url` を UI に表示し、ユーザがブラウザで kintone 認可を完了後に再度ツール呼び出しを行う
 
+ブラウザ自動カスケード `EnsureKintoneOAuthConnected`（M16）:
+- `auth=oidc, authz=oauth` のとき idproxy.Auth.Wrap + PrincipalMiddleware の **内側** に挿入
+- 条件（ALL）: `GET/HEAD` + `Accept: text/html` + Principal あり + path が `/oauth/kintone/` 以外 + path が `/mcp` 系でない + TokenStore に kintone OAuth トークン不在（`ErrNotFound`）
+- → `/oauth/kintone/start` へ 302 リダイレクト（open redirect 面ゼロ: リダイレクト先は `KINTONE_MCP_EXTERNAL_URL` から構築した固定 URL）
+- kill switch: `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1`
+- 実装: `internal/cli/mcp/cascade.go`
+
 ---
 
 ## レイヤー

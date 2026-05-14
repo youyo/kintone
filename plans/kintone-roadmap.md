@@ -12,9 +12,9 @@
 | ステータス | M1-M15 完了 (v0.4.1 リリース準備完了) |
 
 ## Current Focus
-- **マイルストーン**: M15 完了（MCP serve wiring hardening: stdio + authz=oauth fail-fast / HTTP+OAuth で buildAPI skip）
-- **直近の決定**: M14 の copilot:code-review で指摘された MCP serve の wiring 既存課題 2 件を fix-only マイルストーンとして実装する。silent no-op を fail-fast に変えて運用事故（OAuth 設定したつもりが stdio で API token のまま動く）を排除し、HTTP+OAuth では PrincipalAPIFactory が per-request にトークンを引くので起動時の buildAPI を skip する。
-- **次のアクション**: タグ `v0.4.1` を push して GoReleaser ワークフローを起動 → リリース。
+- **マイルストーン**: M16 完了（OIDC callback cascade: issue #5 ブラウザフロー一次修正）
+- **直近の決定**: idproxy v0.4.2 の `/callback` が `redirect_to` 未指定時にデフォルト `"/"` へ redirect し kintone が `/` にハンドラを持たないため 404 になるバグを修正。logvalet `EnsureBacklogConnected` パターンを翻訳した `EnsureKintoneOAuthConnected` middleware 1 つで解決。
+- **次のアクション**: タグ `v0.4.2` を push して GoReleaser ワークフローを起動 → リリース。その後 M17（Claude Desktop OAuth AS カスケード）を `/devflow:plan` で起票。
 
 ## Progress
 
@@ -209,6 +209,17 @@ M14 の copilot:code-review で指摘された MCP serve の wiring 既存課題
 - [x] ドキュメント: README の MCP serve 認証マトリクス、docs/specs の MCP wiring 節を更新、CHANGELOG に v0.4.1 エントリ追加
 - [x] 検証: `go test -race ./...` 全 pass / `gofmt -l .` 差分 0 / `golangci-lint run` 違反 0 / `go vet ./...` クリア
 - 詳細: plans/kintone-m15-mcp-serve-wiring-hardening.md
+
+### M16: OIDC callback ブラウザフロー自動カスケード（issue #5 一次修正） ✅ 完了
+`kintone mcp serve --auth oidc --authz oauth` で OIDC ログイン後にブラウザが `/` にリダイレクトされ 404 となるバグ（[issue #5](https://github.com/youyo/kintone/issues/5)）の一次修正。idproxy v0.4.2 が認証後デフォルトで `"/"` へ redirect するが kintone は `/` にハンドラ未登録。logvalet の `EnsureBacklogConnected` パターンを踏襲し cascade middleware を追加。
+- [x] `internal/cli/mcp/cascade.go`: `EnsureKintoneOAuthConnected` middleware 実装（kill switch `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1` 対応）
+- [x] `internal/cli/mcp/cascade_test.go`: テーブル駆動テスト 11 ケース（N1-N3, E1-E5, E13, E14）
+- [x] `internal/cli/mcp/oauth_glue.go`: `oauthSetup` に `Tokens` / `StartURL` フィールド追加
+- [x] `internal/cli/mcp/serve.go`: `(auth=oidc, authz=oauth)` のとき cascade middleware を内側に合成
+- [x] `internal/cli/mcp/serve_e2e_test.go`: E2E カスケードフロー検証追加（`/login → /callback → / → /oauth/kintone/start → /oauth/kintone/callback`）
+- [x] 全テスト pass（`go test -race -cover ./...` + `-tags e2e`）、golangci-lint 0 violations
+- **M17 予定**: `KintoneAuthorizeGate`（Claude Desktop OAuth AS カスケード）/ `continue` URL / `StateEntry.ContinueURL` / 4-backend schema 拡張
+- 詳細: plans/wondrous-swinging-locket.md
 
 ## Blockers
 なし

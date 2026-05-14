@@ -228,6 +228,168 @@ func TestE2E_OAuthCallbackFlow_SQLite(t *testing.T) {
 	}
 }
 
+// TestE2E_CascadeMiddleware_OAuthCallbackFlow_SQLite (M16)
+//
+// cascade middleware（EnsureKintoneOAuthConnected）を介した kintone OAuth 完全フローを検証:
+//  1. kintonefake 起動
+//  2. sqlite Container 起動
+//  3. cascade middleware + oauthcallback.Handler を組み合わせて mux を構築
+//  4. cookiejar 付き http.Client で "/" から開始:
+//     GET / → cascade → 302 /oauth/kintone/start
+//     → 302 kintonefake /authorize → 302 /callback → 200 htmlAuthSuccess
+//  5. TokenStore に Token が永続化されたことを確認
+//  6. 2 回目の GET / は cascade をスキップ（token 有）して next に届く（404）
+//
+// idproxy は使わず、injectPrincipal ミドルウェアで Principal を context に直接注入する。
+func TestE2E_CascadeMiddleware_OAuthCallbackFlow_SQLite(t *testing.T) {
+	t.Parallel()
+
+	// 1) kintonefake
+	kf := kintonefake.New()
+	defer kf.Stop()
+
+	// 2) sqlite Container
+	dir := t.TempDir()
+	cfg := &store.Config{Backend: store.BackendSQLite, SQLiteDir: dir}
+	container, err := store.OpenFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("OpenFromConfig sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = container.Close(context.Background()) })
+
+	tokens, err := container.Tokens()
+	if err != nil {
+		t.Fatalf("Tokens: %v", err)
+	}
+
+	const (
+		domain = "example.cybozu.com"
+		pid    = "https://issuer.example.com:cascade-user"
+	)
+	kf.SetAuthorizePrincipalID(pid)
+
+	// 3) Handler + cascade middleware を組み立て
+	mux := http.NewServeMux()
+	httpSrv := httptest.NewServer(mux)
+	defer httpSrv.Close()
+
+	redirectURL := httpSrv.URL + "/oauth/kintone/callback"
+	startURL := httpSrv.URL + "/oauth/kintone/start"
+	states := oauthcallback.NewMemoryStateStore()
+	defer func() { _ = states.Close() }()
+
+	handler, err := oauthcallback.NewHandler(oauthcallback.HandlerConfig{
+		Domain:        domain,
+		ClientID:      "kintone-mcp",
+		ClientSecret:  "secret",
+		RedirectURL:   redirectURL,
+		ExternalURL:   httpSrv.URL,
+		States:        states,
+		Tokens:        tokens,
+		AuthorizeBase: kf.URL() + "/oauth2/authorization",
+		TokenEndpoint: kf.URL() + "/oauth2/token",
+	})
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+
+	// テスト用 Principal 注入 middleware（idproxy の代替）
+	principal := &idproxy.Principal{
+		ID:      pid,
+		Issuer:  "https://issuer.example.com",
+		Subject: "cascade-user",
+	}
+	injectPrincipal := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r = r.WithContext(idproxy.WithPrincipal(r.Context(), principal))
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	// cascade middleware（EnsureKintoneOAuthConnected）
+	cascade := EnsureKintoneOAuthConnected(tokens, domain, startURL)
+
+	// mux: cascade は injectPrincipal の内側に配置（Principal が context に乗ってから cascade が動く）
+	// ルート登録: cascade → mux の flow を再現するため、/ を catch-all ハンドラとして登録
+	mux.Handle("/oauth/kintone/start", injectPrincipal(handler.StartHandler()))
+	mux.Handle("/oauth/kintone/callback", injectPrincipal(handler.CallbackHandler()))
+	// "/" へのアクセスは injectPrincipal → cascade → 404 not found（cascade が pass-through する場合）
+	// cascade が 302 する場合はそちらが先に応答する
+	notFoundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+	mux.Handle("/", injectPrincipal(cascade(notFoundHandler)))
+
+	// 4) cookiejar 付き Client（自動リダイレクト follow）
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{
+		Jar:     jar,
+		Timeout: 10 * time.Second,
+		// cascade は Accept: text/html を持つリクエストにのみ発火する。
+		// リダイレクト follow 時も Accept ヘッダを維持するために CheckRedirect で引き継ぐ。
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) > 0 {
+				if accept := via[0].Header.Get("Accept"); accept != "" {
+					req.Header.Set("Accept", accept)
+				}
+			}
+			if len(via) >= 10 {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+	}
+
+	// GET "/" から開始 → cascade が /oauth/kintone/start へ 302 → kintonefake を経由 → callback → 200
+	req, _ := http.NewRequest(http.MethodGet, httpSrv.URL+"/", nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("final status = %d, want 200", resp.StatusCode)
+	}
+	body := make([]byte, 4096)
+	n, _ := resp.Body.Read(body)
+	if !strings.Contains(string(body[:n]), "認証が完了") {
+		t.Errorf("success HTML missing: got %q", string(body[:n]))
+	}
+
+	// 5) TokenStore に Token が永続化されている
+	ctx := context.Background()
+	tok, err := tokens.Get(ctx, domain, pid, store.AuthTypeOAuth)
+	if err != nil {
+		t.Fatalf("Tokens.Get after cascade+callback: %v", err)
+	}
+	if tok.AccessToken == "" || tok.RefreshToken == "" {
+		t.Errorf("token not stored: %+v", tok)
+	}
+	if tok.PrincipalID != pid {
+		t.Errorf("PrincipalID = %q, want %q", tok.PrincipalID, pid)
+	}
+
+	// 6) 2 回目の GET "/" では cascade がトークン存在を確認して次へ委譲（404 を返す）
+	// Accept: text/html を付けないと cascade が token チェックをスキップするため、
+	// 必ず HTML accept を設定して「token あり → pass-through」ブランチを踏む。
+	req2, err := http.NewRequest(http.MethodGet, httpSrv.URL+"/", nil)
+	if err != nil {
+		t.Fatalf("NewRequest GET / 2nd: %v", err)
+	}
+	req2.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	resp2, err := client.Do(req2)
+	if err != nil {
+		t.Fatalf("GET / 2nd: %v", err)
+	}
+	defer func() { _ = resp2.Body.Close() }()
+	// token が存在するため cascade は next に委譲 → "/" の notFoundHandler → 404
+	if resp2.StatusCode != http.StatusNotFound {
+		t.Errorf("2nd GET / status = %d, want 404 (cascade should pass-through when token exists)", resp2.StatusCode)
+	}
+}
+
 // TestE2E_OAuthCallback_StateCSRF_403 (M13)
 //
 // state cookie 改ざんで callback が 403 を返すことを確認。

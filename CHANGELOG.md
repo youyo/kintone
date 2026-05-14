@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.4.2] - 2026-05-14
+
+### Fixed
+
+- **mcp**: OIDC コールバックから kintone OAuth への自動カスケードを実装（[issue #5](https://github.com/youyo/kintone/issues/5) 一次修正）
+  - `--auth oidc --authz oauth` モードで OIDC ログイン後にブラウザが `/` 404 になるバグを修正
+  - `EnsureKintoneOAuthConnected` middleware が OIDC 認証済み + kintone OAuth 未接続のブラウザリクエストを `/oauth/kintone/start` へ自動リダイレクト
+  - logvalet の `EnsureBacklogConnected` パターンを参考に実装
+  - kill switch: `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1` で旧挙動に戻せる
+  - Claude Desktop からの MCP OAuth AS カスケード（`/authorize` → kintone OAuth → `/authorize`）は M17 で対応予定
+
 ## [Unreleased]
 
 ### 修正 — MCP serve wiring hardening（M15 / v0.4.1）

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -158,6 +159,18 @@ func runHTTP(ctx context.Context, api serviceapi.API, resolved *config.Resolved,
 		deps = setup.Deps
 		extraRoutes = setup.ExtraRoutes
 		defer setup.closeStates()
+
+		// auth=oidc + authz=oauth のとき cascade middleware を OIDC middleware の内側に合成する（M16）。
+		// 合成順: idproxy.Auth.Wrap → PrincipalMiddleware → EnsureKintoneOAuthConnected → mux
+		// mw が既に (idproxy.Wrap + PrincipalMiddleware) を合成済みなので、
+		// cascade を inner とした新しい mw を組み立てる。
+		if mw != nil && auth == mcpserver.AuthModeOIDC {
+			cascade := EnsureKintoneOAuthConnected(setup.Tokens, resolved.Domain, setup.StartURL)
+			outer := mw
+			mw = func(h http.Handler) http.Handler {
+				return outer(cascade(h))
+			}
+		}
 	}
 	if deps.API == nil && deps.Factory == nil {
 		return errors.New("mcp serve: internal error - neither API nor Factory configured (wiring bug)")
