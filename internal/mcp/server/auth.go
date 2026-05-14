@@ -84,6 +84,17 @@ func PickServeMode(listenAddr string) ServeMode {
 // ラップして返す。本 sentinel は短い理由のみ保持する。
 var ErrStdioOAuthUnsupported = errors.New("server: authz=oauth requires HTTP transport (--listen)")
 
+// ErrHTTPNoneOAuthUnsupported は HTTP transport で auth=none + authz=oauth が指定された
+// 場合に返される型付き sentinel エラー。
+//
+// auth=none では Principal を context に注入するミドルウェアが存在しないため、
+// /oauth/kintone/start は常に 401 を返し OAuth フローが絶対に成功しない。
+// auth=oidc を必須とすることで起動時にデッドな設定を排除する。
+//
+// 復旧手順を含む user-facing メッセージは CLI 層（cli/mcp）が `clierr.UsageError` で
+// ラップして返す。本 sentinel は短い理由のみ保持する。
+var ErrHTTPNoneOAuthUnsupported = errors.New("server: authz=oauth requires auth=oidc (auth=none provides no Principal injection)")
+
 // ValidateModes は (mode, auth, authz) の組み合わせを検証する。
 //
 //   - stdio + auth=oidc は不正（stdio に HTTP 認証は不要かつ不可能）
@@ -106,6 +117,9 @@ func ValidateModes(serve ServeMode, auth AuthMode, authz AuthZMode) error {
 	}
 	if serve == ServeModeStdio && authz == AuthZModeOAuth {
 		return ErrStdioOAuthUnsupported
+	}
+	if serve == ServeModeHTTP && auth == AuthModeNone && authz == AuthZModeOAuth {
+		return ErrHTTPNoneOAuthUnsupported
 	}
 	return nil
 }

@@ -82,6 +82,9 @@ func TestValidateModes(t *testing.T) {
 		{"stdio+oidc rejected", ServeModeStdio, AuthModeOIDC, AuthZModeAPIToken, "stdio"},
 		{"stdio+oidc+oauth rejected", ServeModeStdio, AuthModeOIDC, AuthZModeOAuth, "stdio"},
 		{"http+none+apitoken", ServeModeHTTP, AuthModeNone, AuthZModeAPIToken, ""},
+		// issue #7: HTTP + auth=none + authz=oauth はデッドな設定なので fail-fast。
+		// auth=none では Principal が注入されないため OAuth フローが動作しない。
+		{"http+none+oauth (rejected)", ServeModeHTTP, AuthModeNone, AuthZModeOAuth, "oidc"},
 		{"http+oidc+oauth", ServeModeHTTP, AuthModeOIDC, AuthZModeOAuth, ""},
 		{"http+oidc+apitoken (allowed)", ServeModeHTTP, AuthModeOIDC, AuthZModeAPIToken, ""},
 		{"invalid authz", ServeModeHTTP, AuthModeNone, "wat", "AuthZMode"},

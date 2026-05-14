@@ -66,8 +66,47 @@ func isStoreRequiredCommand(cmd *cobra.Command) bool {
 	}
 	for _, p := range prefixes {
 		if hasPathPrefix(name, p) {
+			// mcp serve は auth/authz の組み合わせが invalid のときストア不要。
+			// RunE の ValidateModes がエラーを返すのでストア開放を先回りして防ぐ。
+			if hasPathPrefix(name, "kintone mcp serve") && mcpServeModeInvalid(cmd) {
+				return false
+			}
 			return true
 		}
+	}
+	return false
+}
+
+// mcpServeModeInvalid は mcp serve コマンドの --listen / --auth / --authz フラグを読み取り、
+// ValidateModes がエラーを返すような invalid な組み合わせかどうかを判定する。
+//
+// PersistentPreRunE からストアを開く前に呼ばれる（RunE より前）。
+// invalid と判定した場合はストアを開かず、RunE の ValidateModes でエラーを返す。
+// parse 失敗時は false を返して RunE に任せる（保守的 safe default）。
+func mcpServeModeInvalid(cmd *cobra.Command) bool {
+	listenAddr, _ := cmd.Flags().GetString("listen")
+	authStr, _ := cmd.Flags().GetString("auth")
+	authzStr, _ := cmd.Flags().GetString("authz")
+
+	// auth/authz のデフォルト値（空文字は "none" / "api-token" 相当）
+	if authStr == "" {
+		authStr = "none"
+	}
+	if authzStr == "" {
+		authzStr = "api-token"
+	}
+
+	// stdio + authz=oauth（M15）
+	if listenAddr == "" && authzStr == "oauth" {
+		return true
+	}
+	// HTTP + auth=none + authz=oauth（issue #7）
+	if listenAddr != "" && authStr == "none" && authzStr == "oauth" {
+		return true
+	}
+	// stdio + auth=oidc
+	if listenAddr == "" && authStr == "oidc" {
+		return true
 	}
 	return false
 }
