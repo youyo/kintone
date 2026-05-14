@@ -24,6 +24,8 @@ type oauthSetup struct {
 	Deps        facade.ToolDeps // Factory + AuthorizeURLBuilder（OAuth 時）
 	ExtraRoutes []mcpserver.RouteEntry
 	StateStore  oauthcallback.StateStore // close 用
+	Tokens      store.TokenStore         // cascade middleware 用（M16）
+	StartURL    string                   // cascade redirect 先（M16）
 }
 
 // closeStates は M13 までの互換のために残された no-op 寄りのフック。
@@ -151,6 +153,8 @@ func buildOAuthSetup(ctx context.Context, resolved *config.Resolved, container s
 			{Path: "/oauth/kintone/callback", Handler: handler.CallbackHandler()},
 		},
 		StateStore: states,
+		Tokens:     tokens,
+		StartURL:   startBaseURL,
 	}, nil
 }
 
