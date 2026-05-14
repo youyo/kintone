@@ -69,6 +69,8 @@ go build -o /usr/local/bin/kintone ./cmd/kintone
 
 > **Note (v0.3.0+)**: kintone OAuth requires `https` for the redirect URI, so the local CLI loopback flow (`kintone auth login --oauth`) has been removed. **Local CLI usage is API Token only**, and **OAuth is reserved for remote MCP servers**.
 
+> **v0.4.2+: 自動カスケード認証フロー**: OIDC ログイン完了後、kintone OAuth が未完了のブラウザリクエストは自動的に `/oauth/kintone/start` へリダイレクトされます。`/login → [IdP] → /callback → /oauth/kintone/start → [kintone OAuth] → 完了` のフローがワンストップで完結します。問題が発生した場合は `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1` で旧挙動（手動 `/oauth/kintone/start` アクセス）に戻せます。
+
 ## Usage
 
 ### Check version
