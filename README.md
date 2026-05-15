@@ -69,7 +69,32 @@ go build -o /usr/local/bin/kintone ./cmd/kintone
 
 > **Note (v0.3.0+)**: kintone OAuth requires `https` for the redirect URI, so the local CLI loopback flow (`kintone auth login --oauth`) has been removed. **Local CLI usage is API Token only**, and **OAuth is reserved for remote MCP servers**.
 
-> **v0.4.2+: 自動カスケード認証フロー**: OIDC ログイン完了後、kintone OAuth が未完了のブラウザリクエストは自動的に `/oauth/kintone/start` へリダイレクトされます。`/login → [IdP] → /callback → /oauth/kintone/start → [kintone OAuth] → 完了` のフローがワンストップで完結します。問題が発生した場合は `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1` で旧挙動（手動 `/oauth/kintone/start` アクセス）に戻せます。
+#### 自動カスケード認証フロー（v0.4.2+ / v0.5.0+）
+
+OIDC ログイン完了後、kintone OAuth が未完了のブラウザリクエストは自動的に `/oauth/kintone/start` へリダイレクトされます。
+
+##### ブラウザ手動フロー（v0.4.2+）
+
+1. `<EXTERNAL_URL>/login` を開く
+2. OIDC プロバイダー（Entra ID 等）でログイン
+3. 自動的に kintone OAuth 認可ページへ遷移
+4. kintone OAuth を承認
+5. 「kintone 認証が完了しました」画面が表示される
+
+##### Claude Desktop からの接続（v0.5.0+）
+
+idproxy v0.5.0 の `OnAuthenticated` フックを採用し、Claude Desktop が `/authorize` を開いた直後に kintone OAuth が自動カスケードします:
+
+1. Claude Desktop から MCP サーバーに接続を試みる
+2. ブラウザが開いて OIDC ログイン
+3. **OIDC 完了直後に自動で kintone OAuth フローが起動**（ユーザーは何もしない）
+4. kintone OAuth を承認 → 「kintone 認証が完了しました」画面が表示される
+5. ブラウザタブを閉じて Claude Desktop に戻り、**再度接続を試行** → ✅ 接続成功
+6. 2 回目以降の接続はトークン保存済みのため完全自動
+
+> **注**: 初回接続では Claude Desktop の CALLBACK_PORT timeout により「Authorization with the MCP server failed」が一度表示されますが、上記 step 5 で再接続すれば成功します。完全自動化（kintone OAuth 完了後に Claude Desktop へ自動復帰）は M18 で対応予定です。
+
+> **kill switch**: カスケードを無効化するには `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1` を設定してください（プロセス起動時にのみ評価）。
 
 ## Usage
 

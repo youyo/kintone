@@ -242,6 +242,16 @@ AUTH_REQUIRED envelope:
 - kill switch: `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1`
 - 実装: `internal/cli/mcp/cascade.go`
 
+OIDC callback 時カスケード `OnAuthenticated`（M17, idproxy v0.5.0+）:
+- `auth=oidc, authz=oauth` のとき `internal/cli/mcp/idproxy_glue.go::buildOnAuthenticatedHook` で構築したフックを `BuildAuth` 経由で idproxy `Config.OnAuthenticated` に注入
+- フック内で `tokens.Get(domain, principalID, oauth)` → `ErrNotFound` なら `("/oauth/kintone/start", false)` を返却 → idproxy が 302 リダイレクト
+- token 存在時は `("", false)` を返却 → idproxy が `stateData.RedirectURI`（元の `/authorize?...` 等）に 302
+- 非 `ErrNotFound` エラー時は `slog.WarnContext` で記録した上で `("", false)` safe default
+- 戻り値は必ず **相対パス**（HTTPS スキームでない絶対 URL は `StrictPostLoginRedirectValidator` で reject されるため）
+- M16 cascade middleware（per-request）と相補的に動作（hook は callback 1 回のみ、middleware は token 期限切れ後の再認証保険）
+- kill switch: `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1`（hook と M16 cascade の両方を OFF、起動時評価）
+- 実装: `internal/cli/mcp/idproxy_glue.go`、`internal/idproxy/config.go`
+
 ---
 
 ## レイヤー
