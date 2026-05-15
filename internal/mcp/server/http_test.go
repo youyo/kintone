@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -296,5 +297,73 @@ func TestServeHTTP_NoopMiddleware(t *testing.T) {
 	noopMiddleware(h).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if rec.Code != http.StatusTeapot {
 		t.Fatalf("noop did not pass through: %d", rec.Code)
+	}
+}
+
+// TestRequestLogMiddleware_LogsInfoOnRequest は RequestLogMiddleware がリクエストを
+// Info レベルで記録し、下流ハンドラーにリクエストを正しく転送することを確認する。
+func TestRequestLogMiddleware_LogsInfoOnRequest(t *testing.T) {
+	t.Parallel()
+	var buf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := RequestLogMiddleware(logger)
+	h := mw(inner)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/mcp", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200", rec.Code)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "mcp request") {
+		t.Errorf("log output should contain 'mcp request', got: %s", out)
+	}
+	if !strings.Contains(out, "path=/mcp") {
+		t.Errorf("log output should contain path=/mcp, got: %s", out)
+	}
+	if !strings.Contains(out, "status=200") {
+		t.Errorf("log output should contain status=200, got: %s", out)
+	}
+	if !strings.Contains(out, "method=POST") {
+		t.Errorf("log output should contain method=POST, got: %s", out)
+	}
+	if !strings.Contains(out, "has_bearer=false") {
+		t.Errorf("log output should contain has_bearer=false, got: %s", out)
+	}
+}
+
+// TestRequestLogMiddleware_RecordsStatus401 はミドルウェアが 401 を返した場合に
+// status=401 が記録されることを確認する。
+func TestRequestLogMiddleware_RecordsStatus401(t *testing.T) {
+	t.Parallel()
+	var buf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	})
+	mw := RequestLogMiddleware(logger)
+	h := mw(inner)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/mcp", nil)
+	req.Header.Set("Authorization", "Bearer some-token")
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status: got %d want 401", rec.Code)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "status=401") {
+		t.Errorf("log output should contain status=401, got: %s", out)
+	}
+	if !strings.Contains(out, "has_bearer=true") {
+		t.Errorf("log output should contain has_bearer=true, got: %s", out)
 	}
 }

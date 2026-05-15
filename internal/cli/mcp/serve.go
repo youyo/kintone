@@ -16,6 +16,7 @@ import (
 	"github.com/youyo/kintone/internal/config"
 	"github.com/youyo/kintone/internal/mcp/facade"
 	mcpserver "github.com/youyo/kintone/internal/mcp/server"
+	"github.com/youyo/kintone/internal/output"
 	serviceapi "github.com/youyo/kintone/internal/service/api"
 	"github.com/youyo/kintone/internal/store"
 )
@@ -201,6 +202,19 @@ func runHTTP(ctx context.Context, api serviceapi.API, resolved *config.Resolved,
 	if deps.API == nil && deps.Factory == nil {
 		return errors.New("mcp serve: internal error - neither API nor Factory configured (wiring bug)")
 	}
+
+	// RequestLogMiddleware を最外側に合成する（Issue #10 診断: Lambda + CloudWatch 環境で
+	// status code / has_bearer を Info ログに記録し、認証失敗の原因を特定しやすくする）。
+	logMw := mcpserver.RequestLogMiddleware(output.Logger())
+	if mw != nil {
+		innerMw := mw
+		mw = func(h http.Handler) http.Handler {
+			return logMw(innerMw(h))
+		}
+	} else {
+		mw = logMw
+	}
+
 	srv := mcpserver.NewWithDeps(deps)
 
 	return mcpserver.ServeHTTP(ctx, srv, mcpserver.HTTPServeOptions{

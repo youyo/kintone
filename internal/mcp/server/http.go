@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -149,4 +150,38 @@ func itoa(i int) string {
 		return string([]byte{'0' + byte(i)})
 	}
 	return string([]byte{'0' + byte(i/10), '0' + byte(i%10)})
+}
+
+// RequestLogMiddleware は全 HTTP リクエストの受信・完了を Info レベルで記録する。
+//
+// 設計原則:
+//   - idproxy ミドルウェアの最外側（前段）に配置する
+//   - status code / has_bearer を記録することで「idproxy が弾いたか」「アプリ層か」を区別できる
+//   - Lambda + CloudWatch 環境での認証失敗診断を主目的とする（Issue #10）
+func RequestLogMiddleware(logger *slog.Logger) MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(rw, r)
+			logger.Info("mcp request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", rw.status,
+				"duration_ms", time.Since(start).Milliseconds(),
+				"has_bearer", r.Header.Get("Authorization") != "",
+			)
+		})
+	}
+}
+
+// statusRecorder は http.ResponseWriter をラップして WriteHeader で設定されたステータスコードを記録する。
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
 }

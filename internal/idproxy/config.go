@@ -14,6 +14,7 @@ import (
 	upstream "github.com/youyo/idproxy"
 	idstore "github.com/youyo/idproxy/store"
 
+	"github.com/youyo/kintone/internal/output"
 	"github.com/youyo/kintone/internal/store"
 )
 
@@ -191,6 +192,7 @@ func BuildAuth(ctx context.Context, e *Env, authMode string, authZMode string, c
 		AccessTokenTTL:  1 * time.Hour,
 		RefreshTokenTTL: 30 * 24 * time.Hour,
 		OnAuthenticated: hook,
+		Logger:          output.Logger(),
 	}
 	// StrictPostLoginRedirectValidator を常時有効化（open redirect 対策、M17）。
 	// hook 戻り値も Validator で検証されるため、hook は必ず相対パスを返すこと。
