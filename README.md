@@ -757,16 +757,6 @@ After OIDC login completes, browser requests without kintone OAuth tokens are au
 
 > **Troubleshooting**: To disable cascade and restore the prior behavior, set `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1`.
 
-After OIDC login completes, browser requests without kintone OAuth tokens are automatically redirected to `/oauth/kintone/start`. Users experience the following flow:
-
-1. Open `<EXTERNAL_URL>/login`
-2. Sign in with your OIDC provider (Entra ID, Google, etc.)
-3. Automatically redirected to kintone OAuth approval screen
-4. Approve kintone OAuth
-5. "kintone authentication is complete" screen appears
-
-> **Troubleshooting**: To disable cascade and restore the prior behavior, set `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1`.
-
 ### Six tools provided
 
 | Tool | Description |
