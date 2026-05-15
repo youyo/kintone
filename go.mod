@@ -11,7 +11,7 @@ require (
 	github.com/mark3labs/mcp-go v0.54.0
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/spf13/cobra v1.8.1
-	github.com/youyo/idproxy v0.5.0
+	github.com/youyo/idproxy v0.6.0
 	go.uber.org/goleak v1.3.0
 	modernc.org/sqlite v1.50.0
 )
@@ -55,5 +55,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/youyo/idproxy => /Users/youyo/src/github.com/youyo/idproxy
