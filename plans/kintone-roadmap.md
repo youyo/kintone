@@ -12,9 +12,9 @@
 | ステータス | M1-M15 完了 (v0.4.1 リリース準備完了) |
 
 ## Current Focus
-- **マイルストーン**: M16 完了（OIDC callback cascade: issue #5 ブラウザフロー一次修正）
-- **直近の決定**: idproxy v0.4.2 の `/callback` が `redirect_to` 未指定時にデフォルト `"/"` へ redirect し kintone が `/` にハンドラを持たないため 404 になるバグを修正。logvalet `EnsureBacklogConnected` パターンを翻訳した `EnsureKintoneOAuthConnected` middleware 1 つで解決。
-- **次のアクション**: タグ `v0.4.2` を push して GoReleaser ワークフローを起動 → リリース。その後 M17（Claude Desktop OAuth AS カスケード）を `/devflow:plan` で起票。
+- **マイルストーン**: M17 完了（idproxy v0.5.0 OnAuthenticated 採用による Claude Desktop OAuth カスケード対応）
+- **直近の決定**: idproxy v0.5.0 で新規追加された `Config.OnAuthenticated` フックを採用し、OIDC 認証完了直後（/callback 内）に kintone OAuth トークンの有無を確認して未取得なら `/oauth/kintone/start` へ自動カスケード。当初の M17 計画（`KintoneAuthorizeGate` + `StateEntry.ContinueURL` + 4-backend schema 変更）を大幅に簡略化した。Claude Desktop の初回接続は CALLBACK_PORT timeout で 1 回 retry が必要だが、2 回目以降は完全自動。
+- **次のアクション**: タグ `v0.5.0` を push して GoReleaser ワークフローを起動 → リリース。M18（idproxy への OnAuthenticated(stateData) 拡張要望の起票 → Claude Desktop 完全自動化）は upstream 改善次第。
 
 ## Progress
 
@@ -220,6 +220,18 @@ M14 の copilot:code-review で指摘された MCP serve の wiring 既存課題
 - [x] 全テスト pass（`go test -race -cover ./...` + `-tags e2e`）、golangci-lint 0 violations
 - **M17 予定**: `KintoneAuthorizeGate`（Claude Desktop OAuth AS カスケード）/ `continue` URL / `StateEntry.ContinueURL` / 4-backend schema 拡張
 - 詳細: plans/wondrous-swinging-locket.md
+
+### M17: idproxy v0.5.0 OnAuthenticated 採用による Claude Desktop OAuth カスケード対応 ✅ 完了
+issue #5 の Claude Desktop 経路を改善するため、idproxy v0.5.0 で新規追加された `Config.OnAuthenticated` フックを採用し、OIDC 認証完了直後に kintone OAuth トークンの有無を確認して未取得なら `/oauth/kintone/start` へ自動カスケード。当初計画（KintoneAuthorizeGate + ContinueURL + 4-backend schema）を大幅に簡略化。
+- [x] `go.mod` / `go.sum`: idproxy v0.4.2 → v0.5.0
+- [x] `internal/idproxy/config.go::BuildAuth`: 末尾に `hook` 引数を追加、`UseStrictPostLoginRedirectValidator()` を常時呼び出し（open redirect 対策）
+- [x] `internal/cli/mcp/idproxy_glue.go::buildOnAuthenticatedHook`: kintone OAuth カスケード hook 実装（kill switch `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1` 対応、相対パス `/oauth/kintone/start` 強制で StrictValidator 互換）
+- [x] `internal/cli/mcp/serve.go::runHTTP`: hook を `buildOIDCMiddleware` 経由で `BuildAuth` に伝搬、`defer setup.closeStates()` を `if setup != nil` ブロック冒頭に移動（buildHTTPMiddleware エラー時のリソースリーク防止）
+- [x] `internal/cli/mcp/idproxy_glue_test.go`: テーブル駆動テスト N1-N4, E1-E3, E6 全 10 ケース実装
+- [x] 全テスト pass（`go test -race -cover ./...` + `-tags e2e`）、gofmt / go vet クリア
+- [x] M16 cascade middleware（`EnsureKintoneOAuthConnected`）は **temporal フォールバック**として温存
+- **M18 予定**: idproxy 側で `OnAuthenticated` シグネチャに `stateData *AuthCodeData` を追加してもらう upstream issue を起票し、kintone callback から元の `/authorize?...` URL へ自動復帰する完全自動化を実装。
+- 詳細: plans/kintone-m17-idproxy-v0.5-onauthenticated.md
 
 ## Blockers
 なし

@@ -1,5 +1,26 @@
 # Changelog
 
+## [v0.5.0] - 2026-05-15
+
+### Changed
+
+- **deps**: `github.com/youyo/idproxy` v0.4.2 → v0.5.0 にアップグレード
+  - 新規 `Config.OnAuthenticated` フックを採用し、OIDC 認証完了直後に kintone OAuth カスケードを実行
+  - 新規 `Config.UseStrictPostLoginRedirectValidator()` を常時有効化（open redirect 攻撃対策）
+- **mcp**: `internal/idproxy.BuildAuth` シグネチャに OnAuthenticated フック引数を追加（callsite は内部のみ）
+
+### Fixed
+
+- **mcp**: Claude Desktop からの MCP OAuth フローで kintone OAuth が自動カスケードするよう改善（[issue #5](https://github.com/youyo/kintone/issues/5) 二次改善）
+  - OIDC 認証完了直後（/callback 内）に kintone OAuth トークンの有無を確認し、未取得なら `/oauth/kintone/start` へ自動 302
+  - 初回接続は CALLBACK_PORT timeout で 1 回 retry が必要、2 回目以降は完全自動接続
+  - 完全自動化（kintone OAuth 完了後に元の `/authorize?...` へ復帰）は M18 で idproxy 側の `OnAuthenticated(stateData)` 拡張を待って実装予定
+
+### Notes
+
+- kill switch `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1` は M16 cascade middleware と新 OnAuthenticated hook の両方に適用される（process 起動時にのみ評価）
+- M16 の `EnsureKintoneOAuthConnected` middleware は per-request フォールバックとして温存（token 期限切れ後の再認証時の保険）
+
 ## [v0.4.2] - 2026-05-14
 
 ### Fixed

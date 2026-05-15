@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -133,7 +134,11 @@ func isExternalURLValid(s string) bool {
 //   - container == nil かつ authMode == "oidc" は ErrSigningKeyRequired で fail-fast
 //
 // authZMode は idproxy 自身では使わないが、上位の判断と整合させるためシグネチャに残す。
-func BuildAuth(ctx context.Context, e *Env, authMode string, authZMode string, container store.Container) (*upstream.Auth, error) {
+//
+// M17 から: hook は idproxy v0.5.0 の OnAuthenticated フック。nil でも動作する。
+// StrictPostLoginRedirectValidator を常時有効化して open redirect を防ぐ。
+// hook 戻り値は必ず相対パスにすること（HTTP スキームの絶対 URL は Validator が reject）。
+func BuildAuth(ctx context.Context, e *Env, authMode string, authZMode string, container store.Container, hook func(http.ResponseWriter, *http.Request, *upstream.User) (string, bool)) (*upstream.Auth, error) {
 	_ = authZMode // idproxy の関心事ではない（upstream kintone への認可方式）
 	if e == nil {
 		return nil, errors.New("idproxy: nil Env")
@@ -185,6 +190,10 @@ func BuildAuth(ctx context.Context, e *Env, authMode string, authZMode string, c
 		SessionMaxAge:   24 * time.Hour,
 		AccessTokenTTL:  1 * time.Hour,
 		RefreshTokenTTL: 30 * 24 * time.Hour,
+		OnAuthenticated: hook,
 	}
+	// StrictPostLoginRedirectValidator を常時有効化（open redirect 対策、M17）。
+	// hook 戻り値も Validator で検証されるため、hook は必ず相対パスを返すこと。
+	cfg.UseStrictPostLoginRedirectValidator()
 	return upstream.New(ctx, cfg)
 }

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	upstream "github.com/youyo/idproxy"
 
 	"github.com/youyo/kintone/internal/cli/clierr"
 	"github.com/youyo/kintone/internal/config"
@@ -141,14 +142,28 @@ func runHTTP(ctx context.Context, api serviceapi.API, resolved *config.Resolved,
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	mw, err := buildHTTPMiddleware(ctx, auth, authz)
+	// AuthZ=oauth では PrincipalAPIFactory と OAuth callback handler を組み立てる（M13）。
+	// setup を先に構築することで M17 OnAuthenticated フックに tokens と domain を渡せる。
+	container := store.ContainerFromContext(ctx)
+	setup, err := buildOAuthSetup(ctx, resolved, container, authz)
 	if err != nil {
 		return err
 	}
 
-	// AuthZ=oauth では PrincipalAPIFactory と OAuth callback handler を組み立てる（M13）。
-	container := store.ContainerFromContext(ctx)
-	setup, err := buildOAuthSetup(ctx, resolved, container, authz)
+	// M17: auth=oidc + authz=oauth のとき、idproxy OnAuthenticated フックを構築する。
+	// setup != nil（authz=oauth）かつ auth=oidc の場合のみ hook を生成する。
+	// authz=api-token（setup==nil）では hook も nil → 既存動作維持。
+	var hook func(http.ResponseWriter, *http.Request, *upstream.User) (string, bool)
+	if setup != nil {
+		// setup リソースを buildHTTPMiddleware より前に defer することで、
+		// buildHTTPMiddleware がエラーを返した場合でも closeStates が確実に呼ばれる。
+		defer setup.closeStates()
+		if auth == mcpserver.AuthModeOIDC {
+			hook = buildOnAuthenticatedHook(setup.Tokens, resolved.Domain)
+		}
+	}
+
+	mw, err := buildHTTPMiddleware(ctx, auth, authz, hook)
 	if err != nil {
 		return err
 	}
@@ -166,12 +181,13 @@ func runHTTP(ctx context.Context, api serviceapi.API, resolved *config.Resolved,
 	if setup != nil {
 		deps = setup.Deps
 		extraRoutes = setup.ExtraRoutes
-		defer setup.closeStates()
 
 		// auth=oidc + authz=oauth のとき cascade middleware を OIDC middleware の内側に合成する（M16）。
 		// 合成順: idproxy.Auth.Wrap → PrincipalMiddleware → EnsureKintoneOAuthConnected → mux
 		// mw が既に (idproxy.Wrap + PrincipalMiddleware) を合成済みなので、
 		// cascade を inner とした新しい mw を組み立てる。
+		// M17 では OnAuthenticated フックが認証完了直後にカスケードを行うため、
+		// per-request EnsureKintoneOAuthConnected はフォールバックとして温存する。
 		if mw != nil && auth == mcpserver.AuthModeOIDC {
 			cascade := EnsureKintoneOAuthConnected(setup.Tokens, resolved.Domain, setup.StartURL)
 			outer := mw
@@ -194,12 +210,14 @@ func runHTTP(ctx context.Context, api serviceapi.API, resolved *config.Resolved,
 
 // buildHTTPMiddleware は AuthMode に応じた http middleware を返す。
 // idproxy 依存は別ファイル idproxy_glue.go に切り出し、auth=none では idproxy package を実行しない。
-func buildHTTPMiddleware(ctx context.Context, auth mcpserver.AuthMode, authz mcpserver.AuthZMode) (mcpserver.MiddlewareFunc, error) {
+//
+// hook は idproxy v0.5.0 の OnAuthenticated フック（M17）。nil でも動作する。
+func buildHTTPMiddleware(ctx context.Context, auth mcpserver.AuthMode, authz mcpserver.AuthZMode, hook func(http.ResponseWriter, *http.Request, *upstream.User) (string, bool)) (mcpserver.MiddlewareFunc, error) {
 	switch auth {
 	case mcpserver.AuthModeNone:
 		return nil, nil // ServeHTTP で no-op に解決される
 	case mcpserver.AuthModeOIDC:
-		return buildOIDCMiddleware(ctx, string(auth), string(authz))
+		return buildOIDCMiddleware(ctx, string(auth), string(authz), hook)
 	default:
 		return nil, errors.New("mcp serve: unknown auth mode")
 	}
