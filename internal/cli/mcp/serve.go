@@ -159,7 +159,9 @@ func runHTTP(ctx context.Context, api serviceapi.API, resolved *config.Resolved,
 		// buildHTTPMiddleware がエラーを返した場合でも closeStates が確実に呼ばれる。
 		defer setup.closeStates()
 		if auth == mcpserver.AuthModeOIDC {
-			hook = buildOnAuthenticatedHook(setup.Tokens, resolved.Domain)
+			// setup.StartURL を渡してサブパス配備（KINTONE_MCP_EXTERNAL_URL=https://host/base）でも
+			// 正しいパスに redirect されるようにする。hook 内で url.Parse(startURL).Path を使う。
+			hook = buildOnAuthenticatedHook(setup.Tokens, resolved.Domain, setup.StartURL)
 		}
 	}
 

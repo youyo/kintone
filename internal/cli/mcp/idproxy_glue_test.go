@@ -41,6 +41,53 @@ func makeHookResponseWriter() http.ResponseWriter {
 	return httptest.NewRecorder()
 }
 
+// TestBuildOnAuthenticatedHookSubpath はサブパス配備での startURL 処理を検証する。
+func TestBuildOnAuthenticatedHookSubpath(t *testing.T) {
+	t.Parallel()
+	tokensEmpty := memory.NewTokenStore()
+	user := makeUser(hookIssuer, hookSubject)
+
+	tests := []struct {
+		name         string
+		startURL     string
+		wantRedirect string
+	}{
+		{
+			name:         "ルート直下配備: /oauth/kintone/start",
+			startURL:     "https://host/oauth/kintone/start",
+			wantRedirect: "/oauth/kintone/start",
+		},
+		{
+			name:         "サブパス配備: /base/oauth/kintone/start",
+			startURL:     "https://host/base/oauth/kintone/start",
+			wantRedirect: "/base/oauth/kintone/start",
+		},
+		{
+			name:         "ローカル開発: /oauth/kintone/start",
+			startURL:     "http://localhost:8080/oauth/kintone/start",
+			wantRedirect: "/oauth/kintone/start",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			hook := buildOnAuthenticatedHook(tokensEmpty, hookDomain, tc.startURL)
+			if hook == nil {
+				t.Fatal("expected non-nil hook")
+			}
+			redirectTo, handled := hook(makeHookResponseWriter(), makeHookRequest(), user)
+			if handled {
+				t.Error("handled should be false")
+			}
+			if redirectTo != tc.wantRedirect {
+				t.Errorf("redirectTo = %q, want %q", redirectTo, tc.wantRedirect)
+			}
+		})
+	}
+}
+
 // TestBuildOnAuthenticatedHook はテーブル駆動で buildOnAuthenticatedHook の全ケースを検証する。
 //
 // killSwitch テストは t.Setenv を使うため Parallel を使わない。
@@ -136,7 +183,7 @@ func TestBuildOnAuthenticatedHook(t *testing.T) {
 				t.Setenv("KINTONE_MCP_DISABLE_OAUTH_CASCADE", "1")
 			}
 
-			hook := buildOnAuthenticatedHook(tc.tokens, hookDomain)
+			hook := buildOnAuthenticatedHook(tc.tokens, hookDomain, "https://host/oauth/kintone/start")
 
 			if tc.wantNilHook {
 				if hook != nil {

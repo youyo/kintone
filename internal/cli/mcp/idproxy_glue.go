@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 
 	upstream "github.com/youyo/idproxy"
@@ -43,14 +44,21 @@ func buildOIDCMiddleware(ctx context.Context, authMode, authZMode string, hook f
 //
 // kill switch（KINTONE_MCP_DISABLE_OAUTH_CASCADE=1）と tokens==nil で nil を返す。
 //
-// ⚠️ 戻り値は必ず相対パスにすること。StrictPostLoginRedirectValidator は
-// HTTP スキームの絶対 URL を reject するため。
-func buildOnAuthenticatedHook(tokens store.TokenStore, domain string) func(http.ResponseWriter, *http.Request, *upstream.User) (string, bool) {
-	const kintoneStartPath = "/oauth/kintone/start"
-
+// startURL は絶対 URL（例: "https://host/base/oauth/kintone/start"）を受け取り、
+// url.Parse(startURL).Path でパス部分（"/base/oauth/kintone/start"）を抽出して返す。
+// これにより StrictPostLoginRedirectValidator（相対パス OK）に通りつつ、
+// KINTONE_MCP_EXTERNAL_URL にサブパスが含まれる配備でも正しく動作する。
+func buildOnAuthenticatedHook(tokens store.TokenStore, domain, startURL string) func(http.ResponseWriter, *http.Request, *upstream.User) (string, bool) {
 	if tokens == nil || os.Getenv("KINTONE_MCP_DISABLE_OAUTH_CASCADE") == "1" {
 		return nil
 	}
+	// startURL からパス部分だけを抽出（例: "/base/oauth/kintone/start"）。
+	// url.Parse が失敗した場合は "/oauth/kintone/start" にフォールバックする。
+	startPath := "/oauth/kintone/start"
+	if u, err := url.Parse(startURL); err == nil && u.Path != "" {
+		startPath = u.Path
+	}
+
 	return func(w http.ResponseWriter, r *http.Request, user *upstream.User) (string, bool) {
 		if user == nil {
 			return "", false
@@ -61,7 +69,7 @@ func buildOnAuthenticatedHook(tokens store.TokenStore, domain string) func(http.
 		principalID := user.Issuer + ":" + user.Subject
 		_, err := tokens.Get(r.Context(), domain, principalID, store.AuthTypeOAuth)
 		if errors.Is(err, store.ErrNotFound) {
-			return kintoneStartPath, false
+			return startPath, false
 		}
 		if err != nil {
 			// 非 ErrNotFound（network 障害等）: safe default に倒すが警告ログを出す
