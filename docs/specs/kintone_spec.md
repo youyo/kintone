@@ -202,6 +202,10 @@ AuthZ:
 - HTTP + authz=oauth では起動時の固定 `buildAPI` を skip する（Factory が per-request 生成するため）。これにより config.toml に API Token が無い OAuth 専用デプロイで起動できる
 - stdio + authz=oauth は M15 以前は silent no-op として API Token に degrade していたが、運用事故を排除するため fail-fast に変更
 
+### OIDC callback ブラウザフロー自動カスケード（M16）
+
+`EnsureKintoneOAuthConnected`（M16）: `auth=oidc, authz=oauth` のとき idproxy.Wrap + PrincipalMiddleware の内側に挿入。ブラウザ GET + Principal あり + kintone OAuth トークン未取得の場合に `/oauth/kintone/start` へ自動 302 リダイレクト。kill switch: `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1`。
+
 ### サーバホスト型 OAuth callback（M13 / Remote MCP + AuthZ=oauth）
 
 kintone OAuth は redirect_uri に HTTPS 完全一致を強制するため、ローカル CLI の

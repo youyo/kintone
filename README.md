@@ -745,6 +745,28 @@ Endpoints:
 
 > The idproxy SigningKey is resolved from `KINTONE_MCP_SIGNING_KEY_PEM` (env) or persisted in Storage. When `auth=oidc` and the key cannot be resolved, startup is rejected (`SIGNING_KEY_REQUIRED`). For dev, set `KINTONE_MCP_SIGNING_KEY_AUTO_GENERATE=1` to allow auto-generation.
 
+#### Automatic Cascade Authentication Flow (v0.4.2+)
+
+After OIDC login completes, browser requests without kintone OAuth tokens are automatically redirected to `/oauth/kintone/start`. Users experience the following flow:
+
+1. Open `<EXTERNAL_URL>/login`
+2. Sign in with your OIDC provider (Entra ID, Google, etc.)
+3. Automatically redirected to kintone OAuth approval screen
+4. Approve kintone OAuth
+5. "kintone authentication is complete" screen appears
+
+> **Troubleshooting**: To disable cascade and restore the prior behavior, set `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1`.
+
+After OIDC login completes, browser requests without kintone OAuth tokens are automatically redirected to `/oauth/kintone/start`. Users experience the following flow:
+
+1. Open `<EXTERNAL_URL>/login`
+2. Sign in with your OIDC provider (Entra ID, Google, etc.)
+3. Automatically redirected to kintone OAuth approval screen
+4. Approve kintone OAuth
+5. "kintone authentication is complete" screen appears
+
+> **Troubleshooting**: To disable cascade and restore the prior behavior, set `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1`.
+
 ### Six tools provided
 
 | Tool | Description |

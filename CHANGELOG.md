@@ -34,6 +34,19 @@
 
 ## [Unreleased]
 
+## [v0.4.2] - 2026-05-14
+
+### Fixed
+
+- **mcp**: OIDC コールバックから kintone OAuth への自動カスケードを実装（[issue #5](https://github.com/youyo/kintone/issues/5) 一次修正）
+  - `--auth oidc --authz oauth` モードで OIDC ログイン後にブラウザが `/` 404 になるバグを修正
+  - `EnsureKintoneOAuthConnected` middleware が OIDC 認証済み + kintone OAuth 未接続のブラウザリクエストを `/oauth/kintone/start` へ自動リダイレクト
+  - logvalet の `EnsureBacklogConnected` パターンを参考に実装
+  - kill switch: `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1` で旧挙動に戻せる
+  - Claude Desktop からの MCP OAuth AS カスケード（`/authorize` → kintone OAuth → `/authorize`）は M17 で対応予定
+
+## [v0.4.1] - 2026-05-12
+
 ### 修正 — MCP serve wiring hardening（M15 / v0.4.1）
 
 - **`mcp serve --authz=oauth` を stdio で指定した場合に fail-fast**（過去は silent no-op で OAuth が無視され API Token で稼働する事故が起こっていた）。`clierr.UsageError` で `USAGE` envelope を返し、復旧手順（`--listen <addr> --auth oidc --authz oauth` への切り替え、または `--authz=oauth` の解除）を含むメッセージを表示する
