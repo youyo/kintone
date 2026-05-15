@@ -41,6 +41,12 @@ type Config struct {
 	SubjectFor func(r *http.Request) string
 }
 
+// codeEntry は /authorize で発行した code に紐づくデータ。
+type codeEntry struct {
+	sub   string
+	nonce string
+}
+
 // Server は httptest ベースの OIDC stub。
 type Server struct {
 	httpServer *httptest.Server
@@ -49,7 +55,7 @@ type Server struct {
 	kid        string
 
 	mu    sync.Mutex
-	codes map[string]string // code -> sub
+	codes map[string]codeEntry // code -> entry
 }
 
 // New は新しい OIDC stub を起動する。失敗時は error を返す。
@@ -68,7 +74,7 @@ func New(cfg Config) (*Server, error) {
 		cfg:   cfg,
 		priv:  priv,
 		kid:   "oidcstub-key-1",
-		codes: map[string]string{},
+		codes: map[string]codeEntry{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", s.handleDiscovery)
@@ -145,6 +151,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	redirect := q.Get("redirect_uri")
 	state := q.Get("state")
+	nonce := q.Get("nonce")
 	if redirect == "" {
 		http.Error(w, "missing redirect_uri", http.StatusBadRequest)
 		return
@@ -156,7 +163,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	sub := s.cfg.SubjectFor(r)
 	s.mu.Lock()
-	s.codes[code] = sub
+	s.codes[code] = codeEntry{sub: sub, nonce: nonce}
 	s.mu.Unlock()
 
 	dest, err := url.Parse(redirect)
@@ -183,7 +190,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	case "authorization_code":
 		code := r.PostForm.Get("code")
 		s.mu.Lock()
-		sub, ok := s.codes[code]
+		entry, ok := s.codes[code]
 		if ok {
 			delete(s.codes, code)
 		}
@@ -192,10 +199,10 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusBadRequest, "invalid_grant", "unknown code")
 			return
 		}
-		s.respondToken(w, sub)
+		s.respondToken(w, entry.sub, entry.nonce)
 	case "refresh_token":
 		// refresh_token はテスト簡略化のため任意の値を受け付け、新規発行のみ行う。
-		s.respondToken(w, "user-1")
+		s.respondToken(w, "user-1", "")
 	default:
 		writeJSONError(w, http.StatusBadRequest, "unsupported_grant_type", grant)
 	}
@@ -215,9 +222,9 @@ func (s *Server) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // respondToken は ID Token / access_token / refresh_token を返す。
-func (s *Server) respondToken(w http.ResponseWriter, sub string) {
+func (s *Server) respondToken(w http.ResponseWriter, sub, nonce string) {
 	now := time.Now()
-	idToken, err := s.signIDToken(sub, now)
+	idToken, err := s.signIDToken(sub, nonce, now)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "server_error", err.Error())
 		return
@@ -234,14 +241,20 @@ func (s *Server) respondToken(w http.ResponseWriter, sub string) {
 }
 
 // signIDToken は RS256 で OIDC 標準クレームを含む JWT を発行する。
-func (s *Server) signIDToken(sub string, now time.Time) (string, error) {
+// nonce が空でない場合は nonce クレームも含める（idproxy の nonce 検証に対応）。
+// email は sub@test.example.com 形式のダミーアドレスを付与する（idproxy の email 必須要件に対応）。
+func (s *Server) signIDToken(sub, nonce string, now time.Time) (string, error) {
 	header := map[string]any{"alg": "RS256", "typ": "JWT", "kid": s.kid}
 	payload := map[string]any{
-		"iss": s.Issuer(),
-		"sub": sub,
-		"aud": s.cfg.ClientID,
-		"iat": now.Unix(),
-		"exp": now.Add(time.Hour).Unix(),
+		"iss":   s.Issuer(),
+		"sub":   sub,
+		"aud":   s.cfg.ClientID,
+		"iat":   now.Unix(),
+		"exp":   now.Add(time.Hour).Unix(),
+		"email": sub + "@test.example.com",
+	}
+	if nonce != "" {
+		payload["nonce"] = nonce
 	}
 	hb, err := json.Marshal(header)
 	if err != nil {
