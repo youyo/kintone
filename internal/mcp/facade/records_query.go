@@ -11,6 +11,8 @@ import (
 
 func recordsQueryTool() mcp.Tool {
 	return mcp.NewTool("records_query",
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithDescription(
 			"kintone のレコード一覧を取得する。kintone クエリ言語（query フィールド）でフィルタ・並び替え・ページングを行える。"+
 				"app（数値 ID）または app_ref（数値文字列 / code / name / partial）のいずれか必須・両方指定不可。"+

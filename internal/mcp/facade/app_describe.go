@@ -11,6 +11,8 @@ import (
 
 func appDescribeTool() mcp.Tool {
 	return mcp.NewTool("app_describe",
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithDescription(
 			"単一の kintone アプリの詳細情報（基本属性 + フォームのフィールド定義）を取得する。"+
 				"app（数値 ID）または app_ref（数値文字列 / code / name / partial）のいずれか必須・両方指定不可。"+

@@ -11,6 +11,8 @@ import (
 
 func recordCreateTool() mcp.Tool {
 	return mcp.NewTool("record_create",
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithDescription(
 			"kintone にレコードを新規作成する。record（単件）または records（複数件、最大 100 件）のいずれか一方を指定する。"+
 				"app（数値 ID）または app_ref（数値文字列 / code / name / partial）のいずれか必須・両方指定不可。"+

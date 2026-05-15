@@ -13,6 +13,8 @@ import (
 // appsSearchTool は apps_search MCP tool の定義を返す。
 func appsSearchTool() mcp.Tool {
 	return mcp.NewTool("apps_search",
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithDescription(
 			"kintone のアプリを検索する。ids/codes/name/space_ids/limit/offset のいずれかの組み合わせを受け取る。"+
 				"全てのフィールドは任意で、未指定なら全アプリ（権限のあるもの）を最大 100 件返す。"+

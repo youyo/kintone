@@ -11,6 +11,8 @@ import (
 
 func recordDeleteTool() mcp.Tool {
 	return mcp.NewTool("record_delete",
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithDescription(
 			"kintone のレコードを複数件削除する。"+
 				"app（数値 ID）または app_ref（数値文字列 / code / name / partial）のいずれか必須・両方指定不可。"+

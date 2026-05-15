@@ -11,6 +11,8 @@ import (
 
 func recordUpdateTool() mcp.Tool {
 	return mcp.NewTool("record_update",
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithDescription(
 			"kintone のレコードを単件更新する。"+
 				"app（数値 ID）または app_ref（数値文字列 / code / name / partial）のいずれか必須・両方指定不可。"+
