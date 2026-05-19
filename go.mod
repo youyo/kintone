@@ -11,7 +11,7 @@ require (
 	github.com/mark3labs/mcp-go v0.54.0
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/spf13/cobra v1.8.1
-	github.com/youyo/idproxy v0.6.0
+	github.com/youyo/idproxy v0.10.0
 	go.uber.org/goleak v1.3.0
 	modernc.org/sqlite v1.50.0
 )
