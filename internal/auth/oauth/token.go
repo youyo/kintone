@@ -181,7 +181,7 @@ func sendTokenRequest(ctx context.Context, p tokenRequestParams) (resp *TokenRes
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
-	body, err := io.ReadAll(httpResp.Body)
+	body, err := io.ReadAll(io.LimitReader(httpResp.Body, 32*1024*1024))
 	if err != nil {
 		return nil, nil, fmt.Errorf("oauth: read token response: %w", err)
 	}

@@ -127,7 +127,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 				_, _ = io.Copy(io.Discard, resp.Body)
 				return nil
 			}
-			body, readErr := io.ReadAll(resp.Body)
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 32*1024*1024))
 			if readErr != nil {
 				return fmt.Errorf("kintoneapi: read body: %w", readErr)
 			}
@@ -141,7 +141,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		}
 
 		// 非 2xx: APIError 構築
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 32*1024*1024))
 		_ = resp.Body.Close()
 
 		retryAfter := parseRetryAfter(resp.Header, c.now)
@@ -281,7 +281,7 @@ func (c *Client) doJSONWithBodyWithPolicy(ctx context.Context, method, path stri
 				_, _ = io.Copy(io.Discard, resp.Body)
 				return nil
 			}
-			respBody, readErr := io.ReadAll(resp.Body)
+			respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 32*1024*1024))
 			if readErr != nil {
 				return fmt.Errorf("kintoneapi: read body: %w", readErr)
 			}
@@ -294,7 +294,7 @@ func (c *Client) doJSONWithBodyWithPolicy(ctx context.Context, method, path stri
 			return nil
 		}
 
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 32*1024*1024))
 		_ = resp.Body.Close()
 
 		retryAfter := parseRetryAfter(resp.Header, c.now)
