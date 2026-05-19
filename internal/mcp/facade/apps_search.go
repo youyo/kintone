@@ -16,9 +16,10 @@ func appsSearchTool() mcp.Tool {
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithDescription(
-			"kintone のアプリを検索する。ids/codes/name/space_ids/limit/offset のいずれかの組み合わせを受け取る。"+
-				"全てのフィールドは任意で、未指定なら全アプリ（権限のあるもの）を最大 100 件返す。"+
-				"結果は JSON envelope で返す: {\"ok\":true,\"data\":{\"apps\":[...]}}。エラー時は {\"ok\":false,\"error\":{...}}。",
+			"kintone アプリの一覧を取得・検索する。app_describe / records_query を使う前にアプリ ID を調べるエントリーポイント。"+
+				"全引数が省略可能なため、アプリ ID・名前・コードを事前に知らなくても全アプリ一覧を取得できる。"+
+				"ids（ID 配列）/ codes（コード配列）/ name（名前の部分一致）/ space_ids（スペース ID 配列）/ limit / offset で絞り込み可能。"+
+				"GET /k/v1/apps.json に対応。結果: {\"ok\":true,\"data\":{\"apps\":[{\"appId\":\"...\",\"name\":\"...\",\"code\":\"...\"}]}}。",
 		),
 		mcp.WithArray("ids",
 			mcp.Description("検索対象のアプリ ID 配列（数値）。"),
