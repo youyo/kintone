@@ -88,6 +88,9 @@ func ServeHTTP(ctx context.Context, s *MCPServer, opts HTTPServeOptions) error {
 		Addr:              opts.Addr,
 		Handler:           mw(mux),
 		ReadHeaderTimeout: readHeader,
+		ReadTimeout:       30 * time.Second,
+		// WriteTimeout は SSE 長時間接続（MCP Streamable HTTP）を維持するため 0（無制限）のまま。
+		IdleTimeout: 120 * time.Second,
 	}
 
 	errCh := make(chan error, 1)

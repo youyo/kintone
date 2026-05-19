@@ -27,6 +27,11 @@ import (
 	"github.com/youyo/kintone/internal/store"
 )
 
+// TODO: LoaderInput / defaultNewAPI / newCacheProvider / readCLIConfig / buildAPI は
+// cli/ops/helpers.go および cli/mcp/helpers.go と重複している。
+// 共通化は各パッケージの NewAPIBuilder グローバル var がテスト hook として独立管理されているため
+// パッケージ間での race を避けるために慎重な設計変更が必要。現時点ではスキップ。
+
 // LoaderInput は NewAPIBuilder hook へ渡される情報。
 type LoaderInput struct {
 	CLI config.CLIConfig
