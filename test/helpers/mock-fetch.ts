@@ -7,7 +7,7 @@ export interface RecordedCall {
   body: string;
   /** リクエストの中断シグナル(タイムアウトのテストで、ハンドラが中断に反応するために使う)。 */
   signal: AbortSignal;
-  redirect: RequestRedirect;
+  redirect: Request["redirect"];
 }
 
 type Handler = (call: RecordedCall) => Response | Promise<Response>;

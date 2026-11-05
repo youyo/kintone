@@ -97,7 +97,7 @@ const ROWS: Row[] = [
     run: getWith(() => kintoneError(403, "CB_NO02")),
     code: "permission_error",
     retryable: false,
-    details: { http_status: 403, kintone_code: "CB_NO02" },
+    details: { http_status: 403, kintone_code: "CB_NO02", kintone_id: "id-1" },
   },
   {
     row: "404",
@@ -113,7 +113,7 @@ const ROWS: Row[] = [
     run: getWith(() => kintoneError(400, "GAIA_IQ11")),
     code: "argument_error",
     retryable: false,
-    details: { http_status: 400, kintone_code: "GAIA_IQ11" },
+    details: { http_status: 400, kintone_code: "GAIA_IQ11", kintone_id: "id-1" },
   },
   {
     row: "400, 422, kintone コード接頭辞 CB_VA",
@@ -121,7 +121,7 @@ const ROWS: Row[] = [
     run: getWith(() => kintoneError(422, "GAIA_X")),
     code: "argument_error",
     retryable: false,
-    details: { http_status: 422 },
+    details: { http_status: 422, kintone_code: "GAIA_X", kintone_id: "id-1" },
   },
   {
     row: "400, 422, kintone コード接頭辞 CB_VA",
@@ -129,7 +129,7 @@ const ROWS: Row[] = [
     run: getWith(() => kintoneError(520, "CB_VA01")),
     code: "argument_error",
     retryable: false,
-    details: { http_status: 520, kintone_code: "CB_VA01" },
+    details: { http_status: 520, kintone_code: "CB_VA01", kintone_id: "id-1" },
   },
   {
     row: "400, 422, kintone コード接頭辞 CB_VA",
@@ -144,7 +144,12 @@ const ROWS: Row[] = [
     run: getWith(() => kintoneError(429, "GAIA_TM12", { "Retry-After": "2" })),
     code: "rate_limited",
     retryable: true,
-    details: { http_status: 429, retry_after_sec: 2 },
+    details: {
+      http_status: 429,
+      kintone_code: "GAIA_TM12",
+      kintone_id: "id-1",
+      retry_after_sec: 2,
+    },
   },
   {
     row: "429(リトライ後)",
@@ -152,7 +157,7 @@ const ROWS: Row[] = [
     run: postWith(() => kintoneError(429, "GAIA_TM12")),
     code: "rate_limited",
     retryable: true,
-    details: { http_status: 429 },
+    details: { http_status: 429, kintone_code: "GAIA_TM12", kintone_id: "id-1" },
     noDetailsKeys: ["retry_after_sec"],
   },
   {
@@ -161,7 +166,7 @@ const ROWS: Row[] = [
     run: getWith(() => kintoneError(405, "CB_IL02")),
     code: "api_error",
     retryable: false,
-    details: { http_status: 405 },
+    details: { http_status: 405, kintone_code: "CB_IL02", kintone_id: "id-1" },
   },
   {
     row: "その他の 4xx",
@@ -169,7 +174,7 @@ const ROWS: Row[] = [
     run: getWith(() => kintoneError(409, "GAIA_CO02")),
     code: "api_error",
     retryable: false,
-    details: { http_status: 409 },
+    details: { http_status: 409, kintone_code: "GAIA_CO02", kintone_id: "id-1" },
   },
   {
     row: "その他の 4xx",
@@ -185,7 +190,7 @@ const ROWS: Row[] = [
     run: getWith(() => kintoneError(500, "GAIA_IN01")),
     code: "api_error",
     retryable: true,
-    details: { http_status: 500, kintone_code: "GAIA_IN01" },
+    details: { http_status: 500, kintone_code: "GAIA_IN01", kintone_id: "id-1" },
   },
   {
     row: "5xx",
@@ -193,7 +198,7 @@ const ROWS: Row[] = [
     run: getWith(() => kintoneError(520, "GAIA_UN01")),
     code: "api_error",
     retryable: true,
-    details: { http_status: 520 },
+    details: { http_status: 520, kintone_code: "GAIA_UN01", kintone_id: "id-1" },
   },
   {
     row: "5xx",
@@ -201,7 +206,7 @@ const ROWS: Row[] = [
     run: getWith(() => kintoneError(503, "GAIA_SV01")),
     code: "api_error",
     retryable: true,
-    details: { http_status: 503 },
+    details: { http_status: 503, kintone_code: "GAIA_SV01", kintone_id: "id-1" },
   },
   {
     row: "5xx",
@@ -209,7 +214,7 @@ const ROWS: Row[] = [
     run: postWith(() => kintoneError(503, "GAIA_SV01")),
     code: "api_error",
     retryable: true,
-    details: { http_status: 503 },
+    details: { http_status: 503, kintone_code: "GAIA_SV01", kintone_id: "id-1" },
   },
   {
     row: "通信失敗・タイムアウト",

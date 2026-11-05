@@ -5,6 +5,7 @@ import {
   KintoneUnauthorizedError,
 } from "../../src/kintone/client";
 import { createMcpServer } from "../../src/mcp/server";
+import { fakeKintoneClient } from "../helpers/fake-kintone-client";
 import { rpcTo } from "../helpers/mcp";
 import { firstText } from "../helpers/oauth-flow";
 
@@ -15,12 +16,12 @@ interface Recorder {
 
 function setup(get: KintoneClient["get"]) {
   const rec: Recorder = { calls: [], unauthorized: 0 };
-  const client: KintoneClient = {
+  const client = fakeKintoneClient({
     get: async (path, query) => {
       rec.calls.push({ path, query });
       return get(path, query);
     },
-  };
+  });
   const factory = () =>
     createMcpServer({
       getClient: () => client,
