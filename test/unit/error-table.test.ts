@@ -3,7 +3,9 @@
  * HTTP の行は実際の kintone クライアントにモックの fetch を渡し、`toErrorEnvelope` まで通す。
  * 最後に、`ERROR_CODES` の全コードがどれかの行に現れることを検査する(コードを足してテストを書き忘れると赤くなる)。
  */
+import { McpServer } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   ERROR_CODES,
   type ErrorCode,
@@ -12,7 +14,11 @@ import {
   toErrorEnvelope,
 } from "../../src/errors";
 import { createKintoneClient } from "../../src/kintone/client";
+import { defineTool, registerTools } from "../../src/mcp/registry";
+import { fakeKintoneClient } from "../helpers/fake-kintone-client";
+import { rpcTo } from "../helpers/mcp";
 import { jsonResponse, mockOutboundFetch } from "../helpers/mock-fetch";
+import { firstText } from "../helpers/oauth-flow";
 
 const ORIGIN = "https://example.cybozu.com";
 const APPS = `GET ${ORIGIN}/k/v1/apps.json`;
@@ -51,6 +57,37 @@ function postWith(handler: Handler) {
   return async () => {
     mockOutboundFetch({ [RECORDS_POST]: handler });
     return envelopeOf(() => client().post("/k/v1/records.json", { app: 1 }));
+  };
+}
+
+/** registerTools 経由で tools/call し、エンベロープを取り出す(ツール入力の検証・応答サイズの行)。 */
+function viaRegistry(args: Record<string, unknown>) {
+  return async (): Promise<ErrorEnvelope> => {
+    const tool = defineTool({
+      name: "kintone_apps_probe",
+      title: "テスト",
+      description: "probe",
+      category: "ReadOnly",
+      toolset: "app",
+      inputSchema: z.strictObject({ limit: z.number().int().min(1).max(100).optional() }),
+      handler: async () => ({ text: "a".repeat(4 * 100) }),
+    });
+    const { result } = await rpcTo(
+      () => {
+        const server = new McpServer({ name: "t", version: "0" });
+        registerTools(
+          server,
+          [tool],
+          { toolsets: "all", readOnly: false },
+          { getClient: () => fakeKintoneClient(), onKintoneUnauthorized: () => {} },
+        );
+        return server;
+      },
+      "tools/call",
+      { name: "kintone_apps_probe", arguments: args },
+    );
+    expect(result?.isError).toBe(true);
+    return JSON.parse(firstText({ result })) as ErrorEnvelope;
   };
 }
 
@@ -258,6 +295,34 @@ const ROWS: Row[] = [
     row: "応答が上限を超えた",
     when: "kintone の応答本文が 10 MiB 超",
     run: getWith(() => new Response(new Uint8Array(10 * 1024 * 1024 + 1).fill(0x20))),
+    code: "response_too_large",
+    retryable: false,
+  },
+  {
+    row: "ツール入力の検証エラー",
+    when: "範囲外の値",
+    run: viaRegistry({ limit: 0 }),
+    code: "argument_error",
+    retryable: false,
+  },
+  {
+    row: "ツール入力の検証エラー",
+    when: "未知の引数",
+    run: viaRegistry({ nope: 1 }),
+    code: "argument_error",
+    retryable: false,
+  },
+  {
+    row: "ツール入力の検証エラー",
+    when: "負の max_response_tokens",
+    run: viaRegistry({ max_response_tokens: -1 }),
+    code: "argument_error",
+    retryable: false,
+  },
+  {
+    row: "応答が上限を超えた",
+    when: "max_response_tokens を超えた(切り詰めない)",
+    run: viaRegistry({ max_response_tokens: 10 }),
     code: "response_too_large",
     retryable: false,
   },
