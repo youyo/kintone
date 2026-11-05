@@ -52,6 +52,8 @@ export interface MockOptions {
   kintoneToken?: (call: RecordedCall) => Response | Promise<Response>;
   kintoneApps?: (call: RecordedCall) => Response | Promise<Response>;
   jwks?: (call: RecordedCall) => Response | Promise<Response>;
+  /** 追加の宛先("METHOD https://host/path" → ハンドラ)。M03 以降の読み取りツールの kintone REST など。 */
+  extra?: Record<string, (call: RecordedCall) => Response | Promise<Response>>;
 }
 
 /**
@@ -80,6 +82,7 @@ export async function setupMocks(opts: MockOptions = {}) {
     [CERTS_URL]: opts.jwks ?? (() => jwksResponse(accessKey)),
     [KINTONE_TOKEN]: kintoneToken,
     [KINTONE_APPS]: kintoneApps,
+    ...(opts.extra ?? {}),
   });
   return { accessKey, ...mocks };
 }

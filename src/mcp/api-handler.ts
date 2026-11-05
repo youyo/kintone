@@ -5,7 +5,7 @@ import type { GrantProps } from "../auth/props";
 import type { Env } from "../env";
 import { createKintoneClient } from "../kintone/client";
 import { MCP_PATH, protectedResourceMetadataUrl } from "../urls";
-import { parseToolConfig, QueryError, type ToolConfig } from "./registry";
+import { parseToolConfig, QueryError, type ToolConfig, type ToolDefinition } from "./registry";
 import { callMcpHandler } from "./request-body";
 import { createMcpServer } from "./server";
 import { ALL_TOOLS } from "./tools";
@@ -27,7 +27,13 @@ function invalidQuery(description: string): Response {
  * そのとき grant に「kintone の更新が必要」という印を置く(保存した期限より先に kintone 側で失効した場合でも、
  * 次のリフレッシュで期限に関係なく kintone を更新させるため。kintone-stale.ts)。
  */
-export function createMcpApiHandler(): Required<Pick<ExportedHandler<Env>, "fetch">> {
+export function createMcpApiHandler(
+  options: {
+    /** 公開候補のツール(テスト用)。省略時は ALL_TOOLS。 */
+    tools?: readonly ToolDefinition[];
+  } = {},
+): Required<Pick<ExportedHandler<Env>, "fetch">> {
+  const tools = options.tools ?? ALL_TOOLS;
   return {
     async fetch(request, env, ctx) {
       const oauthCtx = ctx as Partial<OAuthResourceContext<GrantProps>> &
@@ -38,16 +44,22 @@ export function createMcpApiHandler(): Required<Pick<ExportedHandler<Env>, "fetc
       // 接続 URL のクエリ(?toolsets=app,record&read_only=true)で公開するツールを決める。不正な値は 400。
       let config: ToolConfig;
       try {
-        config = parseToolConfig(new URL(request.url).searchParams, ALL_TOOLS);
+        config = parseToolConfig(new URL(request.url).searchParams, tools);
       } catch (e) {
         if (e instanceof QueryError) return invalidQuery(e.message);
         throw e;
       }
 
+      const grantRef = grantRefFromAccessToken(oauthCtx.auth?.token);
+
       const handler = createMcpHandler(
         () =>
           createMcpServer({
             config,
+            tools,
+            // 名前解決のキャッシュは grant 単位(MCP トークンの <userId>:<grantId>。形式が違えばキャッシュなし)。
+            kv: env.OAUTH_KV,
+            ...(grantRef ? { grant: grantRef } : {}),
             getClient: ({ maxApiCalls }) =>
               createKintoneClient({
                 host: env.KINTONE_HOST,
@@ -70,10 +82,9 @@ export function createMcpApiHandler(): Required<Pick<ExportedHandler<Env>, "fetc
       if (kintoneUnauthorized) {
         // 印はクライアントが直後に叩く /token より先に書き終える(waitUntil にしない)。失敗しても 401 は返す。
         let staleMarked = false;
-        const ref = grantRefFromAccessToken(oauthCtx.auth?.token);
-        if (ref) {
+        if (grantRef) {
           try {
-            await markKintoneStale(env.OAUTH_KV, ref.userId, ref.grantId);
+            await markKintoneStale(env.OAUTH_KV, grantRef.userId, grantRef.grantId);
             staleMarked = true;
           } catch {
             staleMarked = false;

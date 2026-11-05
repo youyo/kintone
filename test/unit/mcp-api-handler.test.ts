@@ -1,7 +1,9 @@
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import type { GrantProps } from "../../src/auth/props";
 import { createMcpApiHandler } from "../../src/mcp/api-handler";
+import { defineTool } from "../../src/mcp/registry";
 import { jsonResponse, mockOutboundFetch } from "../helpers/mock-fetch";
 import { readRpc } from "../helpers/oauth-flow";
 
@@ -190,15 +192,22 @@ describe("/mcp の URL クエリ(read_only / toolsets。仕様書 §8)", () => {
     return ((await readRpc(res)).result?.tools ?? []).map((t) => t.name);
   };
 
-  it.each([
-    "",
-    "?read_only=true",
-    "?read_only=false",
-    "?toolsets=app",
-    "?toolsets=all&read_only=true",
-    "?x=1",
-  ])("有効なクエリ(%s)では tools/list が通る", async (query) => {
-    expect(await listNames(query)).toEqual(["kintone_apps_search"]);
+  const ALL_READ = ["kintone_apps_search", "kintone_app_describe", "kintone_records_query"];
+
+  it.each(["", "?read_only=true", "?read_only=false", "?toolsets=all&read_only=true", "?x=1"])(
+    "有効なクエリ(%s)では tools/list が通り、M03 の読み取りツール 3 つが見える",
+    async (query) => {
+      expect(await listNames(query)).toEqual(ALL_READ);
+    },
+  );
+
+  it("?toolsets=app は apps_search と app_describe、?toolsets=record は records_query だけ", async () => {
+    expect(await listNames("?toolsets=app")).toEqual([
+      "kintone_apps_search",
+      "kintone_app_describe",
+    ]);
+    expect(await listNames("?toolsets=record")).toEqual(["kintone_records_query"]);
+    expect(await listNames("?toolsets=record&read_only=true")).toEqual(["kintone_records_query"]);
   });
 
   it.each([
@@ -207,8 +216,6 @@ describe("/mcp の URL クエリ(read_only / toolsets。仕様書 §8)", () => {
     ["read_only の重複", "?read_only=true&read_only=false"],
     ["綴り違いのキー(readonly)", "?readonly=true"],
     ["綴り違いのキー(toolset)", "?toolset=app"],
-    // M02 の実ツールは app の toolset だけなので、record だけにすると公開ツールが 0 個になる(M03 で変わる)。
-    ["公開ツールが 0 個になる組み合わせ", "?toolsets=record"],
   ])("%s は HTTP 400 invalid_query。kintone は呼ばない", async (_name, query) => {
     const m = mockOutboundFetch({ [APPS]: () => jsonResponse({ apps: [] }) });
     for (const [method, name] of [
@@ -223,6 +230,34 @@ describe("/mcp の URL クエリ(read_only / toolsets。仕様書 §8)", () => {
       expect(body.error_description.length).toBeGreaterThan(0);
     }
     expect(m.calls).toHaveLength(0);
+  });
+
+  it("公開ツールが 0 個になる組み合わせは 400(M03 で実ツールは読み取りだけになったので、書き込みしかない合成の一覧で確かめる)", async () => {
+    const writeOnly = [
+      defineTool({
+        name: "kintone_record_fake",
+        title: "テスト",
+        description: "write-only fake",
+        category: "WriteNonIdempotent",
+        toolset: "record",
+        inputSchema: z.strictObject({}),
+        handler: async () => ({}),
+      }),
+    ];
+    const res = await createMcpApiHandler({ tools: writeOnly }).fetch(
+      new Request("https://kintone-mcp.test/mcp?read_only=true", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      }),
+      env,
+      makeCtx(),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("invalid_query");
   });
 
   it("GET /mcp でも不正なクエリは 400", async () => {
@@ -240,5 +275,39 @@ describe("/mcp の URL クエリ(read_only / toolsets。仕様書 §8)", () => {
     expect(res.status).toBe(200);
     const params = new URL(m.calls[0]?.url ?? "").searchParams;
     expect([...params.keys()]).toEqual(["limit"]);
+  });
+});
+
+describe("/mcp とキャッシュの grant 単位のキー", () => {
+  it("MCP トークンの <userId>:<grantId> を kcache のキーに使う(秘密の部分は使わない)", async () => {
+    const m = mockOutboundFetch({
+      [APPS]: () => jsonResponse({ apps: [{ appId: "12", code: "CRM", name: "顧客管理" }] }),
+      "GET https://example.cybozu.com/k/v1/records.json": () => jsonResponse({ records: [] }),
+    });
+    const res = await createMcpApiHandler().fetch(
+      new Request("https://kintone-mcp.test/mcp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "kintone_records_query", arguments: { app_ref: "CRM" } },
+        }),
+      }),
+      env,
+      makeCtx(),
+    );
+    expect(res.status).toBe(200);
+    expect(m.calls.length).toBeGreaterThan(0);
+    const prefix = "kcache:v1:userid43chars:grant-unit-1:";
+    const listed = await env.OAUTH_KV.list({ prefix });
+    expect(listed.keys.length).toBeGreaterThan(0);
+    expect(listed.keys.every((k) => k.name.startsWith(prefix))).toBe(true);
+    expect(JSON.stringify(listed.keys)).not.toContain("mcp-secret-value");
+    for (const k of listed.keys) await env.OAUTH_KV.delete(k.name);
   });
 });

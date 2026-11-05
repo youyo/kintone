@@ -1,6 +1,6 @@
 # ADR 0006: ツール名・引数・出力・エラー形式(logbutler に合わせる)
 
-- 状態: 採用(M02 でエンベロープ・エラー表・`details`・ツール登録の仕組みを実装。リゾルバーのエラーを投げる側は M03)。コードの小文字 snake_case への統一はユーザー決定により確定(2026-11-05)
+- 状態: 採用(M02 でエンベロープ・エラー表・`details`・ツール登録の仕組みを実装。リゾルバーのエラーを投げる側は M03 で実装)。コードの小文字 snake_case への統一はユーザー決定により確定(2026-11-05)
 - 日付: 2026-11-05
 - 関連: logbutler ADR 0004、ADR 0007(名前解決)、ADR 0008(制限値)
 
@@ -60,3 +60,8 @@ logbutler は JSON を text content、失敗は `isError: true` + `{"schema_vers
 - 想定外の例外のログは `tool <名前> failed unexpectedly: <例外名>: <トークンを伏せた message>`(応答には固定文だけ)。
 - ツールの入力検証は `registerTools` が自前の zod `safeParse` で行い、SDK には公開用のスキーマだけを渡す(ADR の決定どおり)。
 
+## M03 の実装で確定した点
+
+- 読み取りツール 3 つを実装(`kintone_apps_search` / `kintone_app_describe` / `kintone_records_query`)。出力の形は仕様書 §5.1〜5.3 のとおり。`app_describe` の `app` は `app_id` `code` `name` `description` を常に出し、そのほかの項目(`space_id` `thread_id` `created_at` `creator` `modified_at` `modifier`)と `revision` は空・null なら省略する(Go の `omitempty` と同じ。`description` は Go でも `omitempty` なし)。`records_query` の `total_count` は kintone の文字列を数値に変換し、数として読めなければ `api_error`(retryable)にする(黙って落とさない)。
+- `app` / `app_ref` の排他違反(両方・どちらもなし)・`app_ref` の空文字・範囲外の引数は、kintone を呼ぶ前に `argument_error`。
+- リゾルバーのエラー(`resolver_*`)は `ResolverError` で投げ、`details` に `kind` / `ref` / `candidates`(アプリ `{id, code?, name?}`、フィールド `{code, label?}`)を載せる。`resolver_app_not_found` / `resolver_field_not_found` の `candidates` は空配列。`resolver_app_list_too_large` は `kind` / `ref` だけ。

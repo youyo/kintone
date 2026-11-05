@@ -71,7 +71,7 @@ Go 製の kintone CLI + MCP サーバー(v0.5.6、`archive/go`)を、姉妹プ�
 - [ ] U2/U3: OAuth クライアント登録と利用者の設定(ユーザー)
 - [ ] U4/U5: Access self-hosted アプリの作成(`/authorize` と `/callback` のパス)と AUD の取得、KV と Variables / Secrets(ユーザー)
 - [x] M02: kintone クライアントと基盤(詳細計画: `plans/kintone-mcp-m02-client-and-foundation.md`)
-- [ ] M03: 読み取りツール + 名前解決
+- [x] M03: 読み取りツール + 名前解決(詳細計画: `plans/kintone-mcp-m03-read-tools-resolver.md`)
 - [x] ADR 0007 の未決(書き込み系での部分一致): 完全一致のみに決定済み(2026-11-05)
 - [ ] M04: 書き込みツール
 - [ ] M05: デプロイ準備

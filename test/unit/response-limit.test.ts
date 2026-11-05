@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { ArgumentError, ResponseTooLargeError, toErrorEnvelope } from "../../src/errors";
 import {
   assertWithinResponseLimit,
@@ -77,5 +78,18 @@ describe("maxResponseTokensShape", () => {
     expect(schema.safeParse("10").success).toBe(false);
     expect(schema.description).toContain("50000");
     expect(schema.description).toContain("0");
+  });
+});
+
+describe("maxResponseTokensShape の公開スキーマ(JSON Schema)", () => {
+  it("minimum は 0(負の値が不可であることがスキーマから読める)。検証の挙動は変えない", () => {
+    const json = z.toJSONSchema(z.strictObject(maxResponseTokensShape)) as unknown as {
+      properties: { max_response_tokens: { type: string; minimum: number } };
+    };
+    expect(json.properties.max_response_tokens.type).toBe("integer");
+    expect(json.properties.max_response_tokens.minimum).toBe(0);
+    // 公開スキーマだけ 0 にし、zod の検証自体は負を通す(負は resolveResponseLimit が argument_error にする)。
+    expect(maxResponseTokensShape.max_response_tokens.safeParse(-1).success).toBe(true);
+    expect(() => resolveResponseLimit(-1)).toThrow(ArgumentError);
   });
 });

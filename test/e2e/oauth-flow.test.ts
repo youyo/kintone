@@ -323,7 +323,12 @@ describe("E2E 3: 取得したトークンで /mcp が使える", () => {
     const list = await mcpRequest(access_token, "tools/list");
     expect(list.status).toBe(200);
     const listBody = await readRpc(list);
-    expect((listBody.result?.tools ?? []).map((t) => t.name)).toEqual(["kintone_apps_search"]);
+    // M03 で読み取りツールが 3 つになった(M01 は kintone_apps_search だけ)。
+    expect((listBody.result?.tools ?? []).map((t) => t.name)).toEqual([
+      "kintone_apps_search",
+      "kintone_app_describe",
+      "kintone_records_query",
+    ]);
 
     const before = parseCalls(calls, KINTONE_APPS).length;
     const call = await mcpRequest(access_token, "tools/call", {

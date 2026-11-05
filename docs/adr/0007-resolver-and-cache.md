@@ -1,6 +1,6 @@
 # ADR 0007: 名前解決の仕様とキャッシュ(grant ごとのキー、TTL、無効化)
 
-- 状態: 提案(M03 で採用予定。方針は推奨方針 5)。書き込み系の `app_ref`(読み取り系は Go 版どおり)はユーザー決定により確定(2026-11-05)
+- 状態: 採用(M03 で実装。実装で確定した点は末尾)。書き込み系の `app_ref`(読み取り系は Go 版どおり)はユーザー決定により確定(2026-11-05)
 - 日付: 2026-11-05
 - 関連: ADR 0004、ADR 0010(`userId` は Access の email のハッシュ)、ADR 0008、logbutler ADR 0005(KV の `idem:`)、logbutler ADR 0016(`statuses:<id>` 600 秒)
 
@@ -57,3 +57,20 @@ Go 版の名前解決(`internal/resolver/`)は stateless で、`apps.json` / `fo
 
 - `form/fields.json` の必要権限(アプリ管理権限が要る場合、一般利用者の `update_key_field_ref` と `app_describe` が `permission_error` になる。V09)
 - KV の読み書きが subrequest 上限に数えられるか(V12)
+
+## M03 の実装で確定した点
+
+- 実装は `src/resolver/`(`resolver.ts` = 解決、`cache.ts` = KV、`budget.ts` = 最悪ケースの式)と `src/mcp/tools/app-target.ts`(`app` / `app_ref` の排他・解決・キャッシュの無効化)。テストは `resolver-app` / `resolver-field` / `resolver-cache` / `resolver-cache-behavior` / `call-budget`(unit)と `e2e/read-tools`。
+- リゾルバーは `mode: "read" | "write"` を受ける。write モードは M03 で実装して unit で全分岐を固定した(ツールから使うのは M04)。ID・コード完全一致は両モード共通。API の呼び出し回数・順序は両モードで同じ。
+- **キャッシュは検索の段階ごと**(`appcode` = コード完全一致の結果、`appname` = 名前検索の全ページ、空配列も)。値の形は検査し、壊れていれば「なし」。キーは `userId` と `grantId` の両方を含む。MCP トークンの形式が違う・KV がないときはキャッシュを使わない。
+- **`not_found` の取り直しは「キャッシュから読んだ段階だけ」**(コードだけがキャッシュ由来ならコードだけ)。1 回の解決の中で同じ段階の API を 2 度は呼ばない(結果をメモ化する。KV の書き込みが失敗しても二重に取らない)ので、取り直しを含めても A = 11 を超えない。取り直しの対象になるのは `resolver_app_not_found` / `resolver_field_not_found` だけ(ambiguous・exact_match_required は取り直さない)。
+- **`kintone_app_describe` は `app_ref` の解決でもキャッシュを読まない**(結果は書く)。「いまの状態を見るツール」(本 ADR の決定)を、ツール全体に適用した。`kintone_apps_search` はリゾルバーを使わない。
+- キャッシュで解決したアプリへの呼び出しが HTTP 404(`not_found`)なら、読んだ段階のキーと `fields:<appId>` を消してエラーを返す(再解決しない)。API で解決した直後の 404・`app` の数値指定の 404 では何も消さない。
+- フィールドのキャッシュは `fields:<appId>`。`app_describe` が取得したフィールド定義で更新する。リゾルバーのフィールド解決(`resolveField`)は M04 の `update_key_field_ref` が使う(M03 のツールは使わない)。
+- ログは例外名だけ(`resolver cache get failed: SyntaxError` のように)。キー・値・message は出さない。壊れた値の読み取りも同じ扱いで warn に残る。
+- 数字だけの `app_ref` は、安全な整数の範囲の正の整数だけを ID とみなす(`0`・負・小数・`+5`・前後の空白つきは ID ではなくコードの検索へ進む)。
+
+## 未検証の前提(M03 で追加)
+
+- `apps.json` の `name` の部分一致が、実際に大文字小文字・全角半角をどう扱うか(完全一致の判定は大文字小文字を区別して自前で行う)
+- `codes` / `name` の 64 文字を超える `app_ref` を渡したときの kintone の応答(400 → `argument_error` の想定)

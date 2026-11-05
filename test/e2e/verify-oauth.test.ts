@@ -147,7 +147,8 @@ describe("E2E: verify:oauth(実環境確認用 CLI)を Worker とモック kinto
     ]);
     expect(report.ok).toBe(true);
     expect(report.facts.issuer).toBe(ORIGIN);
-    expect(report.facts.toolCount).toBe(1);
+    // M03 で読み取りツールが 3 つになった(M01・M02 は 1 つ)。
+    expect(report.facts.toolCount).toBe(3);
     expect(report.facts.appCount).toBe(1);
     expect(report.facts.tokenExpiresInSeconds).toBeGreaterThan(0);
     expect(report.facts.refreshedExpiresInSeconds).toBeGreaterThan(0);
