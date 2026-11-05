@@ -35,7 +35,7 @@ function setup(get: KintoneClient["get"]) {
 const APPS = { apps: [{ appId: "1", code: "CRM", name: "顧客管理", spaceId: null }] };
 
 describe("MCP server (kintone_apps_search)", () => {
-  it("tools/list は kintone_apps_search だけを公開する(読み取り専用の annotation と limit 引数つき)", async () => {
+  it("tools/list は kintone_apps_search だけを公開する(読み取り専用の annotation と limit・max_response_tokens 引数つき)", async () => {
     const { factory } = setup(async () => APPS);
     const { result } = await rpcTo(factory, "tools/list");
     const tools = result?.tools ?? [];
@@ -44,7 +44,8 @@ describe("MCP server (kintone_apps_search)", () => {
     expect(tools[0]?.annotations?.destructiveHint).toBe(false);
     expect(JSON.stringify(tools[0]?.inputSchema)).toContain("limit");
     const schema = tools[0]?.inputSchema as { properties: Record<string, unknown> };
-    expect(Object.keys(schema.properties)).toEqual(["limit"]);
+    // 読み取りツールには max_response_tokens が自動で付く(M02)。
+    expect(Object.keys(schema.properties)).toEqual(["limit", "max_response_tokens"]);
   });
 
   it("tools/call は GET /k/v1/apps.json を limit つきで呼び、kintone の生データを JSON text で返す", async () => {
@@ -135,5 +136,60 @@ describe("MCP server (kintone_apps_search)", () => {
     const text = firstText({ result });
     expect(JSON.parse(text).error.code).toBe("generic_error");
     expect(text).not.toContain("kt-secret-token");
+  });
+});
+
+describe("kintone_apps_search の max_response_tokens(読み取りツールの共通引数)", () => {
+  const MANY = {
+    apps: Array.from({ length: 200 }, (_, i) => ({
+      appId: String(i),
+      code: `C${i}`,
+      name: "顧客管理",
+    })),
+  };
+
+  it("既定(50000)で通る小さな応答は成功する", async () => {
+    const { factory } = setup(async () => APPS);
+    const { result } = await rpcTo(factory, "tools/call", {
+      name: "kintone_apps_search",
+      arguments: {},
+    });
+    expect(result?.isError).toBeFalsy();
+  });
+
+  it("上限を超えたら切り詰めずに response_too_large(絞り込みの案内つき)", async () => {
+    const { factory } = setup(async () => MANY);
+    const { result } = await rpcTo(factory, "tools/call", {
+      name: "kintone_apps_search",
+      arguments: { max_response_tokens: 100 },
+    });
+    expect(result?.isError).toBe(true);
+    const text = firstText({ result });
+    const body = JSON.parse(text);
+    expect(body.error).toMatchObject({ code: "response_too_large", retryable: false });
+    expect(body.error.message).toContain("max_response_tokens");
+    expect(text).not.toContain("顧客管理");
+  });
+
+  it("0 で無効にすると同じ応答が通る。limit と併用できる", async () => {
+    const { rec, factory } = setup(async () => MANY);
+    const { result } = await rpcTo(factory, "tools/call", {
+      name: "kintone_apps_search",
+      arguments: { max_response_tokens: 0, limit: 100 },
+    });
+    expect(result?.isError).toBeFalsy();
+    expect(JSON.parse(firstText({ result }))).toEqual(MANY);
+    // max_response_tokens は kintone へは送らない。
+    expect(rec.calls[0]?.query).toEqual({ limit: 100 });
+  });
+
+  it("負の値は argument_error で、kintone を呼ばない", async () => {
+    const { rec, factory } = setup(async () => APPS);
+    const { result } = await rpcTo(factory, "tools/call", {
+      name: "kintone_apps_search",
+      arguments: { max_response_tokens: -1 },
+    });
+    expect(JSON.parse(firstText({ result })).error.code).toBe("argument_error");
+    expect(rec.calls).toHaveLength(0);
   });
 });
