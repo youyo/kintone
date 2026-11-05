@@ -9,14 +9,14 @@ Go 製 CLI + MCP サーバー(v0.5.6)は `archive/go` ブランチ・タグに�
 
 - **TDD**: 失敗するテストを先に書き、`mise run test:unit` / `mise run test:e2e` で期待どおりの理由で失敗するのを確認してから実装する。テストを弱める・skip・削除しない。バグ修正は再現テストが先。
 - **mise**: ランタイムとコマンドは `mise.toml` で管理する。`npm test` や `vitest` や `pnpm` を直接叩かず `mise run <task>` を使う。新しいコマンドが要るなら先にタスクへ追加する(依存を変えたときだけ `mise run install:update` で `pnpm-lock.yaml` を更新する)。
-- 完了条件は `mise run test`(unit + e2e)と `mise run lint` が通ること(`mise run build` も通ること)。
+- 完了条件は `mise run test`(unit + e2e。e2e は node-e2e を含む)と `mise run lint` が通ること(`mise run build` と `mise run deploy:check` も通ること)。
 - **Durable Objects / McpAgent は使わない**。MCP はステートレス(`createMcpHandler`)。
 - **kintone のトークンは grant の `props` にだけ置く**。ログ・エラーメッセージ・別の KV キー・MCP の応答に出さない。クライアント ID / シークレットも同様。
 - **kintone API と Access はモックのみ**。unit / e2e テストで実 kintone・実 Access に通信しない(`test/helpers/mock-fetch.ts` は未登録の宛先への通信を例外にする。Access の JWKS も fetch のモック、JWT はテスト用の鍵で署名する)。
 - 依存は公開から 2 週間以上たった正確なバージョンに固定する(`^` `~` を使わない)。`wrangler.jsonc` の `compatibility_date` も、固定した workerd が対応する日付まで。
 - コミット・push・PR・リモート作成・デプロイは、ユーザーの指示があるときだけ。`archive/go` の push もユーザーが行う。
-- **デプロイは実行しない**: `wrangler deploy`(`--dry-run` 以外)・`wrangler secret put`・KV の作成は実行しない。アカウント固有の値(Worker 名・KV id・ドメイン・kintone ホスト・Access の値・client id/secret)は追跡ファイルに書かない(`wrangler.jsonc` はダミー値の共有設定)。
-- GitHub Actions は**コミット SHA で固定**する(`.github/workflows/ci.yml`)。更新時は `gh api repos/<owner>/<repo>/git/ref/tags/<tag>` で実在を確かめる。
+- **デプロイは実行しない**: `wrangler deploy`(`--dry-run` 以外)・`mise run deploy`・`wrangler secret put`・KV の作成は実行しない(`mise run deploy:check` と node-e2e の dry-run はダミー値なので実行してよい)。アカウント固有の値(Worker 名・KV id・ドメイン・kintone ホスト・Access の値・client id/secret)は追跡ファイルに書かない(`wrangler.jsonc` はダミー値の共有設定。実値は環境変数 `KINTONE_MCP_*` から gitignore 済みの `wrangler.deploy.jsonc` に生成する)。
+- GitHub Actions は**コミット SHA で固定**する(`.github/workflows/ci.yml` と `deploy.yml` は同じ SHA。`test/node/deploy-config.test.ts` が固定を検査する)。更新時は `gh api repos/<owner>/<repo>/git/ref/tags/<tag>` で実在を確かめる。
 
 ## 認証・利用者の識別子(ADR 0001〜0005・0010)
 
@@ -43,6 +43,8 @@ Go 製 CLI + MCP サーバー(v0.5.6)は `archive/go` ブランチ・タグに�
 - 入力の検証は自前(zod の `safeParse`)で行い、SDK には公開用のスキーマだけを渡す(SDK の検証エラーはエンベロープにならないため)。
 - kintone が 401 を返したら、ツールは `authentication_error` を返し、`/mcp` の応答も HTTP 401 + `invalid_token` にして stale 印を置く(`src/mcp/api-handler.ts`)。
 - **起動時の設定チェック**(`src/config-check.ts`、仕様書 §9): 必須の vars / secrets / KV が欠けている・プレースホルダ(`<...>`)のまま・形式が違うなら、`/healthz` 以外は 500 `{"error":"server_misconfigured"}`、`/healthz` は 503 で項目名だけを返す。ログにも応答にも**値は出さない**。必須の設定を足したら `checkConfig` と unit / E2E を更新する。
+- **デプロイ設定の生成**(ADR 0012、`scripts/render-wrangler-config/`): 環境変数 `KINTONE_MCP_WORKER_NAME` / `KV_NAMESPACE_ID` / `HOST` / `PUBLIC_BASE_URL` / `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD`(必須)と `CUSTOM_DOMAIN` / `OAUTH_PKCE`(任意)から `wrangler.deploy.jsonc` を作る。**必須の vars を足したら `checkConfig`・`core.ts`(`ENV_NAMES` と検証)・`wrangler.jsonc`・`deploy.yml` の env・runbook の対応表・`wrangler.deploy.example.jsonc`(`node scripts/render-wrangler-config/main.ts --example` で作り直す)を揃える**(`deploy-config.test.ts` と node-e2e が不一致を検出する)。エラーに値を出さない。
+- **`kintone_record_create` の description**は暗黙の再送判定(明示の冪等キーがなければ 5 分以内の同じ引数は前回の結果を返し 2 件目は作られない。意図して同じ内容を作るときは別の `idempotency_key`)を書いている。冪等の挙動を変えたら description・スナップショット・`tool-record-create.test.ts` を揃える。書き込みはタイムアウト(AbortError)でもリトライしない(`write-no-retry.test.ts`)。
 
 ## 構成
 
@@ -80,13 +82,18 @@ src/resolver/resolver.ts      名前解決(アプリ: ID → コード → 名�
 src/resolver/cache.ts         KV キャッシュ(kcache:v1:<userId>:<grantId>:...、TTL 600 秒、失敗しても続行)
 src/resolver/budget.ts        最悪ケースの式(A = 11、F = 1)と readBudget(論理回数 × 3)・writeBudget(解決の読み取り × 3 + 書き込み 1)
 scripts/verify-oauth/         実環境の OAuth 確認 CLI(`mise run verify:oauth`)。core.ts(Web 標準 API だけ。入出力は VerifyIo で注入)・args.ts・loopback.ts(node:http)・main.ts(Node 24 の型ストリップで直接実行。TS の enum / parameter property は使わない)
-.github/workflows/ci.yml      lint / test(アクションは SHA 固定。deploy:check は M05)
-test/unit/  test/e2e/  test/node/  test/node-e2e/(空)  test/helpers/  test/snapshots/(tools/list のスナップショット)
+scripts/render-wrangler-config/  デプロイ用 wrangler 設定の生成(`mise run deploy:render`)。core.ts(Web 標準 API だけ。検証と変換。エラーは項目名と理由だけで値を出さない)・main.ts(入出力。Node 24 の型ストリップで直接実行。enum / parameter property は使わない。`--example` でダミー値の `wrangler.deploy.example.jsonc`)
+wrangler.deploy.example.jsonc  `--example` の生成物(ダミー値だけ。追跡する。実用の `wrangler.deploy*.jsonc` は gitignore)。`deploy:check` が dry-run に使う
+.github/workflows/ci.yml      lint / test / deploy:check(アクションは SHA 固定)
+.github/workflows/deploy.yml  下流のデプロイ(Variables `KINTONE_MCP_*` → deploy:render → `wrangler deploy --secrets-file`)。Variable `KINTONE_MCP_WORKER_NAME` が空(upstream)ならジョブごと飛ばす。秘密値はステップの env だけ
+docs/runbook.md               第三者がたどれる運用手順書(OAuth クライアント・Access・KV・Variables / Secrets・確認・WAF・切り分け・grant の失効)。実機で確かめていない手順は【未検証】+ V 番号
+README.md                     製品説明・6 ツールの一覧(`test/unit/readme-tools.test.ts` が突き合わせ)・商標の注記・Go 版からの移行案内
+test/unit/  test/e2e/  test/node/  test/node-e2e/  test/helpers/  test/snapshots/(tools/list のスナップショット)
 ```
 
 ## テストの書き方
 
-- 実行環境は workerd(`@cloudflare/vitest-plugin`)。`vitest.config.ts` の `unit` / `e2e` の 2 プロジェクトと、Node 環境の `node` プロジェクト(`test/node/`。`node:http` が要る verify:oauth のループバック受信だけ。`test:unit` に含まれる)と `node-e2e` プロジェクト(`test/node-e2e/`。M05 から使う。空の間は `test:e2e` のタスクから外している(`vitest.config.ts` には定義済み。M05 で `mise.toml` の `test:e2e` に `--project node-e2e` を足す))。テスト用の束縛(ダミー値)は `vitest.config.ts` の `testBindings`。
+- 実行環境は workerd(`@cloudflare/vitest-plugin`)。`vitest.config.ts` の `unit` / `e2e` の 2 プロジェクトと、Node 環境の `node` プロジェクト(`test/node/`。`node:http` が要る verify:oauth のループバック受信と、設定ファイル・文書の不変条件 `deploy-config.test.ts`(ワークフロー・mise・gitignore・runbook の節と【未検証】の V 番号・README の商標と移行案内・example の一致)。`test:unit` に含まれる)と `node-e2e` プロジェクト(`test/node-e2e/`。生成スクリプトを実プロセスで起動し、生成物を `wrangler deploy --dry-run -c` に通す。`test:e2e` に含まれる)。README・文書は workerd のテストでは `import x from "../../README.md?raw"`(型は `test/helpers/raw-imports.d.ts`)で読む。テスト用の束縛(ダミー値)は `vitest.config.ts` の `testBindings`。
 - workerd のテストで `cloudflare:test` を import しない(import すると並列実行時に他ファイルの初回リクエストがタイムアウトする)。Worker 全体を任意の env で呼ぶときは `import worker from "../../src/index"` に env とダミーの ctx を渡す(`test/e2e/config-check.test.ts`、`test/helpers/oauth-flow.ts` の `useEnv`)。
 - E2E は `test/helpers/oauth-flow.ts` の `worker.fetch`(Worker 全体への HTTP)で、`/register` → `/authorize` → `/callback` → `/token` → `/mcp` を通しで行う。`/authorize` と `/callback` の各リクエストには、テスト用の鍵で署名した `Cf-Access-Jwt-Assertion`(`test/helpers/access.ts`)を付ける。kintone と Access の JWKS は `vi.spyOn(globalThis, "fetch")` で差し替える(同じ isolate で動くため Worker にも効く。`setupMocks`)。
 - 時刻に依存する挙動(kintone トークンの期限切れ、JWKS のキャッシュ)は `vi.useFakeTimers({ toFake: ["Date"] })` で進める。コード側は `Date.now` の参照を保持せず、呼び出し時に `Date.now()` を読むこと。JWT の発行時刻も同じ Date を使うので、時刻を進めたあとに JWT を使うテストは `exp` を十分先にする。

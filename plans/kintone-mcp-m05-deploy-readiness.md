@@ -127,4 +127,33 @@ test/snapshots/tools-list.json               description の更新
 
 ## 実装後の記録(計画との差分)
 
-(実装後に書く)
+計画から外れた点と、実装中に決めた細部。
+
+- **`wrangler.deploy.example.jsonc` を追跡した**(logbutler は gitignore のまま)。`.gitignore` に `!wrangler.deploy.example.jsonc` を足し、`--example` の生成物との一致を `test/node/deploy-config.test.ts` で固定した(計画の段階で決めていたが、ADR 0012 に理由を書いた)
+- **`KINTONE_MCP_OAUTH_PKCE`(任意)を足した**(仕様書 §9 の 7 項目 + 1)。`wrangler deploy` は設定にない vars を消すので、これがないと下流が PKCE の逃げ道(`KINTONE_OAUTH_PKCE=off`)を使えない
+- **ADR 0012 を新規に作った**(logbutler ADR 0011 に相当)。番号は kintone の ADR 0011(冪等キャッシュ)と重ならないよう 0012
+- **`docs/manual-verification.md` に V26〜V30 を足した**(V26 = DELETE の JSON 本文(M04 の指摘 3)、V27 = Cloudflare API トークンの権限・初回デプロイ、V28 = `wrangler kv` による grant の失効、V29 = OAuth クライアント登録画面、V30 = WAF / Rate Limiting)。runbook の【未検証】の行が必ず実在する V / P 番号を持つことを `deploy-config.test.ts` で固定したため、番号のない未検証事項に V 番号を割り当てた
+- **runbook の `userId` の計算手順(シェル)**は、`userIdFromEmail` と同じ値になることを Node で確かめた(macOS・Linux の両方での実行は V28)
+- **GitHub のアクションの SHA は `ci.yml` の既存のもの**(checkout v7.0.1 = `3d3c42e5…`、mise-action v5.1.2 = `08ae2a09…`、mise 2026.10.9)をそのまま使った。この環境から GitHub API に通信できないため、`gh api` での実在の再確認はしていない(M01 で確認済み)。新しいアクションは使っていない
+- **ローカルでは `mise run` を実行できなかった**(この環境から mise が pnpm を取得できない)。タスクと同じコマンドを直接実行して確認した(`node scripts/render-wrangler-config/main.ts --example && pnpm exec wrangler deploy --dry-run -c wrangler.deploy.example.jsonc --outdir dist`、`pnpm exec vitest run ...`)。`mise tasks ls` でタスクが読めることは確認した
+- 書き込みのタイムアウトのテスト(M04 の指摘 2)は、クライアントの実装済みの挙動の特性テストなので足した時点で緑。クライアントの `execute` が通信失敗・タイムアウトを再試行するように一時的に変えると 9 件が落ちることを確かめ(元に戻した)、回帰を検出できることを確認した
+- 依存の追加なし
+
+### Red / Green
+
+| 段階 | Red(失敗の理由) | Green |
+|---|---|---|
+| 計画 | - | `plans/kintone-mcp-m05-deploy-readiness.md` |
+| core の unit | `scripts/render-wrangler-config/core.ts` がなく import に失敗 | 実装後 54 件緑 |
+| README の突き合わせ | README に toolset の表・「6 個のツール」がなく 6 件失敗 | README 作成後に緑 |
+| 不変条件(`test/node/deploy-config.test.ts`) | `core.ts`・`deploy.yml`・`runbook.md` がなく import / 読み取りに失敗 | 実装後 34 件緑 |
+| node-e2e | `main.ts` がなく 8 件失敗(終了コード・生成物) | 実装後 8 件緑(wrangler の dry-run を含む) |
+| record_create の description | 暗黙の再送判定・`_meta.idempotency_key`・タイムアウトの記述がなく 3 件失敗 | description 更新とスナップショット更新後に緑 |
+| 書き込みのタイムアウト | (特性テスト。足した時点で緑) | 上記の変異で赤になることを確認 |
+
+### テストの件数
+- unit(`--project unit --project node`): 787 → **890**(+103。`render-wrangler-config` 54、`readme-tools` 6、`deploy-config` 34、`tool-record-create` の description 3、`write-no-retry` のタイムアウト 6)
+- e2e(`--project e2e --project node-e2e`): 158 → **166**(+8。`node-e2e/render-wrangler-config` 8)
+
+### 未検証の前提(追加)
+- runbook の【未検証】の項目は V10・V17〜V21・V27〜V30・P01〜P04 に結んである(上記)。デプロイ・OAuth クライアント登録・Access・KV・WAF の画面と挙動は、実機では確かめていない

@@ -5,7 +5,11 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ENV_NAMES, EXAMPLE_ENV, renderWranglerConfig } from "../../scripts/render-wrangler-config/core";
+import {
+  ENV_NAMES,
+  EXAMPLE_ENV,
+  renderWranglerConfig,
+} from "../../scripts/render-wrangler-config/core";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(join(ROOT, path), "utf8");
@@ -94,14 +98,17 @@ describe("GitHub Actions", () => {
       });
   }
 
-  it.each(Object.entries(workflows))("%s: すべてのアクションがコミット SHA で固定されている", (_n, text) => {
-    const uses = usesOf(text);
-    expect(uses.length).toBeGreaterThan(0);
-    for (const u of uses) {
-      expect(u.ref, `${u.action} が SHA 固定でない`).toMatch(/^[0-9a-f]{40}$/);
-      expect(u.line, `${u.action} のタグのコメントがない`).toMatch(/# v\d/);
-    }
-  });
+  it.each(Object.entries(workflows))(
+    "%s: すべてのアクションがコミット SHA で固定されている",
+    (_n, text) => {
+      const uses = usesOf(text);
+      expect(uses.length).toBeGreaterThan(0);
+      for (const u of uses) {
+        expect(u.ref, `${u.action} が SHA 固定でない`).toMatch(/^[0-9a-f]{40}$/);
+        expect(u.line, `${u.action} のタグのコメントがない`).toMatch(/# v\d/);
+      }
+    },
+  );
 
   it("deploy.yml は ci.yml と同じアクション・同じ SHA だけを使う(新しいアクションを足さない)", () => {
     const ciUses = new Map(usesOf(ci).map((u) => [u.action, u.ref]));
@@ -117,7 +124,7 @@ describe("GitHub Actions", () => {
   const deploy = workflows["deploy.yml"];
 
   it("deploy.yml は Worker 名の Variable が空のとき(upstream)ジョブを飛ばす", () => {
-    expect(deploy).toContain("if: ${{ vars.KINTONE_MCP_WORKER_NAME != '' }}");
+    expect(deploy).toMatch(/^ {4}if: \$\{\{ vars\.KINTONE_MCP_WORKER_NAME != '' \}\}$/m);
   });
 
   it("deploy.yml は main への push と手動実行で動き、権限は contents: read だけ", () => {
@@ -130,7 +137,7 @@ describe("GitHub Actions", () => {
     expect(deploy).not.toMatch(/^env:/m);
     expect(deploy).not.toMatch(/^ {4}env:/m);
     // secrets の参照はステップの env(インデント 10 以上)の中だけ。
-    const refs = deploy.split("\n").filter((l) => l.includes("secrets."));
+    const refs = deploy.split("\n").filter((l) => /\$\{\{\s*secrets\./.test(l));
     expect(refs.length).toBeGreaterThan(0);
     for (const line of refs) expect(line).toMatch(/^ {10,}[A-Z_]+: \$\{\{ secrets\.[A-Z_]+ \}\}$/);
   });
@@ -158,7 +165,12 @@ describe("GitHub Actions", () => {
   it("deploy.yml は secrets-file を自分だけが読める権限で作り、終了時に消す。wrangler secret put は使わない", () => {
     expect(deploy).toContain("umask 077");
     expect(deploy).toMatch(/trap 'rm -f "\$secrets_file"' EXIT/);
-    expect(deploy).not.toContain("secret put");
+    // コメント(説明)は除き、実際に実行する行だけを見る。
+    const code = deploy
+      .split("\n")
+      .filter((l) => !/^\s*#/.test(l))
+      .join("\n");
+    expect(code).not.toContain("secret put");
     expect(deploy).not.toMatch(/echo .*secrets\./);
   });
 });
@@ -180,7 +192,10 @@ describe("docs/runbook.md", () => {
     ["IP 制限", /IP 制限/],
     ["障害の切り分け", /切り分け/],
   ])("見出しに「%s」の節がある", (_label, re) => {
-    expect(headings.some((h) => re.test(h)), `見出しがない: ${re}`).toBe(true);
+    expect(
+      headings.some((h) => re.test(h)),
+      `見出しがない: ${re}`,
+    ).toBe(true);
   });
 
   it("生成する環境変数(KINTONE_MCP_*)と Secrets の名前がすべて載っている", () => {
@@ -234,7 +249,8 @@ describe("docs/runbook.md", () => {
     for (const line of flagged) {
       const ids = [...line.matchAll(/\b([VP]\d{2})\b/g)].map((m) => m[1] as string);
       expect(ids.length, `【未検証】の行に V / P 番号がない: ${line}`).toBeGreaterThan(0);
-      for (const id of ids) expect(defined.has(id), `${id} が manual-verification.md にない`).toBe(true);
+      for (const id of ids)
+        expect(defined.has(id), `${id} が manual-verification.md にない`).toBe(true);
     }
   });
 

@@ -14,5 +14,7 @@ mise.local.toml
 .verify-oauth.local.json
 *.local.json
 
-# デプロイ用に生成する wrangler 設定(アカウント固有の値を含む。M05 で追加)
+# デプロイ用に生成する wrangler 設定(アカウント固有の値を含む。ADR 0012)
 wrangler.deploy*.jsonc
+# ダミー値だけの example(--example の生成物。deploy:check が使う)は追跡する。生成物との一致は test/node/deploy-config.test.ts が確かめる
+!wrangler.deploy.example.jsonc

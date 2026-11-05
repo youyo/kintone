@@ -83,7 +83,9 @@ describe("render-wrangler-config (実プロセス)", () => {
       ACCESS_AUD: "e2e-access-aud",
       KINTONE_OAUTH_PKCE: "off",
     });
-    expect(config.routes).toEqual([{ pattern: "kintone-mcp.e2e.example.org", custom_domain: true }]);
+    expect(config.routes).toEqual([
+      { pattern: "kintone-mcp.e2e.example.org", custom_domain: true },
+    ]);
     expect(config.workers_dev).toBe(false);
     expect(config.env).toBeUndefined();
     const upstream = JSON.parse(
@@ -123,7 +125,12 @@ describe("render-wrangler-config (実プロセス)", () => {
 
   it("--example は環境変数なしでダミー値の設定を生成する(既定の出力先は実用の生成物と別)", async () => {
     const root = await copyRoot(work);
-    const r = await render(join(root, "scripts/render-wrangler-config/main.ts"), ["--example"], {}, root);
+    const r = await render(
+      join(root, "scripts/render-wrangler-config/main.ts"),
+      ["--example"],
+      {},
+      root,
+    );
     expect(r.code).toBe(0);
     const config = JSON.parse(await readFile(join(root, "wrangler.deploy.example.jsonc"), "utf8"));
     expect(config.name).toBeTruthy();
@@ -146,7 +153,12 @@ describe("render-wrangler-config (実プロセス)", () => {
 
   it("--out 省略時はリポジトリ直下の wrangler.deploy.jsonc に書く", async () => {
     const root = await copyRoot(work);
-    const r = await render(join(root, "scripts/render-wrangler-config/main.ts"), [], VALID_ENV, root);
+    const r = await render(
+      join(root, "scripts/render-wrangler-config/main.ts"),
+      [],
+      VALID_ENV,
+      root,
+    );
     expect(r.code).toBe(0);
     const config = JSON.parse(await readFile(join(root, "wrangler.deploy.jsonc"), "utf8"));
     expect(config.name).toBe("e2e-kintone-mcp");

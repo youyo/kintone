@@ -128,16 +128,19 @@ describe("書き込みは 1 回だけ(リトライしない)", () => {
     },
   );
 
-  it.each(WRITES)("$tool: fetch が直接 AbortError を投げても 1 回だけ", async ({ tool, key, args }) => {
-    const m = mockOutboundFetch({
-      [key]: () => {
-        throw new DOMException("The operation was aborted", "AbortError");
-      },
-    });
-    const body = await callTool(tool, args);
-    expect(body.error.code).toBe("api_error");
-    expect(m.callsTo(key)).toHaveLength(1);
-  });
+  it.each(WRITES)(
+    "$tool: fetch が直接 AbortError を投げても 1 回だけ",
+    async ({ tool, key, args }) => {
+      const m = mockOutboundFetch({
+        [key]: () => {
+          throw new DOMException("The operation was aborted", "AbortError");
+        },
+      });
+      const body = await callTool(tool, args);
+      expect(body.error.code).toBe("api_error");
+      expect(m.callsTo(key)).toHaveLength(1);
+    },
+  );
 
   it("名前解決の GET(読み取り)は 429 でリトライされ、そのあとの書き込みは 1 回だけ", async () => {
     let apps = 0;

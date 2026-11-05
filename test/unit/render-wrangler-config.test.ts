@@ -302,9 +302,9 @@ describe("parseJsonc", () => {
   });
 
   it("文字列の中の // や /* や , は壊さない(エスケープされた引用符を含む)", () => {
-    expect(parseJsonc(`{ "u": "https://x.example/a//b", "c": "/* x */", "q": "a\\"//b,}" }`)).toEqual(
-      { u: "https://x.example/a//b", c: "/* x */", q: 'a"//b,}' },
-    );
+    expect(
+      parseJsonc(`{ "u": "https://x.example/a//b", "c": "/* x */", "q": "a\\"//b,}" }`),
+    ).toEqual({ u: "https://x.example/a//b", c: "/* x */", q: 'a"//b,}' });
   });
 
   it("壊れた JSON は例外", () => {

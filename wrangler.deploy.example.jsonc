@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kintone-mcp-example",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-13",
+  "compatibility_flags": [],
+  "observability": {
+    "enabled": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  "vars": {
+    "KINTONE_HOST": "example.cybozu.com",
+    "PUBLIC_BASE_URL": "https://kintone-mcp.example.com",
+    "ACCESS_TEAM_DOMAIN": "example-team.cloudflareaccess.com",
+    "ACCESS_AUD": "example-access-aud"
+  },
+  "routes": [
+    {
+      "pattern": "kintone-mcp.example.com",
+      "custom_domain": true
+    }
+  ],
+  "workers_dev": false
+}
