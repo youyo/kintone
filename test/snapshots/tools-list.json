@@ -1,0 +1,33 @@
+[
+  {
+    "name": "kintone_apps_search",
+    "title": "アプリ検索",
+    "description": "Search kintone apps the authenticated user can see (GET /k/v1/apps.json). Returns the raw kintone response: {apps:[{appId, code, name, ...}]}.",
+    "inputSchema": {
+      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "limit": {
+          "description": "Number of apps to return (1-100). Default 100.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "max_response_tokens": {
+          "description": "Safety limit on the estimated response size in tokens (default: 50000, 0 disables). If exceeded, the call fails with response_too_large instead of returning a truncated result.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "アプリ検索",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
+    }
+  }
+]

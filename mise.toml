@@ -20,8 +20,9 @@ description = "E2E テスト (Worker 全体に HTTP を送る。kintone と Acce
 run = "pnpm exec vitest run --project e2e"
 
 [tasks."test:update-snapshots"]
-description = "tools/list のスナップショットを更新する (M02 から有効)"
-run = "pnpm exec vitest run --project unit --update test/unit/tools-list-snapshot.test.ts"
+description = "tools/list のスナップショット(test/snapshots/tools-list.json)を更新する。更新後は git diff で差分を確認してからコミットする"
+# ファイルを先に書く(--update の後ろに置くと、ファイル指定が効かず unit 全体が走る)。
+run = "pnpm exec vitest run test/unit/tools-list-snapshot.test.ts --project unit --update"
 
 [tasks.test]
 description = "Unit + E2E"
