@@ -1,0 +1,15 @@
+# ローカル開発用の秘密情報の雛形。コピーして .dev.vars を作り、実値を入れる(.dev.vars はコミットしない)。
+# 本番は `wrangler secret put <NAME>` で設定する。
+
+# cybozu.com 共通管理で登録した OAuth クライアント(リダイレクト URI は <PUBLIC_BASE_URL>/callback)の値
+KINTONE_CLIENT_ID=
+KINTONE_CLIENT_SECRET=
+
+# 以下は秘密ではないが、ローカルでは .dev.vars に置いて wrangler.jsonc の vars を上書きできる
+# KINTONE_HOST=example.cybozu.com
+# PUBLIC_BASE_URL=http://localhost:8787
+# Cloudflare Access の self-hosted アプリ(/authorize と /callback だけを守る)の値。どちらも必須。
+# ACCESS_TEAM_DOMAIN=example-team.cloudflareaccess.com
+# ACCESS_AUD=
+# kintone が PKCE パラメーターを拒否した場合の逃げ道(既定は s256)
+# KINTONE_OAUTH_PKCE=off

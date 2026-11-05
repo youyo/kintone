@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // このファイルはローカル開発 (wrangler dev) とテスト (vitest) が読む共有のダミー設定。
+  // アカウント固有の値 (Worker 名・KV id・ドメイン・kintone ホスト・Access の値) は実値をここに書かない。
+  // デプロイ用の設定の生成は M05。
+  "name": "kintone-mcp",
+  "main": "src/index.ts",
+  // compatibility_date は、固定した workerd (wrangler 4.151.0) が対応する最新日。
+  "compatibility_date": "2026-10-13",
+  // nodejs_compat は必要になったときだけ足す。
+  "compatibility_flags": [],
+  "observability": { "enabled": true },
+  "kv_namespaces": [
+    // ローカル開発・テスト用のダミー id。
+    { "binding": "OAUTH_KV", "id": "00000000000000000000000000000000" }
+  ],
+  "vars": {
+    // ローカル開発・テスト用のダミー。
+    "KINTONE_HOST": "example.cybozu.com",
+    "PUBLIC_BASE_URL": "https://kintone-mcp.example.com",
+    // Cloudflare Access (self-hosted アプリ。/authorize と /callback だけを守る。ADR 0010) のダミー。実値は運用者が用意する。
+    "ACCESS_TEAM_DOMAIN": "example-team.cloudflareaccess.com",
+    "ACCESS_AUD": "replace-with-access-application-aud"
+  }
+  // secrets (wrangler secret put / .dev.vars): KINTONE_CLIENT_ID, KINTONE_CLIENT_SECRET
+  // 任意の var: KINTONE_OAUTH_PKCE (s256 既定 / off)
+}
