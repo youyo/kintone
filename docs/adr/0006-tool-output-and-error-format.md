@@ -1,6 +1,6 @@
 # ADR 0006: ツール名・引数・出力・エラー形式(logbutler に合わせる)
 
-- 状態: 提案(M02/M03 で採用予定。方針は推奨方針 1・2)。コードの小文字 snake_case への統一はユーザー決定により確定(2026-11-05)
+- 状態: 採用(M02 でエンベロープ・エラー表・`details`・ツール登録の仕組みを実装。リゾルバーのエラーを投げる側は M03)。コードの小文字 snake_case への統一はユーザー決定により確定(2026-11-05)
 - 日付: 2026-11-05
 - 関連: logbutler ADR 0004、ADR 0007(名前解決)、ADR 0008(制限値)
 
@@ -50,3 +50,13 @@ logbutler は JSON を text content、失敗は `isError: true` + `{"schema_vers
 ## 未検証の前提
 
 - kintone の実際のエラー(ステータスとコードの対応: 400/401/403/404/520、`CB_VA01`、`GAIA_*` など)(V07)
+
+## M02 の実装で確定した点
+
+- エラーの型は `src/errors.ts`(`ERROR_CODES` が仕様書 §6 の全コード。`KintoneMcpError` が `details` を運び、`ResolverError` は M03 のリゾルバーが投げる型)と `src/kintone/errors.ts`(HTTP 応答の分類)。`test/unit/error-table.test.ts` が表の全行をテストし、`ERROR_CODES` の全コードがどれかの行に現れることを検査する。
+- 分類の優先順位: 401・403・404・429 は**ステータスが先**(kintone コードが `CB_VA...` でも `argument_error` にしない)。そのあと 400・422・`CB_VA` 接頭辞(HTTP ステータスは問わない。520 + `CB_VA01` も `argument_error`)→ その他の 4xx・3xx(`api_error`、retryable でない)→ 5xx(`api_error`、retryable)。
+- **200 なのに JSON でない・空の本文**(M01 は 502 を偽装していた)は、通信失敗と同じ `api_error`(retryable)にし、`details.http_status` は実際の 200、message は「not valid JSON」と区別する。リトライはしない(読み取りでもクライアント内では 1 回。AI が `retryable` を見て呼び直す)。書き込みの本文が壊れた場合は実際には処理されている可能性があるので、`retryable` の扱いは AI に委ねる(多重作成の防止は M04 の冪等キャッシュ)。実際に起きるか・原因(IP 制限やプロキシの HTML など)は未検証(V07)。
+- エラー応答の `{code, id, message}` は `details.kintone_code` / `kintone_id` と message に載せる(長さは 500 文字まで、アクセストークンと Bearer は伏せる)。429(と 503)の `Retry-After` が整数秒なら `details.retry_after_sec`。
+- 想定外の例外のログは `tool <名前> failed unexpectedly: <例外名>: <トークンを伏せた message>`(応答には固定文だけ)。
+- ツールの入力検証は `registerTools` が自前の zod `safeParse` で行い、SDK には公開用のスキーマだけを渡す(ADR の決定どおり)。
+

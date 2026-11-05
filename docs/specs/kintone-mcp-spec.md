@@ -1,6 +1,6 @@
 # kintone Remote MCP サーバー仕様(Cloudflare Workers 版)
 
-- 状態: 計画段階(2026-11-05)。実装は M01 以降。コードはまだ書いていない。同日のユーザー決定(Access の email を利用者 ID に必須化、scope 6 つ、書き込み系の `app_ref` は完全一致のみ、`KINTONE_HOST`、小文字のエラーコード)を反映済み
+- 状態: M01(雛形・OAuth・Access)と M02(kintone クライアント・エラー・ツール登録の基盤・`max_response_tokens`・URL クエリ)を実装済み(`kintone_apps_search` の `limit` だけ動く)。M03 以降は計画。2026-11-05 のユーザー決定(Access の email を利用者 ID に必須化、scope 6 つ、書き込み系の `app_ref` は完全一致のみ、`KINTONE_HOST`、小文字のエラーコード)を反映済み
 - 置き換える対象: Go 製 CLI + MCP サーバー v0.5.6(`archive/go` ブランチ・タグ。旧仕様は `docs/specs/kintone_spec.md`。M01 で削除する)
 - 姉妹プロジェクト: `logbutler`(Backlog 用 Remote MCP。同じ構成)。この仕様の「logbutler」は `/Users/youyo/src/github.com/youyo/logbutler` を指す
 - 設計判断の理由は `docs/adr/`、実機でしか確かめられない前提は `docs/manual-verification.md`(V01〜)、進め方は `plans/kintone-mcp-roadmap.md`
@@ -248,6 +248,10 @@ GET の URL 長の上限は公式に記載なし(未検証 V11)。
 - Go 版の `{"ok":true,"data":...}` / `{"ok":false,"error":...}` を使っていたクライアントは**壊れる**(成功は `ok`/`data` の包みがなくなり、失敗は `isError: true` と新しい形になる)
 - kintone のエラー本文は `{code, id, message}`(出典: Go `kintoneapi/transport.go` の `buildAPIError`)。`message` にトークン・Authorization ヘッダーを含めない。kintone が返す `message` はそのまま載せてよい(利用者向けの文言)
 - 400 / 401 / 403 / 404 / 520 などの kintone の実際のステータスとコードの対応は未検証(V07)
+- 分類の優先順位(M02 で確定): 401・403・404・429 は**ステータスが先**(kintone コードが `CB_VA...` でも `argument_error` にしない)。次に 400・422・`CB_VA` 接頭辞(HTTP ステータスは問わない。520 + `CB_VA01` も `argument_error`)、その他の 4xx・3xx(リダイレクトは辿らない)は `api_error`(retryable でない)、5xx は `api_error`(retryable)
+- **200 なのに本文が JSON でない・空**(M01 は 502 を装っていた)は、通信失敗と同じ `api_error`(retryable)。`details.http_status` は実際の 200 で、message が「not valid JSON」。クライアント内ではリトライしない。実際に起きるかは未検証(V07)
+- `details.kintone_code` / `kintone_id` はエラー応答の本文 `{code, id, message}` から。`details.retry_after_sec` は 429(・503)の `Retry-After` が整数秒のとき。kintone の `message` は 500 文字まで、トークンと Bearer は伏せて message に載せる
+- 想定外の例外は、応答には固定文だけ。ログには「ツール名・例外名・トークンを伏せた message」(`tool <名前> failed unexpectedly: ...`)
 
 ## 7. 名前解決
 
@@ -289,10 +293,10 @@ GET の URL 長の上限は公式に記載なし(未検証 V11)。
 |---|---|---|
 | 同時リクエスト | 1(1 回のツール呼び出し内は直列) | kintone の同時接続上限はドメインあたり 100(出典: https://kintone.dev/en/tutorials/development-productivity/how-to-avoid-kintone-rest-api-limits/ 。超えると 429)。直列にして他の利用者を巻き込まない |
 | タイムアウト | 30 秒 / リクエスト | Go `kintoneapi/client.go:39` と同じ |
-| 読み取りのリトライ | 429・503 を最大 2 回。`Retry-After` があれば従う(上限 10 秒)、なければ 1 秒待つ | Go は 3 回試行・バックオフ 0.5〜5 秒(`transport.go:32-36`)。Workers の実時間を考えて logbutler に合わせる。`Retry-After` の有無は未検証 V08 |
+| 読み取りのリトライ | 429・503 だけを最大 2 回(通信失敗・その他の 5xx・本文が壊れた 200 はしない)。`Retry-After`(整数秒)があれば従う(10 秒まで。11 秒以上は待たずに打ち切り)、なし・読めない(日付形式など)は 1 秒待つ | Go は 3 回試行・バックオフ 0.5〜5 秒(`transport.go:32-36`)。Workers の実時間を考えて logbutler に合わせる。`Retry-After` の有無は未検証 V08 |
 | **書き込みのリトライ** | **しない**(429・503 も 1 回で打ち切り) | Go `transport.go:219,228`。多重作成・多重更新を避ける |
-| 呼び出し回数の上限 | 50 回 / ツール呼び出し(リトライ含む) | logbutler ADR 0003。Workers 無料プランの subrequest 上限と同じ |
-| 応答本文の読み取り上限 | 10 MiB。超えたら `response_too_large` | Go は 32 MiB(`transport.go`)。Workers のメモリを考えて縮小 |
+| 呼び出し回数の上限 | 50 回 / ツール呼び出し(リトライ含む。次の試行ができないときは待たずに `api_error`) | logbutler ADR 0003。Workers 無料プランの subrequest 上限と同じ |
+| 応答本文の読み取り上限 | 10 MiB(ちょうどは読める)。超えたら読むのをやめて `response_too_large`(`Content-Length` が超過を宣言していれば本文を読まない)。エラー応答の本文は 64 KiB まで | Go は 32 MiB(`transport.go`)。Workers のメモリを考えて縮小 |
 | ページ上限 | アプリ名検索 10 ページ × 100 件 | 下記の式 |
 
 ### 最悪ケースの呼び出し回数(論理呼び出し数。リトライは別に最大 2 回/呼び出し)
@@ -317,7 +321,7 @@ KV の読み書きが subrequest の上限に数えられるかは未検証(V12)
 
 ### URL クエリ(logbutler ADR 0008)
 
-`/mcp?toolsets=app,record&read_only=true`。`toolsets` は `app` `record`(既定 `all`)、`read_only=true` で書き込み・破壊的ツールを隠す。不正値・綴り違いのキー(`readonly` など)・公開ツールが 0 個になる組み合わせは 400 `{"error":"invalid_query","error_description":"..."}`。
+`/mcp?toolsets=app,record&read_only=true`。`toolsets` は `app` `record`(既定 `all`)、`read_only=true` で書き込み・破壊的ツールを隠す。不正値・綴り違いのキー(`readonly` `toolset` など `read` / `tool` で始まる未知のキー)・公開ツールが 0 個になる組み合わせは 400 `{"error":"invalid_query","error_description":"..."}`(GET / POST / DELETE のどれでも。トークンの検証のあと)。無関係なキー(`x=1` など)は無視する。M02 の実ツールは `kintone_apps_search`(toolset `app`)だけなので `?toolsets=record` は 0 個で 400(M03 で `kintone_records_query` が入ると通る)。
 
 ## 9. 設定項目(ADR 0003・0004・0009・0010)
 

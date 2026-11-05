@@ -65,7 +65,7 @@ src/
 test/
   unit/    errors / error-table / kintone-client / response-limit / mcp-registry / tool-config / tools-list-snapshot / tool-apps-search / mcp-api-handler
   e2e/     mcp-tools.test.ts(新規)、verify-oauth.test.ts(クエリの差し替え)
-  helpers/ fake-kintone-client.ts(ツールのテスト用の KintoneClient 偽物)、mock-fetch.ts は変更なし
+  helpers/ fake-kintone-client.ts(ツールのテスト用の KintoneClient 偽物)、mock-fetch.ts(呼び出しの記録に signal / redirect を追加。既存の使い方は変えない)
   snapshots/tools-list.json
 mise.toml                   test:update-snapshots の説明(「M02 から有効」を外す)。コマンドは M01 から入っている
 ```
@@ -97,7 +97,7 @@ mise.toml                   test:update-snapshots の説明(「M02 から有効�
 
 ### 5. tools/list のスナップショット
 - 実 `ALL_TOOLS` に対する `tools/list`(`createMcpHandler` 経由)の結果を `test/snapshots/tools-list.json` に保存(`toMatchFileSnapshot`)。ツールを足す・引数を変えるとこのファイルの差分としてレビューできる
-- 更新: `mise run test:update-snapshots`(`vitest run --project unit --update test/unit/tools-list-snapshot.test.ts`)。CI では更新しない(差分があれば失敗)
+- 更新: `mise run test:update-snapshots`(`vitest run test/unit/tools-list-snapshot.test.ts --project unit --update`。`--update` の後ろにファイルを置くとファイル指定が効かず unit 全体が走るので、この順にする)。CI(`CI=1`)では更新しない(差分があれば失敗)
 - 追加の固定: 全ツール名が `kintone_` で始まる、ReadOnly だけが `max_response_tokens` を持つ(M03 / M04 で増えたツールにも効く)
 
 ### 6. 環境変数・バインディング
@@ -178,3 +178,17 @@ mise.toml                   test:update-snapshots の説明(「M02 から有効�
 - `docs/adr/0006`・`0008`・`0009` を「提案」から「採用(M02)」に更新(実装で変えた点を追記)、仕様書(状態・§6・§8 の補足)
 - `docs/manual-verification.md` の更新(M02 で増えた前提)
 - ロードマップの M02 を `[x]` にする。CLAUDE.md の構成・出力規約・mise タスクの節を更新
+
+## 実装後の記録(計画との差分)
+
+計画から外れた点と、実装中に決めた細部。ADR 0006 / 0008 / 0009 と仕様書の §6・§8 にも反映した。
+
+- **`mise run test:update-snapshots` のコマンドの順序**: M01 の `--update test/unit/...` はファイル指定が効かず unit 全体が走ったため、`vitest run test/unit/tools-list-snapshot.test.ts --project unit --update` に直した(説明文の「M02 から有効」も外した)。
+- **`fetch` を中断シグナルと競合させる**: 計画は「本文の読み取りも中断に反応する」だけだったが、モックの `fetch` は `signal` に応じないため、`fetch` 自体も `AbortSignal` と競合させてタイムアウトを確実にした(本物の workerd でも害はない)。
+- **上限に達したらリトライの待機をしない**: 呼び出し回数の上限は「次の試行を始めるとき」に見る計画だったが、待ったあとに上限エラーになるのは無駄なので、待機の前に判定する。
+- **`Retry-After` は 429 だけでなく 503 でも `details.retry_after_sec` に載せる**(読めたときだけ)。
+- **kintone の `id` にもトークンの伏せを適用**(`code` `id` `message` のすべて)。
+- **既存テストの変更**: `tool-apps-search.test.ts` の「公開スキーマの引数」は `["limit"]` から `["limit", "max_response_tokens"]` に変えた(読み取りツールへの自動付与という M02 の仕様変更によるもので、検証を弱めたのではなく期待値を仕様に合わせた)。`kintone-client.test.ts` は M01 の全ケースを残して拡張した(`make` を、待機を記録する `setup` に置き換え)。
+- **M02 の実 `ALL_TOOLS` では `?toolsets=record` が 400**(公開ツールが 0 個)。M03 で `kintone_records_query` が入ったら `mcp-api-handler.test.ts` の「公開ツールが 0 個になる組み合わせ」のケースは別の組み合わせ(例: `toolsets=record&read_only=true` が書き込みしかない場合)に変える。
+- **依存の追加なし**。
+
