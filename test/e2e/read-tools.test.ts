@@ -165,7 +165,10 @@ describe("E2E: tools/list", () => {
     const { connect } = await setup();
     const token = await connect();
     const tools = (await readRpc(await mcpRequest(token, "tools/list"))).result?.tools ?? [];
-    for (const t of tools) {
+    // 書き込み・破壊的ツール(M04)は max_response_tokens を持たないので、読み取りのツールだけを見る。
+    const readTools = tools.filter((t) => t.annotations?.readOnlyHint === true);
+    expect(readTools).toHaveLength(3);
+    for (const t of readTools) {
       const props = (t.inputSchema as { properties: Record<string, { minimum?: number }> })
         .properties;
       expect(props.max_response_tokens?.minimum, t.name).toBe(0);

@@ -2,12 +2,17 @@
  * ツール登録の仕組み(ADR 0009)。1 ツール = 名前・説明・入力スキーマ(zod)・区分・toolset・ハンドラ。
  * M03 以降のツールは `defineTool` で定義し、`tools/index.ts` の `ALL_TOOLS` に足すだけで載る。
  */
-import type { McpServer, StandardSchemaWithJSON } from "@modelcontextprotocol/server";
+import type {
+  McpServer,
+  ServerContext,
+  StandardSchemaWithJSON,
+} from "@modelcontextprotocol/server";
 import type { z } from "zod";
 import { ArgumentError, KintoneMcpError, toErrorEnvelope } from "../errors";
 import { type KintoneClient, KintoneUnauthorizedError } from "../kintone/client";
 import { createResolverCache, type GrantRef, type ResolverCache } from "../resolver/cache";
 import { createResolver, type Resolver } from "../resolver/resolver";
+import { explicitKeyFrom, withIdempotency } from "./idempotency";
 import {
   assertWithinResponseLimit,
   maxResponseTokensShape,
@@ -90,6 +95,7 @@ export interface ToolDefinitionInput<S extends z.ZodObject> {
   /**
    * このツール 1 回の呼び出しで許す kintone API の回数(リトライ含む)。省略時はクライアントの既定(50)。
    * 読み取りツールは最悪ケースの式(`src/resolver/budget.ts` の `readBudget(論理回数)` = 論理 × 3)で明示する(ADR 0008)。
+   * 書き込みツールは解決の GET(読み取り)が × 3、書き込み本体が × 1(`writeBudget(読み取りの論理回数)`)。
    */
   maxApiCalls?: number;
   /** 応答サイズの上限(引数 max_response_tokens)を付けるか。ReadOnly の既定は付ける。書き込み系には付けない。 */
@@ -270,6 +276,13 @@ function advertiseOnly(schema: z.ZodObject): StandardSchemaWithJSON {
   } as unknown as StandardSchemaWithJSON;
 }
 
+/** 冪等キャッシュの明示キー(引数 `idempotency_key`)を、自前の検証の前に引数から外す。 */
+function withoutIdempotencyKey(rawArgs: unknown): unknown {
+  if (typeof rawArgs !== "object" || rawArgs === null || Array.isArray(rawArgs)) return rawArgs;
+  const { idempotency_key: _omitted, ...rest } = rawArgs as Record<string, unknown>;
+  return rest;
+}
+
 /**
  * 想定外の例外(generic_error にするもの)を調べられるよう、ツール名・例外名・message をログに残す。
  * 応答には出さない。message にはトークンが混ざりうるので、クライアントが知るトークンと Bearer を伏せる。
@@ -305,10 +318,23 @@ export function registerTools(
         inputSchema: advertiseOnly(tool.inputSchema),
         annotations: tool.annotations,
       },
-      async (args: unknown) => {
-        let client: KintoneClient | undefined;
+      async (args: unknown, ctx?: ServerContext) => {
+        // catch(ログ用の redact)から見えるよう、クロージャで作るクライアントは入れ物に置く。
+        const state: { client?: KintoneClient } = {};
         try {
-          const parsed = tool.inputSchema.safeParse(args ?? {});
+          // WriteNonIdempotent(record_create)は冪等キャッシュで守る。明示キーは検証の前に取り出し、引数から外す
+          // (`idempotency_key` は inputSchema に宣言しない。_meta.idempotency_key が優先)。
+          const idempotent = tool.category === "WriteNonIdempotent";
+          let rawArgs: unknown = args ?? {};
+          let explicit: string | undefined;
+          if (idempotent) {
+            explicit = explicitKeyFrom(
+              ctx?.mcpReq?._meta as Record<string, unknown> | undefined,
+              rawArgs,
+            );
+            rawArgs = withoutIdempotencyKey(rawArgs);
+          }
+          const parsed = tool.inputSchema.safeParse(rawArgs);
           if (!parsed.success) throw new ArgumentError(describeIssues(parsed.error));
           // 上限の引数は kintone を呼ぶ前に検証する(負の値で API を無駄に叩かない)。
           const responseLimit = tool.responseLimit
@@ -316,18 +342,31 @@ export function registerTools(
                 (parsed.data as { max_response_tokens?: number }).max_response_tokens,
               )
             : undefined;
-          client = deps.getClient(
-            tool.maxApiCalls === undefined ? {} : { maxApiCalls: tool.maxApiCalls },
-          );
-          const cache = createResolverCache(deps.kv, deps.grant);
-          const resolver = createResolver({ client, cache });
-          const result = await tool.handler(parsed.data, { client, resolver, cache });
-          const text = JSON.stringify(result ?? null);
-          if (responseLimit !== undefined) assertWithinResponseLimit(text, responseLimit);
+          const execute = async (): Promise<string> => {
+            const client = deps.getClient(
+              tool.maxApiCalls === undefined ? {} : { maxApiCalls: tool.maxApiCalls },
+            );
+            state.client = client;
+            const cache = createResolverCache(deps.kv, deps.grant);
+            const resolver = createResolver({ client, cache });
+            const result = await tool.handler(parsed.data, { client, resolver, cache });
+            const text = JSON.stringify(result ?? null);
+            if (responseLimit !== undefined) assertWithinResponseLimit(text, responseLimit);
+            return text;
+          };
+          // KV か grant が分からないときは冪等キャッシュを使わず、通常の書き込みとして実行する。
+          const text =
+            idempotent && deps.kv && deps.grant
+              ? await withIdempotency(
+                  { kv: deps.kv, grant: deps.grant },
+                  { toolName: tool.name, explicit, args: parsed.data },
+                  execute,
+                )
+              : await execute();
           return textResult(text);
         } catch (e) {
           if (e instanceof KintoneUnauthorizedError) deps.onKintoneUnauthorized();
-          if (!(e instanceof KintoneMcpError)) logUnexpected(tool.name, e, client);
+          if (!(e instanceof KintoneMcpError)) logUnexpected(tool.name, e, state.client);
           return textResult(JSON.stringify(toErrorEnvelope(e)), true);
         }
       },

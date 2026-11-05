@@ -26,6 +26,21 @@ export const appTargetShape = {
     ),
 };
 
+/**
+ * 書き込みツール(record_create / update / delete)の `app` / `app_ref`。`app_ref` は完全一致だけで解決する
+ * (部分一致のみなら `resolver_app_exact_match_required`。ADR 0007)。
+ */
+export const writeAppTargetShape = {
+  app: appTargetShape.app,
+  app_ref: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "App reference: app ID, app code, or app name. Write operations accept an EXACT match only (a partial name match is never used: it fails with resolver_app_exact_match_required and details.candidates; pass a candidate ID as app). Specify exactly one of app or app_ref (either one, not both).",
+    ),
+};
+
 export interface AppTargetArgs {
   app?: number | undefined;
   app_ref?: string | undefined;

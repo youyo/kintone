@@ -160,7 +160,14 @@ describe("tools/list", () => {
   });
 
   it("max_response_tokens の公開スキーマに minimum: 0 が出る(全ての読み取りツール)", async () => {
-    for (const t of await listTools()) {
+    // 書き込み・破壊的ツール(M04)は max_response_tokens を持たない(次のテスト)ので、読み取りのツールだけを見る。
+    const readTools = (await listTools()).filter((t) => t.annotations?.readOnlyHint === true);
+    expect(readTools.map((t) => t.name)).toEqual([
+      "kintone_apps_search",
+      "kintone_app_describe",
+      "kintone_records_query",
+    ]);
+    for (const t of readTools) {
       const props = (t.inputSchema as { properties: Record<string, { minimum?: number }> })
         .properties;
       expect(props.max_response_tokens?.minimum, t.name).toBe(0);
