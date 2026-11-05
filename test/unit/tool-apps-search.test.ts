@@ -5,7 +5,9 @@ import {
   KintoneUnauthorizedError,
 } from "../../src/kintone/client";
 import { createMcpServer } from "../../src/mcp/server";
+import { appsSearch } from "../../src/mcp/tools/apps-search";
 import { fakeKintoneClient } from "../helpers/fake-kintone-client";
+import { fakeKv } from "../helpers/fake-kv";
 import { rpcTo } from "../helpers/mcp";
 import { firstText } from "../helpers/oauth-flow";
 
@@ -14,7 +16,10 @@ interface Recorder {
   unauthorized: number;
 }
 
-function setup(get: KintoneClient["get"]) {
+function setup(
+  get: KintoneClient["get"],
+  extra: { kv?: KVNamespace; grant?: { userId: string; grantId: string } } = {},
+) {
   const rec: Recorder = { calls: [], unauthorized: 0 };
   const client = fakeKintoneClient({
     get: async (path, query) => {
@@ -24,6 +29,9 @@ function setup(get: KintoneClient["get"]) {
   });
   const factory = () =>
     createMcpServer({
+      // このファイルは kintone_apps_search だけを対象にする(ほかのツールは各自のテストで確かめる)。
+      tools: [appsSearch],
+      ...extra,
       getClient: () => client,
       onKintoneUnauthorized: () => {
         rec.unauthorized++;
@@ -45,7 +53,16 @@ describe("MCP server (kintone_apps_search)", () => {
     expect(JSON.stringify(tools[0]?.inputSchema)).toContain("limit");
     const schema = tools[0]?.inputSchema as { properties: Record<string, unknown> };
     // 読み取りツールには max_response_tokens が自動で付く(M02)。
-    expect(Object.keys(schema.properties)).toEqual(["limit", "max_response_tokens"]);
+    // M03 で仕様書 §5.1 の引数に拡張(ids / codes / name / space_ids / offset を追加)。
+    expect(Object.keys(schema.properties)).toEqual([
+      "ids",
+      "codes",
+      "name",
+      "space_ids",
+      "limit",
+      "offset",
+      "max_response_tokens",
+    ]);
   });
 
   it("tools/call は GET /k/v1/apps.json を limit つきで呼び、kintone の生データを JSON text で返す", async () => {
@@ -89,7 +106,8 @@ describe("MCP server (kintone_apps_search)", () => {
     const { rec, factory } = setup(async () => APPS);
     const { result } = await rpcTo(factory, "tools/call", {
       name: "kintone_apps_search",
-      arguments: { name: "顧客" },
+      // `name` は M03 で有効な引数になったので、実在しない引数名を使う。
+      arguments: { nope: "顧客" },
     });
     expect(result?.isError).toBe(true);
     expect(JSON.parse(firstText({ result })).error.code).toBe("argument_error");
@@ -191,5 +209,98 @@ describe("kintone_apps_search の max_response_tokens(読み取りツールの�
     });
     expect(JSON.parse(firstText({ result })).error.code).toBe("argument_error");
     expect(rec.calls).toHaveLength(0);
+  });
+});
+
+describe("kintone_apps_search の引数(仕様書 §5.1。M03 で拡張)", () => {
+  const callWith = async (args: Record<string, unknown>) => {
+    const s = setup(async () => APPS);
+    const { result } = await rpcTo(s.factory, "tools/call", {
+      name: "kintone_apps_search",
+      arguments: args,
+    });
+    return { ...s, result };
+  };
+
+  it("ids / codes / name / space_ids / limit / offset を kintone のクエリ(ids / codes / name / spaceIds / limit / offset)にして 1 回だけ呼ぶ", async () => {
+    const { rec, result } = await callWith({
+      ids: [1, 2],
+      codes: ["CRM", "TASK"],
+      name: "顧客",
+      space_ids: [5],
+      limit: 20,
+      offset: 40,
+    });
+    expect(result?.isError).toBeFalsy();
+    expect(rec.calls).toEqual([
+      {
+        path: "/k/v1/apps.json",
+        query: {
+          ids: [1, 2],
+          codes: ["CRM", "TASK"],
+          name: "顧客",
+          spaceIds: [5],
+          limit: 20,
+          offset: 40,
+        },
+      },
+    ]);
+    expect(JSON.parse(firstText({ result }))).toEqual(APPS);
+  });
+
+  it("offset: 0 も有効(0 以上)", async () => {
+    const { rec, result } = await callWith({ offset: 0 });
+    expect(result?.isError).toBeFalsy();
+    expect(rec.calls[0]?.query).toEqual({ offset: 0 });
+  });
+
+  it("指定しなかった引数は kintone へ送らない", async () => {
+    const { rec } = await callWith({ name: "顧客" });
+    expect(rec.calls[0]?.query).toEqual({ name: "顧客" });
+  });
+
+  it("配列の上限(100 件)ちょうどは通る", async () => {
+    const ids = Array.from({ length: 100 }, (_, i) => i + 1);
+    const codes = ids.map((i) => `C${i}`);
+    const { rec, result } = await callWith({ ids, codes, space_ids: ids });
+    expect(result?.isError).toBeFalsy();
+    expect(rec.calls).toHaveLength(1);
+  });
+
+  it.each([
+    ["ids が 101 件", { ids: Array.from({ length: 101 }, (_, i) => i + 1) }],
+    ["codes が 101 件", { codes: Array.from({ length: 101 }, (_, i) => `C${i}`) }],
+    ["space_ids が 101 件", { space_ids: Array.from({ length: 101 }, (_, i) => i + 1) }],
+    ["ids に 0", { ids: [0] }],
+    ["ids に負", { ids: [-1] }],
+    ["ids に小数", { ids: [1.5] }],
+    ["ids が文字列", { ids: "1" }],
+    ["codes に空文字", { codes: [""] }],
+    ["codes に 65 文字", { codes: ["a".repeat(65)] }],
+    ["name が 65 文字", { name: "a".repeat(65) }],
+    ["name が数値", { name: 1 }],
+    ["space_ids に 0", { space_ids: [0] }],
+    ["offset が負", { offset: -1 }],
+    ["offset が小数", { offset: 1.5 }],
+    ["offset が文字列", { offset: "0" }],
+  ])("%s は argument_error で kintone を呼ばない", async (_n, args) => {
+    const { rec, result } = await callWith(args);
+    expect(result?.isError).toBe(true);
+    expect(JSON.parse(firstText({ result })).error.code).toBe("argument_error");
+    expect(rec.calls).toHaveLength(0);
+  });
+
+  it("codes は 64 文字ちょうど、name は 64 文字ちょうどが通る", async () => {
+    const { result } = await callWith({ codes: ["a".repeat(64)], name: "あ".repeat(64) });
+    expect(result?.isError).toBeFalsy();
+  });
+
+  it("キャッシュ(KV)を読まず、書かない(名前解決を使わない)", async () => {
+    const f = fakeKv();
+    const { factory } = setup(async () => APPS, { kv: f.kv, grant: { userId: "u", grantId: "g" } });
+    await rpcTo(factory, "tools/call", { name: "kintone_apps_search", arguments: { name: "顧客" } });
+    expect(f.gets).toHaveLength(0);
+    expect(f.puts).toHaveLength(0);
+    expect(f.deletes).toHaveLength(0);
   });
 });

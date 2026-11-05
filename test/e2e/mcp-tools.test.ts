@@ -43,20 +43,24 @@ const callSearch = (token: string, args: Record<string, unknown> = {}, url = MCP
   mcpRequest(token, "tools/call", { name: "kintone_apps_search", arguments: args }, url);
 
 describe("E2E: /mcp の URL クエリ(read_only / toolsets)", () => {
-  it.each(["?read_only=true", "?toolsets=app", "?toolsets=all&read_only=false", "?x=1"])(
-    "%s で tools/list と tools/call が通る",
-    async (query) => {
-      const { token } = await connect();
-      const list = await mcpRequest(token, "tools/list", {}, `${MCP_URL}${query}`);
-      expect(list.status).toBe(200);
-      expect(((await readRpc(list)).result?.tools ?? []).map((t) => t.name)).toEqual([
-        "kintone_apps_search",
-      ]);
+  const READ_TOOLS = ["kintone_apps_search", "kintone_app_describe", "kintone_records_query"];
+  it.each([
+    ["?read_only=true", READ_TOOLS],
+    ["?toolsets=app", ["kintone_apps_search", "kintone_app_describe"]],
+    ["?toolsets=record", ["kintone_records_query"]],
+    ["?toolsets=all&read_only=false", READ_TOOLS],
+    ["?x=1", READ_TOOLS],
+  ])("%s で tools/list と tools/call が通る(M03 で公開ツールは 3 つ)", async (query, expected) => {
+    const { token } = await connect();
+    const list = await mcpRequest(token, "tools/list", {}, `${MCP_URL}${query}`);
+    expect(list.status).toBe(200);
+    expect(((await readRpc(list)).result?.tools ?? []).map((t) => t.name)).toEqual(expected);
+    if (expected.includes("kintone_apps_search")) {
       const call = await callSearch(token, {}, `${MCP_URL}${query}`);
       expect(call.status).toBe(200);
       expect((await readRpc(call)).result?.isError).toBeFalsy();
-    },
-  );
+    }
+  });
 
   it.each([
     ["未知の toolset", "?toolsets=nope"],

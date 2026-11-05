@@ -4,6 +4,7 @@
  * 意図した変更のときだけ `mise run test:update-snapshots` で更新し、差分を確認してからコミットする。
  */
 import { describe, expect, it } from "vitest";
+import type { Toolset } from "../../src/mcp/registry";
 import { createMcpServer } from "../../src/mcp/server";
 import { ALL_TOOLS } from "../../src/mcp/tools";
 import { fakeKintoneClient } from "../helpers/fake-kintone-client";
@@ -32,6 +33,61 @@ describe("tools/list", () => {
     expect(names).toEqual(ALL_TOOLS.map((t) => t.name));
     expect(new Set(names).size).toBe(names.length);
     for (const name of names) expect(name).toMatch(/^kintone_[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/);
+  });
+
+  it("M03 の 3 つの読み取りツールが公開される(app_describe と records_query は app / app_ref を持つ)", async () => {
+    const tools = await listTools();
+    expect(tools.map((t) => t.name)).toEqual([
+      "kintone_apps_search",
+      "kintone_app_describe",
+      "kintone_records_query",
+    ]);
+    const props = (name: string) =>
+      (tools.find((t) => t.name === name)?.inputSchema as { properties: Record<string, any> })
+        .properties;
+    expect(Object.keys(props("kintone_app_describe"))).toEqual([
+      "app",
+      "app_ref",
+      "lang",
+      "max_response_tokens",
+    ]);
+    expect(Object.keys(props("kintone_records_query"))).toEqual([
+      "app",
+      "app_ref",
+      "query",
+      "fields",
+      "total_count",
+      "max_response_tokens",
+    ]);
+    // app / app_ref の排他(どちらか 1 つ)が説明から読める。
+    for (const name of ["kintone_app_describe", "kintone_records_query"]) {
+      expect(props(name).app?.description, name).toMatch(/exactly one|either/i);
+      expect(props(name).app_ref?.description, name).toMatch(/exactly one|either/i);
+    }
+  });
+
+  it("toolset: app = apps_search + app_describe、record = records_query", async () => {
+    const names = async (toolset: Toolset) => {
+      const { result } = await rpcTo(
+        () =>
+          createMcpServer({
+            ...deps,
+            config: { toolsets: new Set<Toolset>([toolset]), readOnly: false },
+          }),
+        "tools/list",
+      );
+      return (result?.tools ?? []).map((t) => t.name);
+    };
+    expect(await names("app")).toEqual(["kintone_apps_search", "kintone_app_describe"]);
+    expect(await names("record")).toEqual(["kintone_records_query"]);
+  });
+
+  it("max_response_tokens の公開スキーマに minimum: 0 が出る(全ての読み取りツール)", async () => {
+    for (const t of await listTools()) {
+      const props = (t.inputSchema as { properties: Record<string, { minimum?: number }> })
+        .properties;
+      expect(props.max_response_tokens?.minimum, t.name).toBe(0);
+    }
   });
 
   it("max_response_tokens は読み取り専用のツールだけが持つ(書き込み・破壊的は持たない)", async () => {
