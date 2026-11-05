@@ -35,8 +35,9 @@ export function queryFromSearchParams(params: URLSearchParams): Query {
   for (const [key, value] of params) {
     const m = /^(.+)\[(\d+)\]$/.exec(key);
     if (m?.[1]) {
-      const list = (out[m[1]] ??= []) as string[];
+      const list = (out[m[1]] as string[] | undefined) ?? [];
       list[Number(m[2])] = value;
+      out[m[1]] = list;
     } else {
       out[key] = value;
     }

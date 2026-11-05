@@ -42,9 +42,12 @@ describe("tools/list", () => {
       "kintone_app_describe",
       "kintone_records_query",
     ]);
-    const props = (name: string) =>
-      (tools.find((t) => t.name === name)?.inputSchema as { properties: Record<string, any> })
+    const props = (name: string): Record<string, { description?: string }> => {
+      const tool = tools.find((t) => t.name === name);
+      if (!tool) throw new Error(`tool not found: ${name}`);
+      return (tool.inputSchema as { properties: Record<string, { description?: string }> })
         .properties;
+    };
     expect(Object.keys(props("kintone_app_describe"))).toEqual([
       "app",
       "app_ref",

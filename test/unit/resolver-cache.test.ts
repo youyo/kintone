@@ -82,10 +82,16 @@ describe("アプリのキャッシュ", () => {
     await createResolverCache(f.kv, GRANT).putApps("code", "x", APPS);
     expect(await createResolverCache(f.kv, GRANT).getApps("name", "x")).toBeUndefined();
     expect(
-      await createResolverCache(f.kv, { userId: "user-a", grantId: "grant-2" }).getApps("code", "x"),
+      await createResolverCache(f.kv, { userId: "user-a", grantId: "grant-2" }).getApps(
+        "code",
+        "x",
+      ),
     ).toBeUndefined();
     expect(
-      await createResolverCache(f.kv, { userId: "user-b", grantId: "grant-1" }).getApps("code", "x"),
+      await createResolverCache(f.kv, { userId: "user-b", grantId: "grant-1" }).getApps(
+        "code",
+        "x",
+      ),
     ).toBeUndefined();
   });
 

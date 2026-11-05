@@ -6,6 +6,8 @@ import type { McpServer, StandardSchemaWithJSON } from "@modelcontextprotocol/se
 import type { z } from "zod";
 import { ArgumentError, KintoneMcpError, toErrorEnvelope } from "../errors";
 import { type KintoneClient, KintoneUnauthorizedError } from "../kintone/client";
+import { createResolverCache, type GrantRef, type ResolverCache } from "../resolver/cache";
+import { createResolver, type Resolver } from "../resolver/resolver";
 import {
   assertWithinResponseLimit,
   maxResponseTokensShape,
@@ -65,10 +67,14 @@ export function annotationsFor(category: ToolCategory, title: string): ToolAnnot
   }
 }
 
-/** ツールのハンドラに渡すもの。M03 でリゾルバー・キャッシュを足す。 */
+/** ツールのハンドラに渡すもの。 */
 export interface ToolContext {
   /** このツール呼び出し専用の kintone クライアント(直列化・呼び出し回数上限はこの単位)。 */
   client: KintoneClient;
+  /** アプリ・フィールドの名前解決(このツール呼び出し専用。キャッシュは grant 単位の KV。仕様書 §7・§10)。 */
+  resolver: Resolver;
+  /** 名前解決のキャッシュ(`kintone_app_describe` がフィールド定義を書き込むために使う)。KV・grant がなければ何もしない。 */
+  cache: ResolverCache;
 }
 
 export interface ToolDefinitionInput<S extends z.ZodObject> {
@@ -83,7 +89,7 @@ export interface ToolDefinitionInput<S extends z.ZodObject> {
   inputSchema: S;
   /**
    * このツール 1 回の呼び出しで許す kintone API の回数(リトライ含む)。省略時はクライアントの既定(50)。
-   * 既定のままにする(ADR 0008。最悪ケースは 13 回 × 3 = 39 で 50 に収まる)。
+   * 読み取りツールは最悪ケースの式(`src/resolver/budget.ts` の `readBudget(論理回数)` = 論理 × 3)で明示する(ADR 0008)。
    */
   maxApiCalls?: number;
   /** 応答サイズの上限(引数 max_response_tokens)を付けるか。ReadOnly の既定は付ける。書き込み系には付けない。 */
@@ -236,6 +242,10 @@ export interface RegisterDeps {
   getClient: (options: { maxApiCalls?: number }) => KintoneClient;
   /** kintone が 401 を返したとき(MCP の応答も HTTP 401 にするための合図)。 */
   onKintoneUnauthorized: () => void;
+  /** 名前解決のキャッシュの置き場(OAUTH_KV)。省略時はキャッシュなし。 */
+  kv?: KVNamespace;
+  /** キャッシュのキーに使う grant(MCP トークンの `<userId>:<grantId>`)。省略時(分からないとき)はキャッシュなし。 */
+  grant?: GrantRef;
 }
 
 function textResult(text: string, isError = false) {
@@ -309,7 +319,9 @@ export function registerTools(
           client = deps.getClient(
             tool.maxApiCalls === undefined ? {} : { maxApiCalls: tool.maxApiCalls },
           );
-          const result = await tool.handler(parsed.data, { client });
+          const cache = createResolverCache(deps.kv, deps.grant);
+          const resolver = createResolver({ client, cache });
+          const result = await tool.handler(parsed.data, { client, resolver, cache });
           const text = JSON.stringify(result ?? null);
           if (responseLimit !== undefined) assertWithinResponseLimit(text, responseLimit);
           return textResult(text);

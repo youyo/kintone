@@ -3,8 +3,8 @@ import type { ResolverError } from "../../src/errors";
 import { KintoneApiError, type Query } from "../../src/kintone/client";
 import { appCacheKey, createResolverCache, fieldsCacheKey } from "../../src/resolver/cache";
 import { createResolver } from "../../src/resolver/resolver";
-import { type AppRow, fieldsResponse, listApps, manyApps } from "../helpers/fake-kintone-data";
 import { fakeKintoneClient } from "../helpers/fake-kintone-client";
+import { type AppRow, fieldsResponse, listApps, manyApps } from "../helpers/fake-kintone-data";
 import { fakeKv } from "../helpers/fake-kv";
 
 afterEach(() => vi.restoreAllMocks());
@@ -47,7 +47,10 @@ describe("キャッシュのヒット", () => {
     expect(state.calls).toHaveLength(2); // コード + 名前
     // コードの検索結果(空)も名前の検索結果もキャッシュされる。
     expect(f.puts.map((p) => p.key).sort()).toEqual(
-      [await appCacheKey(GRANT, "code", "顧客管理"), await appCacheKey(GRANT, "name", "顧客管理")].sort(),
+      [
+        await appCacheKey(GRANT, "code", "顧客管理"),
+        await appCacheKey(GRANT, "name", "顧客管理"),
+      ].sort(),
     );
     for (const p of f.puts) expect(p.options).toEqual({ expirationTtl: 600 });
 
@@ -195,7 +198,10 @@ describe("not_found の取り直し(1 回だけ。読んだ段階だけ)", () =>
 
   it("フィールド: キャッシュ由来の not_found は 1 回だけ取り直す", async () => {
     const { f, state, mk } = setup({ apps: [] });
-    f.store.set(fieldsCacheKey(GRANT, 12), JSON.stringify([{ code: "old", label: "旧", type: "NUMBER" }]));
+    f.store.set(
+      fieldsCacheKey(GRANT, 12),
+      JSON.stringify([{ code: "old", label: "旧", type: "NUMBER" }]),
+    );
     const code = await mk().resolveField(12, "金額", { mode: "read" });
     expect(code).toBe("amount");
     expect(state.calls).toHaveLength(1);
@@ -215,7 +221,10 @@ describe("not_found の取り直し(1 回だけ。読んだ段階だけ)", () =>
 
   it("フィールド: キャッシュ済みの定義で解決でき、API を呼ばない。取り直しても無ければ not_found", async () => {
     const { f, state, mk } = setup({ apps: [] });
-    f.store.set(fieldsCacheKey(GRANT, 12), JSON.stringify([{ code: "amount", label: "金額", type: "NUMBER" }]));
+    f.store.set(
+      fieldsCacheKey(GRANT, 12),
+      JSON.stringify([{ code: "amount", label: "金額", type: "NUMBER" }]),
+    );
     expect(await mk().resolveField(12, "金額", { mode: "write" })).toBe("amount");
     expect(state.calls).toHaveLength(0);
     const e = await failure(mk().resolveField(12, "存在しない", { mode: "read" }));

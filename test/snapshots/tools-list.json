@@ -2,21 +2,62 @@
   {
     "name": "kintone_apps_search",
     "title": "アプリ検索",
-    "description": "Search kintone apps the authenticated user can see (GET /k/v1/apps.json). Returns the raw kintone response: {apps:[{appId, code, name, ...}]}.",
+    "description": "Search kintone apps the authenticated user can see (GET /k/v1/apps.json). Filter by ids, codes, name (partial match) or space_ids; returns one page (use offset for the next). Returns the raw kintone response: {apps:[{appId, code, name, ...}]}. Always reads the latest data (no cache).",
     "inputSchema": {
       "type": "object",
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "ids": {
+          "description": "App IDs to match (up to 100).",
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "codes": {
+          "description": "App codes to match exactly (case-sensitive; 1-64 characters each, up to 100).",
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "name": {
+          "description": "App name partial match (case-insensitive, up to 64 characters).",
+          "type": "string",
+          "maxLength": 64
+        },
+        "space_ids": {
+          "description": "Space IDs the apps belong to (up to 100).",
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
         "limit": {
           "description": "Number of apps to return (1-100). Default 100.",
           "type": "integer",
           "minimum": 1,
           "maximum": 100
         },
+        "offset": {
+          "description": "Number of apps to skip (0 or greater). Default 0. Call again with offset to get the next page.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "max_response_tokens": {
+          "minimum": 0,
           "description": "Safety limit on the estimated response size in tokens (default: 50000, 0 disables). If exceeded, the call fails with response_too_large instead of returning a truncated result.",
           "type": "integer",
-          "minimum": -9007199254740991,
           "maximum": 9007199254740991
         }
       },
@@ -24,6 +65,106 @@
     },
     "annotations": {
       "title": "アプリ検索",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "kintone_app_describe",
+    "title": "アプリ定義の取得",
+    "description": "Describe a kintone app: its basic info and its field definitions (GET /k/v1/app.json + GET /k/v1/app/form/fields.json). Specify the app with exactly one of app (ID) or app_ref (ID, code or name). Returns {app:{app_id, code, name, description, space_id?, ...}, fields:{<field code>:{...raw kintone definition}}, revision?}. Always reads the latest data (never uses the cache) and refreshes the field cache used by name resolution.",
+    "inputSchema": {
+      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "app": {
+          "description": "kintone app ID (positive integer). Specify exactly one of app or app_ref (either one, not both).",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "app_ref": {
+          "description": "App reference: app ID, app code, or app name (exact match first, then partial match when it is unique). Specify exactly one of app or app_ref (either one, not both).",
+          "type": "string",
+          "minLength": 1
+        },
+        "lang": {
+          "description": "Display language of the field labels: ja, en, zh, user or default.",
+          "type": "string",
+          "enum": [
+            "ja",
+            "en",
+            "zh",
+            "user",
+            "default"
+          ]
+        },
+        "max_response_tokens": {
+          "minimum": 0,
+          "description": "Safety limit on the estimated response size in tokens (default: 50000, 0 disables). If exceeded, the call fails with response_too_large instead of returning a truncated result.",
+          "type": "integer",
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "アプリ定義の取得",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "kintone_records_query",
+    "title": "レコード検索",
+    "description": "Query records of a kintone app (GET /k/v1/records.json). Specify the app with exactly one of app (ID) or app_ref (ID, code or name). Returns {records:[...raw kintone records], total_count?:number}. One request per call, no automatic paging: put limit/offset in query to fetch more. Large results fail with response_too_large; narrow with fields, a smaller limit or a tighter query.",
+    "inputSchema": {
+      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "app": {
+          "description": "kintone app ID (positive integer). Specify exactly one of app or app_ref (either one, not both).",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "app_ref": {
+          "description": "App reference: app ID, app code, or app name (exact match first, then partial match when it is unique). Specify exactly one of app or app_ref (either one, not both).",
+          "type": "string",
+          "minLength": 1
+        },
+        "query": {
+          "description": "kintone query language, e.g. `status = \"Open\" order by $id desc limit 50 offset 0`. Put limit (max 500, default 100) and offset (max 10,000) in the query.",
+          "type": "string"
+        },
+        "fields": {
+          "description": "Field codes to return (up to 100). Omit to return all fields.",
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "total_count": {
+          "description": "true to also return total_count (number of records matching the query).",
+          "type": "boolean"
+        },
+        "max_response_tokens": {
+          "minimum": 0,
+          "description": "Safety limit on the estimated response size in tokens (default: 50000, 0 disables). If exceeded, the call fails with response_too_large instead of returning a truncated result.",
+          "type": "integer",
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "レコード検索",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": true,

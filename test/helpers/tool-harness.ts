@@ -2,12 +2,17 @@
  * 読み取りツールの unit 用ハーネス。kintone の GET を偽物で受け(呼び出しを記録)、
  * 実際の `createMcpServer`(ALL_TOOLS)の `tools/call` を通す。KV とキャッシュ用の grant も渡せる。
  */
-import { createMcpServer } from "../../src/mcp/server";
-import type { ToolDefinition } from "../../src/mcp/registry";
+
 import type { KintoneClient, Query } from "../../src/kintone/client";
+import type { ToolDefinition } from "../../src/mcp/registry";
+import { createMcpServer } from "../../src/mcp/server";
 import { fakeKintoneClient } from "./fake-kintone-client";
 import { rpcTo } from "./mcp";
 import { firstText, type RpcResponse } from "./oauth-flow";
+
+/** tools/call の応答 JSON(テストが形ごとに確かめるので、キーは固定しない)。 */
+// biome-ignore lint/suspicious/noExplicitAny: テストの応答 JSON は形を固定しない
+export type ToolBody = Record<string, any>;
 
 export interface RecordedGet {
   path: string;
@@ -57,7 +62,7 @@ export function toolHarness(options: HarnessOptions) {
         rpc,
         isError: rpc.result?.isError === true,
         text,
-        body: JSON.parse(text) as Record<string, any>,
+        body: JSON.parse(text) as ToolBody,
       };
     },
   };

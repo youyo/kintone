@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { ArgumentError, type ResolverError } from "../../src/errors";
 import type { Query } from "../../src/kintone/client";
 import { createResolver } from "../../src/resolver/resolver";
-import { type FieldProp, fieldsResponse } from "../helpers/fake-kintone-data";
 import { fakeKintoneClient } from "../helpers/fake-kintone-client";
+import { type FieldProp, fieldsResponse } from "../helpers/fake-kintone-data";
 
 const PROPS: FieldProp[] = [
   { type: "SINGLE_LINE_TEXT", code: "customer", label: "顧客名" },

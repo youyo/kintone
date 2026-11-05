@@ -185,7 +185,8 @@ describe("kintone_records_query とキャッシュ", () => {
       kv: f.kv,
       grant: GRANT,
       get: async (path) => {
-        if (path === "/k/v1/records.json") throw new KintoneApiError(404, { kintoneCode: "GAIA_AP01" });
+        if (path === "/k/v1/records.json")
+          throw new KintoneApiError(404, { kintoneCode: "GAIA_AP01" });
         throw new Error(`unexpected ${path}`);
       },
     });

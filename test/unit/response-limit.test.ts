@@ -83,7 +83,7 @@ describe("maxResponseTokensShape", () => {
 
 describe("maxResponseTokensShape の公開スキーマ(JSON Schema)", () => {
   it("minimum は 0(負の値が不可であることがスキーマから読める)。検証の挙動は変えない", () => {
-    const json = z.toJSONSchema(z.strictObject(maxResponseTokensShape)) as {
+    const json = z.toJSONSchema(z.strictObject(maxResponseTokensShape)) as unknown as {
       properties: { max_response_tokens: { type: string; minimum: number } };
     };
     expect(json.properties.max_response_tokens.type).toBe("integer");

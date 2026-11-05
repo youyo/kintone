@@ -194,15 +194,12 @@ describe("/mcp の URL クエリ(read_only / toolsets。仕様書 §8)", () => {
 
   const ALL_READ = ["kintone_apps_search", "kintone_app_describe", "kintone_records_query"];
 
-  it.each([
-    "",
-    "?read_only=true",
-    "?read_only=false",
-    "?toolsets=all&read_only=true",
-    "?x=1",
-  ])("有効なクエリ(%s)では tools/list が通り、M03 の読み取りツール 3 つが見える", async (query) => {
-    expect(await listNames(query)).toEqual(ALL_READ);
-  });
+  it.each(["", "?read_only=true", "?read_only=false", "?toolsets=all&read_only=true", "?x=1"])(
+    "有効なクエリ(%s)では tools/list が通り、M03 の読み取りツール 3 つが見える",
+    async (query) => {
+      expect(await listNames(query)).toEqual(ALL_READ);
+    },
+  );
 
   it("?toolsets=app は apps_search と app_describe、?toolsets=record は records_query だけ", async () => {
     expect(await listNames("?toolsets=app")).toEqual([

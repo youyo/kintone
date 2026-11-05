@@ -24,9 +24,18 @@ export function estimateTokens(text: string): number {
 
 export const MAX_RESPONSE_TOKENS_DESCRIPTION = `Safety limit on the estimated response size in tokens (default: ${DEFAULT_MAX_RESPONSE_TOKENS}, 0 disables). If exceeded, the call fails with response_too_large instead of returning a truncated result.`;
 
-/** 読み取りツールの入力スキーマに足す引数。負の値の検査は resolveResponseLimit(argument_error)で行う。 */
+/**
+ * 読み取りツールの入力スキーマに足す引数。負の値の検査は resolveResponseLimit(argument_error)で行う(zod の検証は負を通す)。
+ * `.int()` は JSON Schema に `minimum: -9007199254740991` を出してしまい、負が不可であることが読めないので、
+ * `.meta({ minimum: 0 })` で公開スキーマの minimum だけ 0 にする(検証の挙動は変えない)。
+ */
 export const maxResponseTokensShape = {
-  max_response_tokens: z.number().int().optional().describe(MAX_RESPONSE_TOKENS_DESCRIPTION),
+  max_response_tokens: z
+    .number()
+    .int()
+    .optional()
+    .meta({ minimum: 0 })
+    .describe(MAX_RESPONSE_TOKENS_DESCRIPTION),
 };
 
 /** 引数 `max_response_tokens` から実際の上限を決める。未指定は既定値、0 は無効、負の値は ArgumentError。 */

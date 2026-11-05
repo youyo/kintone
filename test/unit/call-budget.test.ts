@@ -8,8 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createKintoneClient } from "../../src/kintone/client";
 import { createMcpServer } from "../../src/mcp/server";
 import { ALL_TOOLS } from "../../src/mcp/tools";
-import { appCacheKey, createResolverCache } from "../../src/resolver/cache";
 import { APP_RESOLVE_CALLS, FIELD_RESOLVE_CALLS, readBudget } from "../../src/resolver/budget";
+import { appCacheKey, createResolverCache } from "../../src/resolver/cache";
 import {
   type AppRow,
   fieldsResponse,
@@ -21,6 +21,7 @@ import { fakeKv } from "../helpers/fake-kv";
 import { rpcTo } from "../helpers/mcp";
 import { jsonResponse, mockOutboundFetch, type RecordedCall } from "../helpers/mock-fetch";
 import { firstText } from "../helpers/oauth-flow";
+import type { ToolBody } from "../helpers/tool-harness";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -85,7 +86,7 @@ async function callTool(
     "tools/call",
     { name, arguments: args },
   );
-  return JSON.parse(firstText(rpc)) as Record<string, any>;
+  return JSON.parse(firstText(rpc)) as ToolBody;
 }
 
 describe("maxApiCalls の宣言値(最悪ケースの式 × 3)", () => {

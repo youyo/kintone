@@ -298,7 +298,10 @@ describe("kintone_apps_search の引数(仕様書 §5.1。M03 で拡張)", () =>
   it("キャッシュ(KV)を読まず、書かない(名前解決を使わない)", async () => {
     const f = fakeKv();
     const { factory } = setup(async () => APPS, { kv: f.kv, grant: { userId: "u", grantId: "g" } });
-    await rpcTo(factory, "tools/call", { name: "kintone_apps_search", arguments: { name: "顧客" } });
+    await rpcTo(factory, "tools/call", {
+      name: "kintone_apps_search",
+      arguments: { name: "顧客" },
+    });
     expect(f.gets).toHaveLength(0);
     expect(f.puts).toHaveLength(0);
     expect(f.deletes).toHaveLength(0);

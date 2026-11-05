@@ -122,7 +122,7 @@ describe("kintone_app_describe(仕様書 §5.2)", () => {
 
   it("解決できないとき(ambiguous)は candidates つきのエンベロープで、app.json は呼ばない", async () => {
     const h = toolHarness({
-      get: async (path, query) =>
+      get: async (_path, query) =>
         listApps(
           [
             { appId: "1", code: "A", name: "顧客A" },

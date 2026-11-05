@@ -5,7 +5,13 @@
  */
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type AppRow, fieldsResponse, listApps, manyApps, queryFromSearchParams } from "../helpers/fake-kintone-data";
+import {
+  type AppRow,
+  fieldsResponse,
+  listApps,
+  manyApps,
+  queryFromSearchParams,
+} from "../helpers/fake-kintone-data";
 import { jsonResponse, type RecordedCall } from "../helpers/mock-fetch";
 import {
   firstText,
@@ -17,6 +23,7 @@ import {
   setupMocks,
   type TokenSet,
 } from "../helpers/oauth-flow";
+import type { ToolBody } from "../helpers/tool-harness";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -40,7 +47,9 @@ const FIELDS = fieldsResponse([
   { type: "SINGLE_LINE_TEXT", code: "customer", label: "顧客名" },
   { type: "NUMBER", code: "amount", label: "金額" },
 ]);
-const RECORDS = [{ $id: { type: "__ID__", value: "1" }, customer: { type: "SINGLE_LINE_TEXT", value: "山田" } }];
+const RECORDS = [
+  { $id: { type: "__ID__", value: "1" }, customer: { type: "SINGLE_LINE_TEXT", value: "山田" } },
+];
 
 const path = (c: RecordedCall) => new URL(c.url).pathname;
 const params = (c: RecordedCall) => new URL(c.url).searchParams;
@@ -81,7 +90,10 @@ async function setup(options: Options = {}) {
     },
   });
   const connect = async (email?: string) => {
-    const flow = await runAuthorizationFlow({ accessKey: mocks.accessKey, ...(email ? { email } : {}) });
+    const flow = await runAuthorizationFlow({
+      accessKey: mocks.accessKey,
+      ...(email ? { email } : {}),
+    });
     const { access_token } = (await flow.tokenResponse.json()) as TokenSet;
     state.afterFlow = true;
     return access_token;
@@ -96,7 +108,12 @@ async function setup(options: Options = {}) {
     expect(res.status).toBe(200);
     const rpc = await readRpc(res);
     const text = firstText(rpc);
-    return { rpc, isError: rpc.result?.isError === true, text, body: JSON.parse(text) as Record<string, any> };
+    return {
+      rpc,
+      isError: rpc.result?.isError === true,
+      text,
+      body: JSON.parse(text) as ToolBody,
+    };
   };
   return { ...mocks, state, apiCalls, connect, callTool };
 }
@@ -106,10 +123,15 @@ describe("E2E: tools/list", () => {
     const { connect } = await setup();
     const token = await connect();
     const names = async (query = "") =>
-      ((await readRpc(await mcpRequest(token, "tools/list", {}, `${MCP_URL}${query}`))).result?.tools ?? []).map(
-        (t) => t.name,
-      );
-    expect(await names()).toEqual(["kintone_apps_search", "kintone_app_describe", "kintone_records_query"]);
+      (
+        (await readRpc(await mcpRequest(token, "tools/list", {}, `${MCP_URL}${query}`))).result
+          ?.tools ?? []
+      ).map((t) => t.name);
+    expect(await names()).toEqual([
+      "kintone_apps_search",
+      "kintone_app_describe",
+      "kintone_records_query",
+    ]);
     expect(await names("?toolsets=app")).toEqual(["kintone_apps_search", "kintone_app_describe"]);
     expect(await names("?toolsets=record")).toEqual(["kintone_records_query"]);
     expect(await names("?read_only=true")).toHaveLength(3);
@@ -120,7 +142,8 @@ describe("E2E: tools/list", () => {
     const token = await connect();
     const tools = (await readRpc(await mcpRequest(token, "tools/list"))).result?.tools ?? [];
     for (const t of tools) {
-      const props = (t.inputSchema as { properties: Record<string, { minimum?: number }> }).properties;
+      const props = (t.inputSchema as { properties: Record<string, { minimum?: number }> })
+        .properties;
       expect(props.max_response_tokens?.minimum, t.name).toBe(0);
     }
   });
@@ -160,7 +183,9 @@ describe("E2E: kintone_apps_search", () => {
     const r = await callTool(token, "kintone_apps_search");
     expect(r.body.apps.map((a: { code: string }) => a.code)).toEqual(["CRM", "TASK"]);
     const [userId, grantId] = token.split(":");
-    expect((await env.OAUTH_KV.list({ prefix: `kcache:v1:${userId}:${grantId}:` })).keys).toHaveLength(0);
+    expect(
+      (await env.OAUTH_KV.list({ prefix: `kcache:v1:${userId}:${grantId}:` })).keys,
+    ).toHaveLength(0);
   });
 
   it("範囲外の引数は argument_error で kintone を呼ばない", async () => {
@@ -269,7 +294,11 @@ describe("E2E: kintone_records_query", () => {
     const token = await connect();
     const first = await callTool(token, "kintone_records_query", { app_ref: "顧客管理" });
     expect(first.isError).toBe(false);
-    expect(apiCalls.map(path)).toEqual(["/k/v1/apps.json", "/k/v1/apps.json", "/k/v1/records.json"]);
+    expect(apiCalls.map(path)).toEqual([
+      "/k/v1/apps.json",
+      "/k/v1/apps.json",
+      "/k/v1/records.json",
+    ]);
     apiCalls.length = 0;
     const second = await callTool(token, "kintone_records_query", { app_ref: "顧客管理" });
     expect(second.isError).toBe(false);

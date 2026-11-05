@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ArgumentError, ResolverError } from "../../src/errors";
+import { ArgumentError, type ResolverError } from "../../src/errors";
 import type { Query } from "../../src/kintone/client";
 import { createResolver } from "../../src/resolver/resolver";
-import { type AppRow, listApps, manyApps } from "../helpers/fake-kintone-data";
 import { fakeKintoneClient } from "../helpers/fake-kintone-client";
+import { type AppRow, listApps, manyApps } from "../helpers/fake-kintone-data";
 
 interface Call {
   path: string;
@@ -73,9 +73,7 @@ describe("resolveApp: 解決順序(ID → コード完全一致 → 名前完全
     const { resolver, calls } = setup([CRM, TASK]);
     const r = await resolver.resolveApp("CRM", { mode: "read" });
     expect(r.appId).toBe(12);
-    expect(calls).toEqual([
-      { path: "/k/v1/apps.json", query: { codes: ["CRM"], limit: 100 } },
-    ]);
+    expect(calls).toEqual([{ path: "/k/v1/apps.json", query: { codes: ["CRM"], limit: 100 } }]);
   });
 
   it("コードは大文字小文字を区別する(crm は CRM に当たらず、名前の検索へ進む)", async () => {
@@ -185,7 +183,10 @@ describe("resolveApp: 部分一致(read モード)", () => {
       { appId: "2", code: "X", name: "共通B" },
     ]);
     const e = await failure(resolver.resolveApp("共通", { mode: "read" }));
-    expect(e.details?.candidates).toEqual([{ id: "1", name: "共通A" }, { id: "2", code: "X", name: "共通B" }]);
+    expect(e.details?.candidates).toEqual([
+      { id: "1", name: "共通A" },
+      { id: "2", code: "X", name: "共通B" },
+    ]);
   });
 });
 
