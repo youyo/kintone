@@ -156,3 +156,34 @@ test/
 - `docs/manual-verification.md` の更新(M03 で増えた前提)
 - ロードマップの M03 を `[x]` にする。CLAUDE.md の構成・ツールの節を更新
 - 本ファイルの末尾に「実装後の記録(計画との差分)」
+
+## 実装後の記録(計画との差分)
+
+計画から外れた点と、実装中に決めた細部。ADR 0006 / 0007 / 0008 と仕様書の §5・§8・§10、CLAUDE.md にも反映した。
+
+- **`maxApiCalls` を「既定の 50 のまま」から「論理最悪 × 3 を明示」に変更**(3 / 39 / 36)。ADR 0008 は M02 時点で「50 のまま・ツールごとの個別値は却下」だったが、M03 の指示(式から決めた値を明示してテストで固定)に合わせ、ADR と仕様書の該当箇所を更新した。理由は、読み取りの最悪の試行数は論理 × 3 そのものなので、50 のような緩い上限は実装の誤りで呼び出しが増えても気づけないため。
+- **`app_describe` は `app_ref` の解決でもキャッシュを読まない**。ADR 0007 の「`kintone_app_describe` は読まない」を、フィールド定義だけでなくアプリの解決にも適用した(結果は書く)。仕様書 §10 の「読む」の記述はツール単位の指示と読み、計画の完了条件に明記した。
+- **`not_found` の取り直しを「読んだ段階だけ」に絞った**。計画の段階では「キャッシュを無視して取り直す」だけだったが、全段階を取り直すと(コードだけがキャッシュ由来で名前を 10 ページ取ったあとだと)合計が A = 11 を超えうるので、段階ごとに取り直し、1 回の解決で同じ段階の API を 2 度呼ばない(メモ化)ことにした。
+- **既存テストの変更(アサーションは同等以上を残した)**:
+  - `tool-apps-search.test.ts`: `createMcpServer` に `tools: [appsSearch]` を渡して「このファイルは apps_search だけ」を保った。公開スキーマの引数の期待値を `["limit","max_response_tokens"]` から §5.1 の 7 つに更新。「未知の引数」の例を `name`(有効な引数になった)から `nope` に変更
+  - `mcp-api-handler.test.ts`: 有効なクエリの `tools/list` の期待値を 1 ツールから 3 ツールに更新。`?toolsets=record` は公開ツール 0 個ではなくなったので 400 の一覧から外し(`?toolsets=record` が通ることは別のテストで確認)、0 ツールの 400 は `createMcpApiHandler({ tools })` に書き込みだけの合成ツール一覧を渡して同じ検査を残した
+  - `e2e/mcp-tools.test.ts`: クエリごとの `tools/list` の期待値を更新(`?toolsets=record` を追加)
+  - `e2e/oauth-flow.test.ts`・`e2e/verify-oauth.test.ts`: `tools/list` のツール名(1 → 3)とツール数(1 → 3)の期待値を更新
+  - `test/helpers/oauth-flow.ts`: `setupMocks` に追加の宛先(`extra`)を渡せるようにした(既存の使い方は変えない)
+- `createMcpApiHandler` に `{ tools }` の任意引数を足した(テスト用。本番は引数なしで `ALL_TOOLS`)。
+- `RegisterDeps` に `kv?` / `grant?` を足した。`registerTools` が `tools/call` ごとにキャッシュとリゾルバーを作って `ToolContext`(`client` `resolver` `cache`)で渡す。
+- 計画のテスト名 `resolver-app` などはそのまま作り、補助として `test/helpers/{fake-kv,fake-kintone-data,tool-harness}.ts` を足した。
+- **依存の追加なし**。`wrangler deploy --dry-run` でバンドルできることを確認した。
+
+### Red / Green
+
+| 段階 | Red(失敗の理由) | Green |
+|---|---|---|
+| 計画 | - | `plans/kintone-mcp-m03-read-tools-resolver.md` |
+| テスト一式 | 新規 8 ファイルは `src/resolver/*` が存在せず import で失敗。既存の更新分は期待どおりの理由で失敗(`tool-apps-search` の引数一覧・新引数の対応づけ、`response-limit` の `minimum` が -9007199254740991、`tools-list-snapshot` の 3 ツール・`minimum: 0`、`mcp-api-handler` の公開ツール・`createMcpApiHandler({tools})`・kcache のキー、E2E の 20 件) | 実装後に unit 640 / e2e 133 が緑 |
+| 実装 | - | `src/resolver/{budget,cache,resolver}.ts`、`src/mcp/tools/{app-target,app-describe,records-query,apps-search,index}.ts`、`registry.ts` / `api-handler.ts` / `response-limit.ts` の変更 |
+| スナップショット | `tools-list.json` が古い(1 ツール) | `--update` のあと差分を確認(3 ツール、`minimum: 0`) |
+| 既存 E2E の更新 | `oauth-flow` / `verify-oauth` がツール数 1 を期待 | 3 に更新して緑 |
+
+### 未検証の前提(追加)
+- V22(名前検索の部分一致の挙動・長さの上限)と V23(`totalCount` の型)を `docs/manual-verification.md` に追加した。V09・V11・V12 は M03 のツールが実際に使うので、実機確認の優先度が上がった(`app_describe` の権限、`records_query` の URL 長、KV と subrequest)。

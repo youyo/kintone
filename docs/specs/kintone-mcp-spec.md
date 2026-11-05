@@ -1,6 +1,6 @@
 # kintone Remote MCP サーバー仕様(Cloudflare Workers 版)
 
-- 状態: M01(雛形・OAuth・Access)と M02(kintone クライアント・エラー・ツール登録の基盤・`max_response_tokens`・URL クエリ)を実装済み(`kintone_apps_search` の `limit` だけ動く)。M03 以降は計画。2026-11-05 のユーザー決定(Access の email を利用者 ID に必須化、scope 6 つ、書き込み系の `app_ref` は完全一致のみ、`KINTONE_HOST`、小文字のエラーコード)を反映済み
+- 状態: M01(雛形・OAuth・Access)、M02(kintone クライアント・エラー・ツール登録の基盤・`max_response_tokens`・URL クエリ)、M03(読み取りツール 3 つ・名前解決・KV キャッシュ・`maxApiCalls` の最悪ケース)を実装済み。書き込みツール(§5.4〜5.6)は M04 以降で計画(リゾルバーの write モードは M03 で実装済み)。2026-11-05 のユーザー決定(Access の email を利用者 ID に必須化、scope 6 つ、書き込み系の `app_ref` は完全一致のみ、`KINTONE_HOST`、小文字のエラーコード)を反映済み
 - 置き換える対象: Go 製 CLI + MCP サーバー v0.5.6(`archive/go` ブランチ・タグ。旧仕様は `docs/specs/kintone_spec.md`。M01 で削除する)
 - 姉妹プロジェクト: `logbutler`(Backlog 用 Remote MCP。同じ構成)。この仕様の「logbutler」は `/Users/youyo/src/github.com/youyo/logbutler` を指す
 - 設計判断の理由は `docs/adr/`、実機でしか確かめられない前提は `docs/manual-verification.md`(V01〜)、進め方は `plans/kintone-mcp-roadmap.md`
@@ -143,7 +143,7 @@ logbutler ADR 0014 と同じ方式。
 | `limit` | number | 1〜100(省略時 100) |
 | `offset` | number | 0 以上(省略時 0) |
 
-制約の出典: 公式 https://cybozu.dev/ja/kintone/docs/rest-api/apps/get-apps/ 。出力: `{"apps":[{"appId","code","name","description","spaceId","threadId","createdAt","creator","modifiedAt","modifier"}, ...]}`(kintone の生データ)。1 回の呼び出しで 1 ページだけ取る。続きは `offset` で呼び直す。
+制約の出典: 公式 https://cybozu.dev/ja/kintone/docs/rest-api/apps/get-apps/ 。kintone へは `ids[n]` `codes[n]` `name` `spaceIds[n]` `limit` `offset` として送る(指定しなかった引数・空配列は送らない)。範囲外・未知の引数は kintone を呼ぶ前に `argument_error`。リゾルバー・キャッシュは使わない(読まない・書かない)。出力: `{"apps":[{"appId","code","name","description","spaceId","threadId","createdAt","creator","modifiedAt","modifier"}, ...]}`(kintone の生データ)。1 回の呼び出しで 1 ページだけ取る。続きは `offset` で呼び直す。
 
 ### 5.2 `kintone_app_describe`(ReadOnly、toolset `app`)
 
@@ -154,7 +154,7 @@ logbutler ADR 0014 と同じ方式。
 | `app` / `app_ref` | | 上記 |
 | `lang` | enum | `ja` `en` `zh` `user` `default` |
 
-出力: `{"app":{"app_id","code","name","description","space_id","thread_id","created_at","creator","modified_at","modifier"},"fields":{<フィールドコード>:{...kintone の生定義}},"revision":"..."}`(`app` の中は snake_case に加工、`fields` は生)。空の値は省略(Go の `omitempty`)。常に最新を取り(キャッシュを読まない)、フィールドのキャッシュを更新する(§10)。
+出力: `{"app":{"app_id","code","name","description","space_id","thread_id","created_at","creator","modified_at","modifier"},"fields":{<フィールドコード>:{...kintone の生定義}},"revision":"..."}`(`app` の中は snake_case に加工、`fields` は生)。空の値は省略(Go の `omitempty`。ただし `app_id` `code` `name` `description` は常に出す)。常に最新を取り(**`app_ref` の解決でもキャッシュを読まない**。結果は書く)、フィールドのキャッシュを更新する(§10)。`app` / `app_ref` の排他違反は kintone を呼ぶ前に `argument_error`。
 `form/fields.json` の必要権限(アプリ管理権限が要るか)は未検証(V09)。
 
 ### 5.3 `kintone_records_query`(ReadOnly、toolset `record`)
@@ -168,7 +168,7 @@ logbutler ADR 0014 と同じ方式。
 | `fields` | string[] | 取得するフィールドコード。**最大 100**(クエリ文字列では添字 0〜99 まで) |
 | `total_count` | boolean | true で件数も返す |
 
-出力: `{"records":[...kintone の生レコード...],"total_count":N}`(`total_count` は指定時のみ、数値に変換)。1 回の呼び出しで 1 リクエスト。自動ページングはしない(続きは `query` の `offset` で呼び直す)。出典(制限値): 公式 https://cybozu.dev/ja/kintone/docs/rest-api/records/get-records/ 。
+出力: `{"records":[...kintone の生レコード...],"total_count":N}`(`total_count` は指定時のみ、数値に変換。数として読めなければ `api_error`)。kintone へは `app` `query`(空なら送らない)`fields[n]` `totalCount=true` として送る。1 回の呼び出しで 1 リクエスト。自動ページングはしない(続きは `query` の `offset` で呼び直す)。出典(制限値): 公式 https://cybozu.dev/ja/kintone/docs/rest-api/records/get-records/ 。
 GET の URL 長の上限は公式に記載なし(未検証 V11)。
 
 ### 5.4 `kintone_record_create`(WriteNonIdempotent、toolset `record`)
@@ -305,14 +305,14 @@ GET の URL 長の上限は公式に記載なし(未検証 V11)。
 
 | ツール | 式 | 最悪 | リトライ込み(読み取りは × 3) | `maxApiCalls` |
 |---|---|---|---|---|
-| `kintone_apps_search` | 1 | 1 | 3 | 50(既定) |
-| `kintone_app_describe` | A + app 1 + fields 1 | 13 | 39 | 50 |
-| `kintone_records_query` | A + 1 | 12 | 36 | 50 |
-| `kintone_record_create` | A + 1(書き込みはリトライなし) | 12 | 12 | 50 |
-| `kintone_record_update` | A + F + 1 | 13 | 13 | 50 |
-| `kintone_record_delete` | A + 1 | 12 | 12 | 50 |
+| `kintone_apps_search` | 1 | 1 | 3 | **3**(M03) |
+| `kintone_app_describe` | A + app 1 + fields 1 | 13 | 39 | **39**(M03) |
+| `kintone_records_query` | A + 1 | 12 | 36 | **36**(M03) |
+| `kintone_record_create` | A + 1(書き込みはリトライなし) | 12 | 12 | M04 で式から決める |
+| `kintone_record_update` | A + F + 1 | 13 | 13 | M04 で式から決める |
+| `kintone_record_delete` | A + 1 | 12 | 12 | M04 で式から決める |
 
-どのツールも「論理 13 回 × 3 = 39 ≤ 50」に収まる。実装(M02/M03)で、モックが全ページ満杯を返す最悪ケースの呼び出し回数をテストで固定する。
+どのツールも「論理 13 回 × 3 = 39 ≤ 50」に収まる。**読み取りツールの `maxApiCalls` は、論理最悪 × 3(リトライ込みの最悪の試行数)を明示する**(`src/resolver/budget.ts`。M02 時点の「50 のまま」から M03 で変更。ADR 0008)。`test/unit/call-budget.test.ts` が、モックが全ページ満杯を返す最悪ケースの論理呼び出し数(1 / 13 / 12)と、すべての呼び出しが 429 を 2 回返す最悪のリトライでの試行数(3 / 39 / 36 = 宣言値ちょうど)を固定する。KV の呼び出しは含めない(V12)。
 KV の読み書きが subrequest の上限に数えられるかは未検証(V12)。
 
 ### 応答サイズ(logbutler ADR 0007)
@@ -321,7 +321,7 @@ KV の読み書きが subrequest の上限に数えられるかは未検証(V12)
 
 ### URL クエリ(logbutler ADR 0008)
 
-`/mcp?toolsets=app,record&read_only=true`。`toolsets` は `app` `record`(既定 `all`)、`read_only=true` で書き込み・破壊的ツールを隠す。不正値・綴り違いのキー(`readonly` `toolset` など `read` / `tool` で始まる未知のキー)・公開ツールが 0 個になる組み合わせは 400 `{"error":"invalid_query","error_description":"..."}`(GET / POST / DELETE のどれでも。トークンの検証のあと)。無関係なキー(`x=1` など)は無視する。M02 の実ツールは `kintone_apps_search`(toolset `app`)だけなので `?toolsets=record` は 0 個で 400(M03 で `kintone_records_query` が入ると通る)。
+`/mcp?toolsets=app,record&read_only=true`。`toolsets` は `app` `record`(既定 `all`)、`read_only=true` で書き込み・破壊的ツールを隠す。不正値・綴り違いのキー(`readonly` `toolset` など `read` / `tool` で始まる未知のキー)・公開ツールが 0 個になる組み合わせは 400 `{"error":"invalid_query","error_description":"..."}`(GET / POST / DELETE のどれでも。トークンの検証のあと)。無関係なキー(`x=1` など)は無視する。M03 の時点で公開ツールは読み取りの 3 つ(`app` = `kintone_apps_search` + `kintone_app_describe`、`record` = `kintone_records_query`)なので、`?toolsets=record` も通る。公開ツールが 0 個になる組み合わせは、書き込みツールが入る M04 以降に `toolsets` と `read_only` の組み合わせで起こりうる(M03 の実ツールだけでは起きない。テストは書き込みだけの合成ツール一覧で確かめる)。
 
 ## 9. 設定項目(ADR 0003・0004・0009・0010)
 
@@ -365,6 +365,9 @@ KV の読み書きが subrequest の上限に数えられるかは未検証(V12)
 | 書く | 名前解決で取得したとき。`kintone_app_describe` が取得したフィールド定義でフィールドのキャッシュも更新 |
 | 無効化 | (1) TTL。(2) キャッシュ由来の解決で `not_found` になったら、**キャッシュを無視して 1 回だけ取り直す**(取り直しも最悪ケースの式の範囲内)。(3) キャッシュで解決したアプリへの呼び出しが `not_found` を返したら、そのキャッシュを消す。(4) 手動の削除手段は持たない |
 | 失敗時 | KV の読み書き失敗はツール呼び出しを止めない(キャッシュなしで続行。例外名だけログ) |
+| 取り直しの範囲(M03 の確定) | キャッシュから読んだ**段階だけ**を 1 回取り直す(コードだけがキャッシュ由来ならコードだけ)。同じ段階の API は 1 回の解決で 2 度呼ばないので、取り直しを含めても A = 11 以内。対象は `not_found` だけ(ambiguous・exact_match_required は取り直さない) |
+| 段階ごとのキー(M03 の確定) | `appcode` = コード完全一致の結果(空配列も)、`appname` = 名前検索の全ページ(空配列も)。値の形が違えば「なし」。MCP トークンから grant が分からない・KV がないときはキャッシュを使わない |
+| `app_describe` と `app_ref`(M03 の確定) | `kintone_app_describe` は `app_ref` の解決でもキャッシュを読まない(結果は書く) |
 
 Go 版は TTL 1 年・キーにドメインだけ(利用者を含まない。出典: Go `internal/store/cache.go:10-12`、`internal/service/api/caching.go:74,98,139-186`)で、`cache clear` CLI で無効化していた。Remote MCP には無効化手段がなく、アプリの見え方は kintone アカウントごとに違うため、短い TTL と grant 別キーに変える。冪等キャッシュ(`idem:<userId>:<grantId>:...`、M04)と stale 印(`kintone-stale:<userId>:<grantId>`)も grant 単位。
 

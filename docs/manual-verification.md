@@ -124,7 +124,7 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 ### V09 `form/fields.json` の必要権限(アプリ管理権限が要るか)
 - 出典: ADR 0007。公式ページの本文を取得できなかった(404)。OAuth scope は `k:app_settings:read`(scope ページ)
 - 目的: 一般の閲覧者(アプリ管理権限なし)が `GET /k/v1/app/form/fields.json` を OAuth で呼べるか。呼べないなら `kintone_app_describe` と `update_key_field_ref` が `permission_error` になる。
-- 手順: アプリ管理権限のないユーザーで認可し、`kintone_app_describe`(M03 以降)または curl で呼ぶ。
+- 手順: アプリ管理権限のないユーザーで認可し、`kintone_app_describe`(M03 で実装済み)または curl で呼ぶ。
 - 結果: 呼べる [ はい / いいえ ] ／ 失敗時のステータスとコード [ ] ／ 判定 [ ] ／ メモ:
 
 ### V10 IP アドレス制限・他ドメイン
@@ -141,7 +141,7 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 
 ### V12 KV の読み書きは subrequest に数えられるか
 - 出典: ADR 0008 / 0007。logbutler ADR 0003 は「Workers 無料プランの subrequest 上限 50」を根拠にしている
-- 目的: KV の get/put が subrequest 上限に数えられるか。数えられるなら最悪ケース(論理 13 回 + KV)の見積もりを直す。
+- 目的: KV の get/put が subrequest 上限に数えられるか。数えられるなら最悪ケース(論理 13 回 + KV)の見積もりを直す。M03 の `maxApiCalls`(3 / 39 / 36)は kintone への HTTP だけを数え、KV の get/put を含めない。名前解決の KV は最悪で 2 回の get + 2 回の put(+ 取り直し分)、`app_describe` はさらに fields の put 1 回。
 - 手順: Cloudflare の公式ドキュメント(Workers の limits)を確認し、無料プラン相当で名前解決の最悪ケース(10 ページ満杯のモック)を `wrangler dev --remote` 等で通す。
 - 結果: 数えられる [ はい / いいえ ] ／ 出典 URL [ ] ／ 判定 [ ] ／ メモ:
 
@@ -171,6 +171,18 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 - 結果: 公式の上限 [ ] ／ 出典 URL [ ] ／ 判定 [ ] ／ メモ:
 
 ---
+
+### V22 名前検索(`apps.json?name=`)の部分一致の挙動と長さの上限(M03 で追加)
+- 出典: 仕様書 §7、ADR 0007。公式 get-apps ページは「`name` は部分一致・大文字小文字を区別しない」「64 文字以内」と書く。実機では未確認
+- 目的: (a) `name=` が大文字小文字・全角半角・濁点の違いをどう扱うか(リゾルバーの完全一致の判定は大文字小文字を区別して自前で行うので、kintone が区別しない前提と食い違うと完全一致を取りこぼす)、(b) 64 文字を超える `codes[0]` / `name`(`app_ref`)を渡したときのステータスとコード(`argument_error` になる想定)、(c) `apps.json` の `limit=100` / `offset` が 1,000 件目まで取れるか。
+- 手順: 検証環境で、`Sales` / `sales` / `ＳＡＬＥＳ` のようなアプリを作り、`kintone_apps_search` の `name` と `kintone_records_query` の `app_ref` で確かめる。65 文字の `app_ref` を渡す。
+- 結果: (a) [ ] ／ (b) [ ] ／ (c) [ ] ／ 判定 [ ] ／ メモ:
+
+### V23 `records.json` の `totalCount` の型(M03 で追加)
+- 出典: 仕様書 §5.3。公式は文字列で返すと書く(Go 版も文字列として受けて数値に変換していた)
+- 目的: `totalCount=true` のときの実際の型(文字列の想定)。数値で返っても `Number()` で数値になるが、`null` や空のときの挙動を確認する(M03 は `null` は出力に出さず、数として読めない文字列は `api_error`)。
+- 手順: 検証アプリで `kintone_records_query` に `total_count: true` を渡す。0 件のアプリでも確認する。
+- 結果: 型 [ ] ／ 0 件のとき [ ] ／ 判定 [ ] ／ メモ:
 
 ## C. MCP クライアント・Portal(ADR 0002)
 
@@ -254,4 +266,6 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 | V19 /callback の JWT・セッション切れ | 0010 | 高 |
 | V20 workers.dev での Access | 0010 | 中(ドメインの選定前) |
 | V21 kintone のトークン取り消し | 0010 | 低 |
+| V22 名前検索の部分一致・長さの上限(M03) | 0007 | 中 |
+| V23 totalCount の型(M03) | 0006 | 低 |
 | P01〜P04 Portal | 0002 / 0010 | M05 以降(P04 は早めに) |
