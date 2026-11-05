@@ -5,8 +5,18 @@ import type { GrantProps } from "../auth/props";
 import type { Env } from "../env";
 import { createKintoneClient } from "../kintone/client";
 import { MCP_PATH, protectedResourceMetadataUrl } from "../urls";
+import { parseToolConfig, QueryError, type ToolConfig } from "./registry";
 import { callMcpHandler } from "./request-body";
 import { createMcpServer } from "./server";
+import { ALL_TOOLS } from "./tools";
+
+/** /mcp の URL クエリが不正なときの応答(仕様書 §8)。 */
+function invalidQuery(description: string): Response {
+  return new Response(JSON.stringify({ error: "invalid_query", error_description: description }), {
+    status: 400,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 /**
  * OAuthProvider の apiHandler。`ctx.props` は grant の props(kintone のトークン入り)。
@@ -25,13 +35,24 @@ export function createMcpApiHandler(): Required<Pick<ExportedHandler<Env>, "fetc
       const props = oauthCtx.props;
       let kintoneUnauthorized = false;
 
+      // 接続 URL のクエリ(?toolsets=app,record&read_only=true)で公開するツールを決める。不正な値は 400。
+      let config: ToolConfig;
+      try {
+        config = parseToolConfig(new URL(request.url).searchParams, ALL_TOOLS);
+      } catch (e) {
+        if (e instanceof QueryError) return invalidQuery(e.message);
+        throw e;
+      }
+
       const handler = createMcpHandler(
         () =>
           createMcpServer({
-            getClient: () =>
+            config,
+            getClient: ({ maxApiCalls }) =>
               createKintoneClient({
                 host: env.KINTONE_HOST,
                 accessToken: props.kintoneAccessToken,
+                ...(maxApiCalls === undefined ? {} : { maxApiCalls }),
               }),
             onKintoneUnauthorized: () => {
               kintoneUnauthorized = true;

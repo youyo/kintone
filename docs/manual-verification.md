@@ -106,6 +106,9 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 | 権限のないアプリ | | | |
 | 存在しないアプリ ID | | | |
 | 不正な `query` | | | |
+| `CB_VA...` 接頭辞のコードが返るときの HTTP ステータス(400 以外か。M02 は 520 などでも `argument_error` にする) | | | |
+| 200 なのに JSON でない・空の本文が返ることがあるか(IP 制限・プロキシの HTML など。M02 は `api_error`・retryable・`http_status: 200` にする) | | | |
+| 3xx(リダイレクト)が返ることがあるか(M02 は辿らず `api_error`) | | | |
 | `revision` の不一致(update) | | | |
 
 ---
@@ -180,7 +183,7 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 - 結果: [ ] ／ メモ:
 
 ### P03 Portal がクエリ付き URL(`?read_only=true` など)を保持するか
-- 出典: logbutler ADR 0008 の P3 と同種。M02 以降
+- 出典: logbutler ADR 0008 の P3 と同種。M02 で `/mcp` の `read_only` / `toolsets` を実装済み(不正な値・綴り違いのキーは 400。Portal が付ける別のクエリは無視する)。確認すること: Portal の登録 URL に付けた `?read_only=true` が `tools/list` の取得にも `tools/call` にも保たれ、書き込みツール(M04 以降)が隠れること。Portal が独自のクエリを足しても 400 にならないこと(`read` / `tool` で始まるキーは綴り違いとして 400 になるので、Portal がそのようなキーを足さないこと)
 - 結果: [ ] ／ メモ:
 
 ### P04 Portal 経由の MCP クライアントで、ブラウザが `/authorize` へ遷移したときに Access の cookie と JWT が付くか
@@ -236,8 +239,8 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 | V04 PKCE | 0004 | 高 |
 | V05 redirect_uri | 0004 | 高 |
 | V06 リフレッシュトークン上限 | 0001 / 0005 | 中 |
-| V07 エラーの実形・ステータス | 0005 / 0006 | 高(M02 の前) |
-| V08 429 の Retry-After | 0008 | 中 |
+| V07 エラーの実形・ステータス(M02 の分類の答え合わせ) | 0005 / 0006 | 高 |
+| V08 429 の Retry-After(M02 は付かなくても 1 秒待ち × 2 回で動く) | 0008 | 中 |
 | V09 form/fields の権限 | 0007 | 高(M03 の前) |
 | V10 IP 制限・他ドメイン | 0003 | 中(利用環境による) |
 | V11 GET の URL 長 | 0008 | 中(M03 の前) |

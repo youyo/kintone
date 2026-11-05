@@ -1,6 +1,6 @@
 # ADR 0009: logbutler の規約のうち、採用するものと後回しにするもの
 
-- 状態: 採用(M01 の分を実装。M02〜M05 の行は各マイルストーンで実装)
+- 状態: 採用(M01・M02 の分を実装。M03〜M05 の行は各マイルストーンで実装)
 - 日付: 2026-11-05
 - 関連: logbutler `CLAUDE.md`、logbutler ADR 0008 / 0010 / 0011 / 0005、ADR 0010
 
@@ -35,3 +35,10 @@
 
 - `@modelcontextprotocol/sdk` 1.32.1 と `@modelcontextprotocol/client` 2.3.1 は、テストや verify:oauth では直接使わないが、`agents` 0.28.1 の(optional でない)peer dependency で exact バージョンが指定されているため `package.json` に入れた。`jose` 6.2.12 は Access の JWT 検証とテスト用の鍵・JWT 署名に使う。`@types/node` は `scripts/` の型検査用。
 - `ci.yml` はアクションの SHA を `gh api` で確かめて固定した(checkout v7.0.1、mise-action v5.1.2、mise 2026.10.9)。`deploy:check` は M05。
+
+## M02 の実装で確定した点
+
+- `src/mcp/registry.ts`(`defineTool` / `parseToolConfig` / `registerTools`)、`src/mcp/response-limit.ts`、`src/mcp/tools/index.ts`(`ALL_TOOLS`)を追加。ツールの追加は「`defineTool` で定義して `ALL_TOOLS` に足し、`mise run test:update-snapshots` でスナップショットを更新する」だけ。
+- tools/list のスナップショットは `test/snapshots/tools-list.json`(`toMatchFileSnapshot`)。更新タスク `test:update-snapshots` は、ファイルを先に書いた `vitest run test/unit/tools-list-snapshot.test.ts --project unit --update`(`--update` の後ろにファイルを置くと指定が効かず unit 全体が走るため)。CI(`CI=1`)ではスナップショットを書き換えず、差分があれば失敗する。
+- 依存は追加していない。
+

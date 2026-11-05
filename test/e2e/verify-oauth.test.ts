@@ -232,11 +232,14 @@ describe("E2E: verify:oauth(実環境確認用 CLI)を Worker とモック kinto
   it("URL にクエリが付いていても、そのまま /mcp に送り、resource は正規 URL(クエリなし)を使う", async () => {
     const { accessKey } = await setupMocks();
     const h = harness(accessKey);
-    const report = await runVerification({ mcpUrl: `${MCP_URL}?x=1`, refreshOnly: false }, h.io);
+    const report = await runVerification(
+      { mcpUrl: `${MCP_URL}?read_only=true`, refreshOnly: false },
+      h.io,
+    );
     expect(report.ok).toBe(true);
     expect(new URL(h.openedUrls[0] ?? "").searchParams.get("resource")).toBe(MCP_URL);
     const mcpCall = h.requests.find((r) => new URL(r.url).pathname === "/mcp");
-    expect(new URL(mcpCall?.url ?? "").search).toBe("?x=1");
+    expect(new URL(mcpCall?.url ?? "").search).toBe("?read_only=true");
   });
 
   it("トークンは出力にも要約にも全文を出さない(先頭数文字だけ)", async () => {

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GrantProps } from "../../src/auth/props";
 import { createMcpApiHandler } from "../../src/mcp/api-handler";
 import { jsonResponse, mockOutboundFetch } from "../helpers/mock-fetch";
+import { readRpc } from "../helpers/oauth-flow";
 
 const APPS = "GET https://example.cybozu.com/k/v1/apps.json";
 const props: GrantProps = {
@@ -156,5 +157,88 @@ describe("MCP API handler (/mcp の下流)", () => {
         expect(all).not.toContain(secret);
       }
     });
+  });
+});
+
+describe("/mcp の URL クエリ(read_only / toolsets。仕様書 §8)", () => {
+  function rpc(
+    query: string,
+    method: string,
+    params: Record<string, unknown> = {},
+    httpMethod = "POST",
+  ) {
+    return createMcpApiHandler().fetch(
+      new Request(`https://kintone-mcp.test/mcp${query}`, {
+        method: httpMethod,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body:
+          httpMethod === "POST"
+            ? JSON.stringify({ jsonrpc: "2.0", id: 1, method, params })
+            : undefined,
+      }),
+      env,
+      makeCtx(),
+    );
+  }
+
+  const listNames = async (query: string) => {
+    const res = await rpc(query, "tools/list");
+    expect(res.status).toBe(200);
+    return ((await readRpc(res)).result?.tools ?? []).map((t) => t.name);
+  };
+
+  it.each([
+    "",
+    "?read_only=true",
+    "?read_only=false",
+    "?toolsets=app",
+    "?toolsets=all&read_only=true",
+    "?x=1",
+  ])("有効なクエリ(%s)では tools/list が通る", async (query) => {
+    expect(await listNames(query)).toEqual(["kintone_apps_search"]);
+  });
+
+  it.each([
+    ["未知の toolset", "?toolsets=nope"],
+    ["read_only が true / false 以外", "?read_only=maybe"],
+    ["read_only の重複", "?read_only=true&read_only=false"],
+    ["綴り違いのキー(readonly)", "?readonly=true"],
+    ["綴り違いのキー(toolset)", "?toolset=app"],
+    // M02 の実ツールは app の toolset だけなので、record だけにすると公開ツールが 0 個になる(M03 で変わる)。
+    ["公開ツールが 0 個になる組み合わせ", "?toolsets=record"],
+  ])("%s は HTTP 400 invalid_query。kintone は呼ばない", async (_name, query) => {
+    const m = mockOutboundFetch({ [APPS]: () => jsonResponse({ apps: [] }) });
+    for (const [method, name] of [
+      ["tools/list", undefined],
+      ["tools/call", "kintone_apps_search"],
+    ] as const) {
+      const res = await rpc(query, method, name ? { name, arguments: {} } : {});
+      expect(res.status, `${method} ${query}`).toBe(400);
+      expect(res.headers.get("Content-Type")).toContain("application/json");
+      const body = (await res.json()) as { error: string; error_description: string };
+      expect(body.error).toBe("invalid_query");
+      expect(body.error_description.length).toBeGreaterThan(0);
+    }
+    expect(m.calls).toHaveLength(0);
+  });
+
+  it("GET /mcp でも不正なクエリは 400", async () => {
+    const res = await rpc("?readonly=true", "", {}, "GET");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("invalid_query");
+  });
+
+  it("tools/call は kintone の呼び出しに max_response_tokens を送らない(クエリ付き URL でも通る)", async () => {
+    const m = mockOutboundFetch({ [APPS]: () => jsonResponse({ apps: [{ code: "CRM" }] }) });
+    const res = await rpc("?read_only=true", "tools/call", {
+      name: "kintone_apps_search",
+      arguments: { limit: 2, max_response_tokens: 0 },
+    });
+    expect(res.status).toBe(200);
+    const params = new URL(m.calls[0]?.url ?? "").searchParams;
+    expect([...params.keys()]).toEqual(["limit"]);
   });
 });
