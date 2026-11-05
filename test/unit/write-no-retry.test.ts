@@ -39,7 +39,7 @@ const WRITES = [
   },
 ] as const;
 
-async function callTool(name: string, args: Record<string, unknown>) {
+async function callTool(name: string, args: Record<string, unknown>, timeoutMs?: number) {
   const rpc = await rpcTo(
     () =>
       createMcpServer({
@@ -49,6 +49,7 @@ async function callTool(name: string, args: Record<string, unknown>) {
             accessToken: "[REDACTED]",
             // リトライの待機を実際には待たない(読み取りのリトライの確認用)。
             sleep: async () => {},
+            ...(timeoutMs === undefined ? {} : { timeoutMs }),
             ...(maxApiCalls === undefined ? {} : { maxApiCalls }),
           }),
         onKintoneUnauthorized: () => {},
@@ -107,6 +108,39 @@ describe("書き込みは 1 回だけ(リトライしない)", () => {
       expect(m2.callsTo(w.key)).toHaveLength(1);
     });
   }
+
+  it.each(WRITES)(
+    "$tool: タイムアウト(AbortError)でもリトライせず 1 回で打ち切る(結果は不明なので api_error・retryable)",
+    async ({ tool, key, args }) => {
+      const m = mockOutboundFetch({
+        [key]: (call: RecordedCall) =>
+          new Promise<Response>((_, reject) => {
+            call.signal.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
+          }),
+      });
+      const body = await callTool(tool, args, 20);
+      expect(body.error.code).toBe("api_error");
+      expect(body.error.retryable).toBe(true);
+      expect(body.error.message).toContain("timed out after 20ms");
+      expect(m.callsTo(key)).toHaveLength(1);
+    },
+  );
+
+  it.each(WRITES)(
+    "$tool: fetch が直接 AbortError を投げても 1 回だけ",
+    async ({ tool, key, args }) => {
+      const m = mockOutboundFetch({
+        [key]: () => {
+          throw new DOMException("The operation was aborted", "AbortError");
+        },
+      });
+      const body = await callTool(tool, args);
+      expect(body.error.code).toBe("api_error");
+      expect(m.callsTo(key)).toHaveLength(1);
+    },
+  );
 
   it("名前解決の GET(読み取り)は 429 でリトライされ、そのあとの書き込みは 1 回だけ", async () => {
     let apps = 0;

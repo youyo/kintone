@@ -1,6 +1,6 @@
 # kintone Remote MCP サーバー仕様(Cloudflare Workers 版)
 
-- 状態: M01(雛形・OAuth・Access)、M02(kintone クライアント・エラー・ツール登録の基盤・`max_response_tokens`・URL クエリ)、M03(読み取りツール 3 つ・名前解決・KV キャッシュ・`maxApiCalls` の最悪ケース)、M04(書き込みツール 3 つ・write モードの名前解決・冪等キャッシュ `idem:`・書き込みの `maxApiCalls`)を実装済み。2026-11-05 のユーザー決定(Access の email を利用者 ID に必須化、scope 6 つ、書き込み系の `app_ref` は完全一致のみ、`KINTONE_HOST`、小文字のエラーコード)を反映済み
+- 状態: M01(雛形・OAuth・Access)、M02(kintone クライアント・エラー・ツール登録の基盤・`max_response_tokens`・URL クエリ)、M03(読み取りツール 3 つ・名前解決・KV キャッシュ・`maxApiCalls` の最悪ケース)、M04(書き込みツール 3 つ・write モードの名前解決・冪等キャッシュ `idem:`・書き込みの `maxApiCalls`)、M05(デプロイ設定の生成・CI / deploy.yml・runbook・README)を実装済み。2026-11-05 のユーザー決定(Access の email を利用者 ID に必須化、scope 6 つ、書き込み系の `app_ref` は完全一致のみ、`KINTONE_HOST`、小文字のエラーコード)を反映済み
 - 置き換える対象: Go 製 CLI + MCP サーバー v0.5.6(`archive/go` ブランチ・タグ。旧仕様は `docs/specs/kintone_spec.md`。M01 で削除する)
 - 姉妹プロジェクト: `logbutler`(Backlog 用 Remote MCP。同じ構成)。この仕様の「logbutler」は `/Users/youyo/src/github.com/youyo/logbutler` を指す
 - 設計判断の理由は `docs/adr/`、実機でしか確かめられない前提は `docs/manual-verification.md`(V01〜)、進め方は `plans/kintone-mcp-roadmap.md`
@@ -183,7 +183,7 @@ GET の URL 長の上限は公式に記載なし(未検証 V11)。
 
 出力: `{"ids":[数値...],"revisions":[数値...]}`(kintone は文字列で返すので数値化。数として読めなければ、書き込みは済んでいるので **retryable でない** `api_error`)。全件成功か全件取り消し(公式)。リトライしない(§8)。`record` と `records` はちょうど一方(両方・どちらもなしは `argument_error`)。検査(排他・1〜100 件・未知の引数)は kintone を呼ぶ前、名前解決の API を呼ぶ前に行う。`POST /k/v1/records.json` の本文は `{"app":N,"records":[...]}`(`record` は 1 件の配列にする)。
 
-**冪等キャッシュ(§10、ADR 0011)**: 同じ呼び出しの再送(接続断のあとなど)は、成功した最初の結果を 5 分間返し、kintone を(名前解決も含めて)一度も呼ばない。明示キーは `params._meta.idempotency_key`、なければ引数 `idempotency_key`(`inputSchema` には宣言しない。引数から外して kintone へは送らない。UTF-8 で 200 バイトまで)、どちらもなければ検証済みの引数のハッシュ。同じ明示キーで別の引数は `argument_error`。エラーは保存しない。同じ引数で意図的に 2 件作るときは別の `idempotency_key` を渡す。
+**冪等キャッシュ(§10、ADR 0011)**: 同じ呼び出しの再送(接続断のあとなど)は、成功した最初の結果を 5 分間返し、kintone を(名前解決も含めて)一度も呼ばない。明示キーは `params._meta.idempotency_key`、なければ引数 `idempotency_key`(`inputSchema` には宣言しない。引数から外して kintone へは送らない。UTF-8 で 200 バイトまで)、どちらもなければ検証済みの引数のハッシュ。同じ明示キーで別の引数は `argument_error`。エラーは保存しない。同じ引数で意図的に 2 件作るときは別の `idempotency_key` を渡す。この暗黙の再送判定(明示キーがなければ 5 分以内の同じ引数は再送とみなす)は `tools/list` の description にも書いてある。
 
 ### 5.5 `kintone_record_update`(WriteIdempotent、toolset `record`)
 
@@ -352,7 +352,7 @@ KV の読み書きが subrequest の上限に数えられるかは未検証(V12)
 
 欠け・不正があるとき `/healthz` 以外は 500 `{"error":"server_misconfigured"}`、`/healthz` は 503 + 項目名。値は応答にもログにも出さない。**`ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` が未設定のとき、UUID などで代替して認可を通すことはしない**(ADR 0010)。
 
-デプロイ設定の生成(logbutler ADR 0011): 環境変数 `KINTONE_MCP_WORKER_NAME` / `KINTONE_MCP_KV_NAMESPACE_ID` / `KINTONE_MCP_HOST` / `KINTONE_MCP_PUBLIC_BASE_URL` / `KINTONE_MCP_ACCESS_TEAM_DOMAIN` / `KINTONE_MCP_ACCESS_AUD` / `KINTONE_MCP_CUSTOM_DOMAIN`(任意)から `wrangler.deploy.jsonc`(gitignore)を生成して `wrangler deploy -c`。secrets は `--secrets-file`。
+デプロイ設定の生成(ADR 0012。logbutler ADR 0011 と同じ): 環境変数 `KINTONE_MCP_WORKER_NAME` / `KINTONE_MCP_KV_NAMESPACE_ID` / `KINTONE_MCP_HOST` / `KINTONE_MCP_PUBLIC_BASE_URL` / `KINTONE_MCP_ACCESS_TEAM_DOMAIN` / `KINTONE_MCP_ACCESS_AUD`(以上必須)/ `KINTONE_MCP_CUSTOM_DOMAIN`(任意)/ `KINTONE_MCP_OAUTH_PKCE`(任意。`vars.KINTONE_OAUTH_PKCE` になる)から `wrangler.deploy.jsonc`(gitignore)を生成して `wrangler deploy -c`(`mise run deploy:render` / `deploy`)。入力の検証(欠け・形式違い・`<...>`)は項目名と理由だけを出し、値は出さない。secrets(`KINTONE_CLIENT_ID` / `KINTONE_CLIENT_SECRET`)は `--secrets-file`(CI)または `wrangler secret put`(手元)。`mise run deploy:check` はダミー値の dry-run。
 
 ## 10. キャッシュ(ADR 0007)
 
@@ -389,7 +389,7 @@ Go 版は TTL 1 年・キーにドメインだけ(利用者を含まない。出
 
 - **利用者の識別子(Access の email)が示すのは「Access にログインした人」で、「kintone で認可したアカウント」ではない**。同意画面のあとの kintone の認可画面で別のアカウントでログインしても、Worker は気づけない(kintone に持ち主を返す口がない。ADR 0010)。そのためキャッシュ・冪等キー・stale 印は grant 単位のままで、email 単位にしない。緩和策は kintone 側の「利用者の設定」と同意画面の注意書きだけ
 - 同じ email・同じ MCP クライアントの再認可は旧 grant を失効させて置き換える(別クライアントの grant は残る。DCR で毎回登録し直すクライアントの旧 grant は失効しない)。kintone 側のリフレッシュトークンは取り消されない(取り消しの口は未確認。V21)ので、10 個上限(公式)を超えたときの kintone の挙動は未検証(V06)で、置き換えが効くのは「kintone が古いトークンから失効させる」場合だけ
-- Access から外した利用者の既存 grant は残る(失効は手動。runbook、M05)。Access の JWT は長寿命になりうる(awsbridge の観測で約 30 日)が、本仕様で JWT を使うのは認可の瞬間だけ
+- Access から外した利用者の既存 grant は残る(失効は手動。`docs/runbook.md` の「Access から外した利用者の grant を失効させる」)。Access の JWT は長寿命になりうる(awsbridge の観測で約 30 日)が、本仕様で JWT を使うのは認可の瞬間だけ
 - cybozu.com 共通管理の IP 制限を使う環境では、Workers の送信元 IP を許可できず使えない可能性が高い(V10)
 - ゲストスペースのアプリは扱えない(ADR 0003)
 - `records_query` は自動ページングなし。`offset` は kintone の上限 10,000 まで(それ以上はカーソル API が必要。M05 以降)

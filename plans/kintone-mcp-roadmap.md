@@ -74,7 +74,7 @@ Go 製の kintone CLI + MCP サーバー(v0.5.6、`archive/go`)を、姉妹プ�
 - [x] M03: 読み取りツール + 名前解決(詳細計画: `plans/kintone-mcp-m03-read-tools-resolver.md`)
 - [x] ADR 0007 の未決(書き込み系での部分一致): 完全一致のみに決定済み(2026-11-05)
 - [x] M04: 書き込みツール(詳細計画: `plans/kintone-mcp-m04-write-tools.md`)
-- [ ] M05: デプロイ準備
+- [x] M05: デプロイ準備(詳細計画: `plans/kintone-mcp-m05-deploy-readiness.md`)
 - [ ] U6/U7: 実機確認(`docs/manual-verification.md`)と Portal 登録(ユーザー)
 
 ## 未決事項

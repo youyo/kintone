@@ -1,5 +1,41 @@
 # Changelog
 
+## [Unreleased] - Cloudflare Workers 版への作り直し(`feat/workers-rewrite`)
+
+Go 製の CLI + MCP サーバー(v0.5.6 まで)を、Cloudflare Workers 上の **Remote MCP サーバー**として作り直した。Go 版は `archive/go` ブランチ・タグに保存してあり、v0.5.6 の Homebrew / ghcr のイメージはそのまま使える。移行の手順と破壊的変更の一覧は [README](README.md#go-版の利用者への移行のお知らせ)。
+
+### BREAKING CHANGES
+
+- **CLI を廃止**(Homebrew・Docker・GoReleaser・`go install`・stdio も廃止)。Remote MCP サーバー(Cloudflare Workers + KV + Hono)だけになった
+- **ツール名に `kintone_` が付く**(`kintone_apps_search` `kintone_app_describe` `kintone_records_query` `kintone_record_create` `kintone_record_update` `kintone_record_delete`)。引数名は Go 版を踏襲
+- **出力・エラーの形式**: 成功は `{"ok":true,"data":...}` の包みをやめ、kintone のデータそのもの(加工したものは snake_case)。失敗は `isError: true` と `{"schema_version":"1","error":{"code","message","retryable","details"?}}`
+- **エラーコードが小文字の snake_case**になった(`KINTONE_UNAUTHORIZED` → `authentication_error` など。対応は仕様書 §6)。新しいコード(`resolver_app_exact_match_required` `resolver_field_exact_match_required` `response_too_large` など)を追加
+- **認証**: 利用者ごとの kintone OAuth(Worker が OAuth 認可サーバー。トークンは暗号化して Cloudflare KV)と、**Cloudflare Access の email による利用者の識別**(`/authorize` と `/callback` を Access の self-hosted アプリで保護)に変わった。OIDC(idproxy)は廃止
+- **API トークン(`X-Cybozu-API-Token`)を廃止**
+- OAuth のリダイレクト URI が `<PUBLIC_BASE_URL>/callback` に変わった(cybozu.com の OAuth クライアントの登録のやり直しが必要。scope は Go 版と同じ 6 つ)
+- **設定項目**: `KINTONE_DOMAIN` → `KINTONE_HOST`(ホスト全体)。Cloudflare の Variables / Secrets と wrangler の設定に移った(`PUBLIC_BASE_URL` `ACCESS_TEAM_DOMAIN` `ACCESS_AUD` `KINTONE_CLIENT_ID` `KINTONE_CLIENT_SECRET` `KINTONE_OAUTH_PKCE`、KV `OAUTH_KV`)。`config.toml`・プロファイル・SQLite / Redis / DynamoDB は廃止
+- 名前解決: キャッシュは利用者(grant)ごと・TTL 600 秒(Go 版は利用者に依存せず TTL 1 年)、名前検索は最大 10 ページ。**書き込みの `app_ref` と `update_key_field_ref` は完全一致だけ**(部分一致のみなら候補を返して書き込まない)
+
+### Added
+
+- **M01 雛形と OAuth**: Worker が OAuth 認可サーバー(DCR・PKCE・`/token`)と MCP サーバーを兼ねる。kintone OAuth(Basic 認証・PKCE・scope 6 つ)、Access JWT の検証と email からの利用者 ID、トークン更新、起動時の設定チェック(`/healthz`)、`mise run verify:oauth`
+- **M02 基盤**: kintone REST クライアント(直列・読み取りだけ 429 / 503 を最大 2 回リトライ・呼び出し回数の上限・10 MiB・30 秒)、エラー表、ツール登録(4 区分の annotation・toolset・`?toolsets=` / `?read_only=true`・`max_response_tokens`)、tools/list のスナップショット
+- **M03 読み取りツール**: `kintone_apps_search` / `kintone_app_describe` / `kintone_records_query`、名前解決(`app` / `app_ref`)、KV キャッシュ(grant 単位)
+- **M04 書き込みツール**: `kintone_record_create` / `kintone_record_update` / `kintone_record_delete`、冪等キャッシュ(`kintone_record_create` だけ。5 分)、書き込みはリトライしない
+- **M05 デプロイ準備**:
+  - `scripts/render-wrangler-config/`: 環境変数 `KINTONE_MCP_*` から、gitignore 済みの `wrangler.deploy.jsonc` を生成する(`mise run deploy:render`。値は出さずに項目名と理由だけで検証する)。`mise run deploy:check` はダミー値の `wrangler deploy --dry-run`、`mise run deploy` が実際のデプロイ
+  - `.github/workflows/ci.yml` に `deploy:check`、`.github/workflows/deploy.yml`(下流の Variables / Secrets で動く。Worker 名の Variable が空の upstream では飛ばす)。アクションはコミット SHA で固定
+  - `docs/runbook.md`(OAuth クライアント登録・Access の self-hosted アプリ・KV・Variables / Secrets・動作確認・WAF・IP 制限・切り分け・grant の失効)、README(ツール一覧・商標の注記・Go 版からの移行案内)、ADR 0012
+  - `test:e2e` に `node-e2e`(生成スクリプトの実プロセス起動と `wrangler deploy --dry-run -c`)
+
+### Changed
+
+- `kintone_record_create` の description に、明示の冪等キーがないと 5 分以内の同じ引数の呼び出しは再送とみなして前回の結果を返すこと(2 件目は作られない)と、同じ内容を意図して 2 件作る方法(別の `idempotency_key`)を明記した
+
+### Notes
+
+- 実機でしか確かめられない前提は `docs/manual-verification.md`(V01〜V30、P01〜P04)に集約している。デプロイ・実 kintone での確認はユーザーが行う
+
 ## [v0.5.0] - 2026-05-15
 
 ### Changed
@@ -31,8 +67,6 @@
   - logvalet の `EnsureBacklogConnected` パターンを参考に実装
   - kill switch: `KINTONE_MCP_DISABLE_OAUTH_CASCADE=1` で旧挙動に戻せる
   - Claude Desktop からの MCP OAuth AS カスケード（`/authorize` → kintone OAuth → `/authorize`）は M17 で対応予定
-
-## [Unreleased]
 
 ## [v0.4.2] - 2026-05-14
 

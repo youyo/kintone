@@ -1,6 +1,6 @@
 # ADR 0009: logbutler の規約のうち、採用するものと後回しにするもの
 
-- 状態: 採用(M01・M02・M03・M04 の分を実装。M05 の行は M05 で実装)
+- 状態: 採用(M01・M02・M03・M04・M05 の分を実装)
 - 日付: 2026-11-05
 - 関連: logbutler `CLAUDE.md`、logbutler ADR 0008 / 0010 / 0011 / 0005、ADR 0010
 
@@ -18,8 +18,8 @@
 | `toolsets` / `read_only` の URL クエリ(ADR 0008) | 採用(小さく) | M02 | toolset は `app` / `record` の 2 つだけ。`read_only=true` が実用上の価値(読み取り専用の接続を作れる)。不正値・綴り違い・0 ツールは 400 |
 | `timezone` 引数 | 後回し(不要) | - | 日付を解釈するツールがない |
 | 冪等キャッシュ `idem:`(ADR 0005)| 採用 | M04 | `kintone_record_create` だけ(WriteNonIdempotent)。KV の `idem:<userId>:<grantId>:...`(grant 単位。ADR 0010)。`record_update`/`record_delete` は対象外 |
-| upstream / 下流モデルと `render-wrangler-config`(ADR 0011) | 採用 | M05 | `wrangler.jsonc` は共有のダミー値。`KINTONE_MCP_*` 環境変数から `wrangler.deploy.jsonc`(gitignore)を生成。`deploy:check` は ダミー値の dry-run。M01 では `wrangler.jsonc` と gitignore の枠だけ作る |
-| `.github/workflows/ci.yml`(アクションはコミット SHA 固定、`mise-action` のバージョン固定)、`deploy.yml` | 採用 | ci.yml の最小版(lint・test)は M01、`deploy:check` と deploy.yml は M05 | SHA は実装時に `gh api` で確かめる(logbutler のコメントの手順)。logbutler の SHA をそのまま写さず、更新確認してから固定 |
+| upstream / 下流モデルと `render-wrangler-config`(logbutler ADR 0011 → 本リポジトリの ADR 0012) | 採用 | M05 | `wrangler.jsonc` は共有のダミー値。`KINTONE_MCP_*` 環境変数から `wrangler.deploy.jsonc`(gitignore)を生成。`deploy:check` は ダミー値の dry-run。M01 では `wrangler.jsonc` と gitignore の枠だけ作り、M05 で実装した(ADR 0012) |
+| `.github/workflows/ci.yml`(アクションはコミット SHA 固定、`mise-action` のバージョン固定)、`deploy.yml` | 採用 | ci.yml の最小版(lint・test)は M01、`deploy:check` と deploy.yml は M05(実装済み) | SHA は実装時に `gh api` で確かめる(logbutler のコメントの手順)。logbutler の SHA をそのまま写さず、更新確認してから固定 |
 | `docs/runbook.md`、`docs/manual-verification.md` | 採用 | M05 / 今回(後者) | 後者は今回作成 |
 | 下流セットアップ用スキル(`logbutler-setup`) | 後回し | M06 以降 | 利用者が増えてから |
 | `test:live`(実環境 E2E) | 後回し | M05 以降 | 実 kintone への書き込みを伴う。ユーザーの許可が要る |
@@ -45,4 +45,11 @@
 ## M04 の実装で確定した点
 
 - 冪等キャッシュ `idem:` を実装した(`src/mcp/idempotency.ts`、設計は ADR 0011)。対象は WriteNonIdempotent の `kintone_record_create` だけ(`record_update` / `record_delete` は対象外)。logbutler ADR 0005 との差分は ADR 0011 に書いた(キーが grant 単位、明示キーを SHA-256 にして入れる、同じ明示キーで別の引数は `argument_error`)。
+- 依存は追加していない。
+
+## M05 の実装で確定した点
+
+- upstream / 下流モデルを実装した(ADR 0012)。`scripts/render-wrangler-config/`、mise の `deploy:render` / `deploy:check` / `deploy`、`deploy.yml`(Variable `KINTONE_MCP_WORKER_NAME` が空なら飛ばす)、`docs/runbook.md`、`test/node-e2e/`(`test:e2e` に含めた)。
+- `deploy.yml` の秘密値は `--secrets-file`(ランナーの一時ファイル)で渡し、アクションは `ci.yml` と同じ SHA。新しいアクションは使っていない。
+- `README.md` のツール一覧は `test/unit/readme-tools.test.ts` が `ALL_TOOLS` と突き合わせる(logbutler と同じ)。
 - 依存は追加していない。

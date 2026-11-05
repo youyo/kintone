@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { KintoneApiError } from "../../src/kintone/client";
+import { recordCreate } from "../../src/mcp/tools/record-create";
 import { type AppRow, listApps } from "../helpers/fake-kintone-data";
 import { toolHarness, writeBody } from "../helpers/tool-harness";
 
@@ -194,5 +195,29 @@ describe("kintone_record_create: 結果とエラー", () => {
     const h = setup();
     await h.call(TOOL, { app: 12, record: REC });
     expect(h.clientOptions).toEqual([{ maxApiCalls: 34 }]);
+  });
+});
+
+describe("kintone_record_create: description(暗黙の再送判定を AI に伝える)", () => {
+  const description = recordCreate.description;
+
+  it("明示の冪等キーがないと、5 分以内の同じ引数の呼び出しは再送とみなして前回の結果を返す(2 件目は作られない)", () => {
+    expect(description).toMatch(/without an explicit idempotency key/i);
+    expect(description).toMatch(/same arguments within 5 minutes/i);
+    expect(description).toMatch(/re-?send/i);
+    expect(description).toMatch(/returns the previous result/i);
+    expect(description).toMatch(/second record is NOT created/i);
+  });
+
+  it("意図して同じ内容を 2 件作る方法(別の idempotency_key。_meta.idempotency_key でもよい)を書く", () => {
+    expect(description).toMatch(/identical records on purpose/i);
+    expect(description).toContain("idempotency_key");
+    expect(description).toContain("_meta.idempotency_key");
+    expect(description).toMatch(/different idempotency_key/i);
+  });
+
+  it("書き込みがリトライされないことと、通信失敗・タイムアウトのあとは結果が分からないことを書く", () => {
+    expect(description).toMatch(/not retried/i);
+    expect(description).toMatch(/timeout|network failure/i);
   });
 });

@@ -2,7 +2,7 @@
 
 kintone Remote MCP(Workers 版)はまだ実装・デプロイしていない。ADR と仕様書に「未検証の前提」として書いたものを、ここに集約する。
 ユーザーが検証用の環境を用意したら、この表の順に実施し、**結果の欄に記入する**(実施はユーザーの指示を受けてから)。
-デプロイ手順は M05 の `docs/runbook.md`(まだない)。M01 時点では `wrangler dev` / 手動 `wrangler deploy` で足りる範囲を使う。
+デプロイ手順は `docs/runbook.md`(M05)。runbook の【未検証】の手順は、この表の V 番号(V26〜V30 を含む)に結んである。
 
 ## 使い方
 
@@ -198,6 +198,36 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 - 手順: 検証アプリに対し、`_meta.idempotency_key` を付けた `kintone_record_create` を 1 回呼び、すぐ(1 秒以内・10 秒後・60 秒後)に同じ呼び出しを再送する。作成されたレコードの数を数える。
 - 結果: 重複した最短の間隔 [ ] ／ 判定 [ ] ／ メモ:
 
+### V26 `DELETE /k/v1/records.json` を JSON 本文で送る形(M05 で追加。M04 の検証の指摘)
+- 出典: 仕様書 §5.6、ADR 0008、公式 delete-records ページ。`kintone_record_delete` は `ids` / `revisions` を **JSON 本文**(`Content-Type: application/json`)で送る。DELETE のパラメーターをクエリ文字列(`ids[0]=...`)で渡す形も考えられ、**実機が JSON 本文を受け付けるかは未確認**(Go 版の実装 `kintoneapi/records_write.go:75-99` を引き継いだ形。公式の記述との突き合わせも未実施)
+- 目的: (a) JSON 本文の DELETE が通り、レコードが削除されること、(b) 応答が `{}` か、空本文か(空本文だと M02 のクライアントは 200 + JSON でない本文を `api_error`(retryable)にする。**削除は済んでいるのに再送を促す**ことになるので、空本文なら要対応)、(c) `revisions` つきでリビジョン不一致のときのステータスとコード、(d) 100 件ちょうどが通ること、(e) 本文を受け付けない場合(400 など)は、`ids` をクエリ文字列で送る形に変える必要がある(クライアントの `delete` に本文でなくクエリを渡せるようにする。実装は変えていない)。
+- 手順: 検証アプリに 3 件のレコードを作り、`kintone_record_delete`(`ids` のみ → `ids` + `revisions`)を実行する。curl でも同じ形(`curl -X DELETE -H 'Content-Type: application/json' -d '{"app":N,"ids":[1,2]}'`、トークンは貼らない)を確かめる。
+- 結果: (a) [ ] ／ (b) [ ] ／ (c) [ ] ／ (d) [ ] ／ (e) 本文が拒否された [ はい / いいえ ] ／ 判定 [ ] ／ メモ:
+
+### V27 Cloudflare API トークンの最小権限と、初回デプロイの実挙動(M05 で追加)
+- 出典: `docs/runbook.md`、ADR 0012。runbook の権限の表は logbutler の運用を引き継いだもので、**公式ドキュメントの権限名との突き合わせは未実施**
+- 目的: (a) runbook の権限だけで `wrangler deploy -c wrangler.deploy.jsonc --secrets-file ...`(secrets の同時投入を含む)が通るか、足りない権限は何か、(b) カスタムドメイン(`custom_domain: true`)で DNS と証明書が自動で作られること(既存の DNS レコードがあると失敗すること)、(c) `workers_dev: true`(カスタムドメインなし)で公開されること、(d) secrets を入れる前にデプロイした Worker の `/healthz` が 503(`missing` に 2 つの secret)になること、(e) 設定にない vars がデプロイで消えること(`--keep-vars` なし)。
+- 手順: 検証用アカウントで runbook どおりにデプロイする(実施はユーザー)。権限不足のエラーに出る権限名を記録し、runbook の表を直す。
+- 結果: (a) [ ] ／ 不足していた権限 [ ] ／ (b) [ ] ／ (c) [ ] ／ (d) [ ] ／ (e) [ ] ／ 判定 [ ] ／ メモ:
+
+### V28 `wrangler kv` による grant の失効(Access から外した利用者)(M05 で追加)
+- 出典: `docs/runbook.md`、ADR 0010(Access から外した利用者の既存 grant は残る)。キーの形 `grant:<userId>:<grantId>` と `token:<userId>:<grantId>:<id>` は workers-oauth-provider 1.2.3 のコードで確かめたが、**実際の KV で一覧・削除した確認は未実施**
+- 目的: (a) email から `userId` を計算するシェルの手順(`printf %s <email> | tr '[:upper:]' '[:lower:]' | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '='`)が Worker の `userIdFromEmail` と一致すること(macOS と Linux の両方。コードの単体テストでは同じ値を確認済み)、(b) `wrangler kv key list --prefix "grant:<userId>:"` が目的の grant を返すこと、(c) `grant:` を消すと、その利用者の MCP アクセストークン(まだ期限内のもの)が `/mcp` で 401 になり、リフレッシュもできなくなること(`token:` は消さなくても無効になるか。ライブラリは grant を参照するため無効になる想定)、(d) `kcache:` `idem:` `kintone-stale:` は TTL で消えるので残しても害がないこと。
+- 手順: 検証用の利用者を 1 人認可し、上の手順で失効させて、`mise run verify:oauth -- $BASE/mcp --refresh-only` が失敗することを確認する。
+- 結果: (a) [ ] ／ (b) [ ] ／ (c) [ ] ／ (d) [ ] ／ 判定 [ ] ／ メモ:
+
+### V29 cybozu.com 共通管理の OAuth クライアント登録画面の手順(M05 で追加)
+- 出典: `docs/runbook.md`、公式 add-client ページ(https://cybozu.dev/ja/common/docs/oauth-client/add-client/)。runbook の画面の項目名・STEP の呼び名は公式の記述から書いたもので、**実際の画面での確認は未実施**
+- 目的: (a) リダイレクト URI に `https://<domain>/callback` を登録でき、完全一致が求められること、(b) scope の 6 つを選べる画面か(ラベルと `k:app_record:read` などの対応)、(c) STEP2「利用者の設定」で利用者(ユーザー・組織・グループ)を指定できること、(d) 同じクライアントに複数のリダイレクト URI を登録できるか(登録できれば検証用と本番で兼用できる)、(e) 登録後にクライアントシークレットを再表示・再発行できるか。
+- 手順: 検証環境のサブドメインで登録し、画面の項目名を runbook と見比べる(違えば runbook を直す)。
+- 結果: (a) [ ] ／ (b) [ ] ／ (c) [ ] ／ (d) [ ] ／ (e) [ ] ／ 判定 [ ] ／ メモ:
+
+### V30 WAF / Rate Limiting が `/register` `/token` に効き、正常な利用を妨げないこと(M05 で追加)
+- 出典: `docs/runbook.md`(WAF / Rate Limiting の節)、ADR 0010(`/register`(DCR)は匿名のまま。レート制限は前段で行う)
+- 目的: (a) runbook の例の Rate Limiting ルール(`/register` と `/token` を対象)が Cloudflare のプランで作れること、(b) 閾値を超えると 429 などで止まること、(c) 通常の MCP クライアント(Portal を含む)の接続・更新が止まらないこと(Portal や複数クライアントが同じ送信元 IP から DCR・更新をすると、IP 単位の制限に当たる可能性)。
+- 手順: 検証環境でルールを作り、`curl` で `/register` を連続して呼ぶ。そのあと `mise run verify:oauth` が通ることを確かめる。
+- 結果: (a) [ ] ／ (b) [ ] ／ (c) [ ] ／ 判定 [ ] ／ メモ:
+
 ## C. MCP クライアント・Portal(ADR 0002)
 
 ### P01 Portal に「OAuth(DCR 自動登録)+ Require user auth」で登録でき、ツールが同期されること
@@ -284,4 +314,9 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 | V23 totalCount の型(M03) | 0006 | 低 |
 | V24 書き込み API の応答形・制約(M04) | 0006 / 0008 | 高(書き込みを使う前) |
 | V25 冪等キャッシュと KV の結果整合(M04) | 0011 | 中 |
+| V26 DELETE の JSON 本文(M05。M04 の指摘) | 0006 / 0008 | 高(`record_delete` を使う前) |
+| V27 Cloudflare API トークンの権限・初回デプロイの実挙動(M05) | 0012 | 高(デプロイ時) |
+| V28 `wrangler kv` による grant の失効(M05) | 0010 | 中 |
+| V29 OAuth クライアント登録画面の手順(M05) | 0004 | 高(デプロイ時) |
+| V30 WAF / Rate Limiting(M05) | 0010 | 中 |
 | P01〜P04 Portal | 0002 / 0010 | M05 以降(P04 は早めに) |
