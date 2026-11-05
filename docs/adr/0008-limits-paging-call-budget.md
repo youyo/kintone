@@ -1,6 +1,6 @@
 # ADR 0008: ページング・呼び出し回数の上限・応答サイズ・書き込みのリトライ
 
-- 状態: 採用(M02 でクライアントの制限・`max_response_tokens` を実装。M03 で名前解決のページ上限・読み取りツールの最悪ケースのテスト・入力の上限の検査(読み取り分)を実装。書き込み分は M04)
+- 状態: 採用(M02 でクライアントの制限・`max_response_tokens` を実装。M03 で名前解決のページ上限・読み取りツールの最悪ケースのテスト・入力の上限の検査(読み取り分)を実装。M04 で書き込みツールの `maxApiCalls`・入力の上限の検査(書き込み分)・書き込みがリトライされないことのテストを実装)
 - 日付: 2026-11-05
 - 関連: logbutler ADR 0003 / 0006 / 0007、ADR 0007
 
@@ -33,9 +33,9 @@
 | `kintone_apps_search` | 1 | 1 | 3 |
 | `kintone_app_describe` | A + 2 | 13 | 39 |
 | `kintone_records_query` | A + 1 | 12 | 36 |
-| `kintone_record_create` | A + 1 | 12 | 12(書き込みはリトライなし) |
-| `kintone_record_update` | A + F + 1 | 13 | 13 |
-| `kintone_record_delete` | A + 1 | 12 | 12 |
+| `kintone_record_create` | A + 1 | 12 | ~~12~~ → **34**(M04 で訂正: 解決の GET は × 3、書き込みは × 1) |
+| `kintone_record_update` | A + F + 1 | 13 | ~~13~~ → **37** |
+| `kintone_record_delete` | A + 1 | 12 | ~~12~~ → **34** |
 
 すべて 50(既定)以内。~~`maxApiCalls` は既定の 50 のまま~~ → **M03 で変更: 読み取りツールは `maxApiCalls` を式から決めて明示する**(下の「M03 の実装で確定した点」)。テスト(unit)で「全ページ満杯を返すモックでの論理呼び出し数 = 上の式」と「リトライ込みの試行数 = 宣言値」を固定する。名前解決のページ上限を 10 より増やすと `13 × 3 = 39` の余裕がなくなる(増やすなら式から再計算する)。
 キャッシュを使うと減る一方、「キャッシュ由来の解決が `not_found` → 取り直し」(ADR 0007)でも合計は A 以内に収まる(キャッシュヒットで 0 回、取り直しで A)。
@@ -85,3 +85,12 @@
 - KV の呼び出しは `maxApiCalls`(kintone への HTTP の回数)に含めない。KV が subrequest 上限の 50 に数えられるか(V12)が未確認のため、数えられる場合は `app_describe` の最悪(kintone 39 + KV の読み書き)が 50 に近づく。確認結果によって式を直す。
 - 入力の上限のうち読み取り分は M03 で実装した: `records_query` の `fields` は 100 件まで、`apps_search` の `ids` / `codes` / `space_ids` は各 100 件まで・`codes` の各要素 1〜64 文字・`name` 64 文字まで・`limit` 1〜100・`offset` 0 以上。いずれも kintone を呼ぶ前に `argument_error`。
 - `max_response_tokens` の公開スキーマは `minimum: 0` を出す(zod の `.int()` が出す `-9007199254740991` を `.meta({ minimum: 0 })` で上書き。検証は従来どおり `resolveResponseLimit` が負を `argument_error` にする)。
+
+## M04 の実装で確定した点
+
+- **書き込みツールの `maxApiCalls` は「解決の読み取り × 3 + 書き込み × 1」**(`writeBudget(読み取りの論理回数, 書き込み回数 = 1)` = `readBudget(...) + 書き込み回数`)。`kintone_record_create` = A × 3 + 1 = **34**、`kintone_record_update` = (A + F) × 3 + 1 = **37**、`kintone_record_delete` = A × 3 + 1 = **34**。上の表(M02 時点)の 12 / 13 / 12 は「書き込みはリトライしない」ことだけを見て、名前解決・フィールド解決の GET がリトライされること(読み取りなので 1 呼び出しあたり最大 2 回)を落としていた。12 のままだと、アプリ名検索の GET が 1 回 429 を返しただけで上限に達し、書き込みの前に `api_error` で止まる。すべて 50 以内(最大 37)。
+- `test/unit/call-budget.test.ts` が固定する: (a) 宣言値 34 / 37 / 34、(b) 全ページ満杯のモックで数えた論理呼び出し数 12 / 13 / 12(書き込みは最後に 1 回)、(c) 解決のすべての GET が 429 を 2 回返してから成功しても、試行数は宣言値ちょうど(書き込みは 1 回で成功)、(d) 名前検索が 10 ページ満杯なら 11 回の GET で `resolver_app_list_too_large` になり書き込みを呼ばない、(e) キャッシュの取り直しを含めても解決の GET は A = 11 回以内。
+- **書き込みはリトライしない**ことは `test/unit/write-no-retry.test.ts` と E2E でツール経由に固定した(POST / PUT / DELETE が 429・503・500・通信失敗・本文が壊れた 200 を返しても、書き込みは 1 回だけ)。クライアント(M02)の実装は変えていない。
+- 入力の上限(書き込み分)を実装: `record_create` の `records` は 1〜100 件、`record_delete` の `ids` は 1〜100 件(正の整数)・`revisions` は `ids` と同じ長さ、`record_update` の排他・必須。いずれも `registerTools` の自前の検証(`inputSchema` の `superRefine` を含む)で、kintone クライアントを作る前・名前解決の API を呼ぶ前に `argument_error` にする。
+- 書き込みの結果を読めなかったとき(`ids` が数でない等)は、書き込みが済んでいる可能性があるので **retryable でない** `api_error`(再送を促すと二重に作成・更新する)。
+- KV の呼び出しは引き続き `maxApiCalls` に含めない(V12)。書き込みツールの最悪は、kintone 37 + KV(名前解決のキャッシュの get / put、`record_create` は冪等の get / put)。

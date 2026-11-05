@@ -162,3 +162,40 @@ test/
 - `docs/manual-verification.md` の更新(V07 の追記、V24・V25)
 - ロードマップの M04 を `[x]` にする。CLAUDE.md の構成・ツールの節を更新
 - 本ファイルの末尾に「実装後の記録(計画との差分)」
+
+## 実装後の記録(計画との差分)
+
+計画から外れた点と、実装中に決めた細部。ADR 0006 / 0007 / 0008 / 0009 / 0011 と仕様書の §5・§8・§10、CLAUDE.md にも反映した。
+
+- **書き込みツールの `maxApiCalls` は、仕様書 §8 の表(M02 時点の 12 / 13 / 12)でなく 34 / 37 / 34**。表は「書き込みはリトライしない」ことだけを見て、名前解決・フィールド解決の GET が読み取りとしてリトライされる(最大 2 回)ことを落としていた。12 のままだと、`apps.json` が 1 回 429 を返しただけで上限に達し、書き込みの前に `api_error` で止まる。式は「解決の読み取り × 3 + 書き込み × 1」(`writeBudget`)。`call-budget.test.ts` が宣言値・論理回数(12 / 13 / 12)・最悪のリトライ(試行数 = 宣言値ちょうど)・10 ページ満杯・取り直しを固定する。計画の段階でこの式にしていたので、計画との差分ではなく**仕様書・ADR 0008 の表の訂正**(両方を直した)
+- **冪等キャッシュは logbutler ADR 0005 から 3 点変えた**(ADR 0011): (1) キーは grant 単位(`idem:<userId>:<grantId>:...`)、(2) 明示キーは生で KV のキーに入れず SHA-256 にする(200 バイトの上限は入力の検査として残した)、(3) 同じ明示キーで別の引数は前回の結果を返さず `argument_error`(保存値に引数ハッシュを持つ)。計画の段階から決めていたが、実装で `{args, result}` の保存形式にした
+- **既存テストの変更(アサーションは同等以上を残した)**:
+  - `tools-list-snapshot.test.ts`: 「3 つの読み取りツールが公開される」を 6 ツールの一覧に更新、toolset `record` の期待値を 4 ツールに更新、`max_response_tokens` の `minimum: 0` の検査は書き込みツール(この引数を持たない)を除く読み取りの 3 ツールが対象(読み取りの 3 ツールの名前も検査に加えた)
+  - `mcp-api-handler.test.ts`: 有効なクエリの `tools/list`(`""` `?read_only=false` `?toolsets=all` `?x=1` は 6 ツール、`?read_only=true` `?toolsets=all&read_only=true` は読み取りの 3 つ)、`?toolsets=record` は 4 ツールに更新
+  - `e2e/read-tools.test.ts`: `tools/list` の期待値(6 / `?toolsets=record` 4 / `?read_only=true` は読み取りの 3 つ)、`minimum: 0` の検査は読み取りのツールだけ
+  - `e2e/mcp-tools.test.ts`: クエリごとの `tools/list` の期待値(`?toolsets=record&read_only=true` を足した)
+  - `e2e/oauth-flow.test.ts`: `tools/list` のツール名を 6 つに、`e2e/verify-oauth.test.ts`: `toolCount` を 3 から 6 に
+  - `test/helpers/tool-harness.ts`: `get` を任意にし、書き込みの偽物(`write` オプション。記録は `writes`)・`call` の第 3 引数 `_meta`・`writeBody()` を足した(読み取りの既存の使い方は変えない。`write` を渡さなければ書き込みは呼ばれたら例外のまま)。`test/helpers/oauth-flow.ts`: `RpcResponse` の tools に `description?` を足した(型だけ)
+- **`records_query` の limit / offset 拒否のテスト(M03 の指摘)は、実装済みの分類の特性テストなので、足した時点で緑**(Red はない。コードは変えていない)。400 + `CB_VA01` → `argument_error`(retryable でない、`details.http_status` / `kintone_code`)・リトライなし・クエリがそのまま kintone へ渡ることを E2E で固定
+- **`read_only=true` の `tools/call` が書き込みツールを呼べないことの unit(`mcp-api-handler.test.ts`)は、実装前もツールがないために緑**(Red の根拠は `tools/list` の期待値と E2E の `tools/list`)。E2E と合わせて、実装後は「ツールは存在するが隠れて呼べない」ことを確かめている
+- **`superRefine` で入力の排他・必須・上限を検査**(`record_create` / `record_update` / `record_delete`)。zod 4 では `superRefine` が `ZodObject` のまま返るので `defineTool` の型を変えていない。公開スキーマ(`tools/list`)は refinement を出さないため、排他は引数の `description` にも書いた
+- `ToolContext`・`RegisterDeps`・`defineTool` は変えていない。`registerTools` の `tools/call` ハンドラが SDK の第 2 引数(`ServerContext`)から `_meta` を読む
+- **依存の追加なし**。`wrangler deploy --dry-run` でバンドルできることを確認した
+
+### Red / Green
+
+| 段階 | Red(失敗の理由) | Green |
+|---|---|---|
+| 計画 | - | `plans/kintone-mcp-m04-write-tools.md` |
+| テスト一式 | 新規 `tool-record-create` / `update` / `delete`・`write-no-retry`・`call-budget`(書き込み)・`e2e/write-tools` は書き込みツールが `ALL_TOOLS` にない(`tools/call` の応答が空で `JSON.parse` に失敗、`maxApiCalls` が `undefined`)。`idempotency.test.ts` は `src/mcp/idempotency.ts` と `writeBudget` が存在せず import で失敗。更新分は期待どおりの理由で失敗(`tools-list-snapshot` が 3 ツールのまま、`mcp-api-handler` の `?toolsets=record` が 1 ツール、E2E の公開ツール 3 つ・`toolCount` 3)。unit 122 件・e2e 27 件が赤 | 実装後に unit 787 / e2e 158 が緑 |
+| 実装 | - | `src/resolver/budget.ts`(`writeBudget`)、`src/mcp/idempotency.ts`、`src/mcp/registry.ts`(冪等キャッシュの組み込み)、`src/mcp/tools/{record-write,record-create,record-update,record-delete,index,app-target}.ts` |
+| スナップショット | `tools-list.json` が古い(3 ツール) | `--update` のあと差分を確認(書き込み 3 ツールの追加だけ。既存の 3 ツールの行は変わらない) |
+| 既存テストの更新 | `max_response_tokens` の `minimum` 検査が全ツールを見て、書き込みツールで失敗(unit 1 件・e2e 1 件) | 読み取りのツールだけに絞って緑 |
+
+### テストの件数
+- unit(`--project unit --project node`): 640 → **787**(+147。新規 5 ファイル 125 件(`tool-record-create` 27・`tool-record-update` 31・`tool-record-delete` 21・`idempotency` 29・`write-no-retry` 17。`it.each` の展開後)+ 既存ファイルへの追加 22 件(`call-budget`・`tools-list-snapshot`・`mcp-api-handler`))
+- e2e(`--project e2e`): 133 → **158**(+25。`write-tools` 22 + `read-tools` に limit / offset 拒否 2 + tools/list の更新分)
+
+### 未検証の前提(追加)
+- V24(書き込み API の応答形と制約: `ids` / `revisions` の型、DELETE の JSON 本文と応答本文、`updateKey` の条件、`revision` 不一致)と V25(冪等キャッシュと KV の結果整合)を `docs/manual-verification.md` に追加した。V07 に「存在しないアプリの実ステータス(520 の可能性とキャッシュの残り)」と「limit / offset の拒否の実ステータス」を追記した(コードは変えていない)。V08(書き込みの 429 が未処理か)・V09(`update_key_field_ref` の `form/fields.json` 権限)・V12(KV と subrequest。書き込みの最悪は kintone 37 + KV)は M04 のツールが実際に使うので、実機確認の優先度が上がった
+- 書き込みでもキャッシュ(TTL 600 秒)で `app_ref` を解決する。アプリ名が付け替わった直後は別のアプリに当たりうる(特に `record_delete`)。ADR 0007 の「M04 の実装で確定した点」に既知のリスクとして書いた

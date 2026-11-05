@@ -65,3 +65,11 @@ logbutler は JSON を text content、失敗は `isError: true` + `{"schema_vers
 - 読み取りツール 3 つを実装(`kintone_apps_search` / `kintone_app_describe` / `kintone_records_query`)。出力の形は仕様書 §5.1〜5.3 のとおり。`app_describe` の `app` は `app_id` `code` `name` `description` を常に出し、そのほかの項目(`space_id` `thread_id` `created_at` `creator` `modified_at` `modifier`)と `revision` は空・null なら省略する(Go の `omitempty` と同じ。`description` は Go でも `omitempty` なし)。`records_query` の `total_count` は kintone の文字列を数値に変換し、数として読めなければ `api_error`(retryable)にする(黙って落とさない)。
 - `app` / `app_ref` の排他違反(両方・どちらもなし)・`app_ref` の空文字・範囲外の引数は、kintone を呼ぶ前に `argument_error`。
 - リゾルバーのエラー(`resolver_*`)は `ResolverError` で投げ、`details` に `kind` / `ref` / `candidates`(アプリ `{id, code?, name?}`、フィールド `{code, label?}`)を載せる。`resolver_app_not_found` / `resolver_field_not_found` の `candidates` は空配列。`resolver_app_list_too_large` は `kind` / `ref` だけ。
+
+## M04 の実装で確定した点
+
+- 書き込みツール 3 つの出力: `record_create` = `{ids:[数値], revisions:[数値]}`、`record_update` = `{revision:数値}`、`record_delete` = `{deleted:ids.length}`(kintone の文字列を数値化)。書き込みツールに `max_response_tokens` は付けない。
+- annotation: create = WriteNonIdempotent、update = WriteIdempotent、delete = Destructive(`destructiveHint: true`、`idempotentHint: true`)。`title` は日本語。
+- **書き込みが成功したあとの応答の解釈の失敗は、retryable でない `api_error`**(`ids` / `revisions` / `revision` が数として読めない・欠けている)。message で「書き込みは済んでいる可能性があるので、盲目的に再送せず内容を確認する」ことを案内する。再送を促すと二重に作成・更新してしまうため(M02 の「200 なのに本文が JSON でない」は retryable のまま。こちらは AI に判断を委ねる)。
+- `argument_error` の追加の用途: 書き込みツールの排他・必須・上限・`revisions` の長さ、冪等キーの再利用(同じ `idempotency_key` で別の引数)、`idempotency_key` が 200 バイト超(ADR 0011)。新しいエラーコードは足していない(`ERROR_CODES` は変わらず、`error-table.test.ts` もそのまま)。
+- M03 の検証の指摘: `records_query` で kintone が `limit` > 500・`offset` > 10,000 を 400 + `CB_VA01` で拒否したら `argument_error`(retryable でない、`details.http_status` / `kintone_code`)になることを E2E で固定した(分類は M02 のまま。実際の応答は V07 で確認)。

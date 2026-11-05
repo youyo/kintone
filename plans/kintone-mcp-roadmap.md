@@ -35,7 +35,7 @@ Go 製の kintone CLI + MCP サーバー(v0.5.6、`archive/go`)を、姉妹プ�
 | kintone OAuth | Basic 認証、PKCE(S256。`KINTONE_OAUTH_PKCE=off` の逃げ道)、**scope は Go 版と同じ 6 つ**(今のツールが使わない権限も要求。ユーザー決定)、`userId` は Access の email のハッシュ、認可時に疎通確認 | ADR 0004、ADR 0010 |
 | トークン更新 | logbutler ADR 0014 と同じ(失効後にだけ更新、MCP の寿命を kintone の残り寿命に合わせる、stale 印) | ADR 0005 |
 | 名前解決とキャッシュ | Go の解決順序を踏襲。ページ上限 100 → 10。**書き込み系(record_create / update / delete)の `app_ref` は ID・コード完全一致・名前完全一致だけ。部分一致のみなら `resolver_app_exact_match_required` で候補を返す**(ユーザー決定。読み取り系は部分一致も使う)。キャッシュは `OAUTH_KV`、grant 単位のキー、TTL 600 秒、`not_found` で取り直し | ADR 0007 |
-| 制限値 | 書き込みはリトライしない。`maxApiCalls` は既定 50 のまま、最悪 13 回 × 3 = 39。`max_response_tokens` 既定 50000 | ADR 0008 |
+| 制限値 | 書き込みはリトライしない。`maxApiCalls` はツールごとに最悪ケースの式から明示(M03 で変更): 読み取り 3 / 39 / 36、書き込みは解決の GET × 3 + 書き込み 1 で 34 / 37 / 34(M04)。`max_response_tokens` 既定 50000 | ADR 0008 |
 | logbutler の規約 | 採用/後回しの一覧は ADR 0009 | |
 | 廃止 | CLI、Docker、GoReleaser、Homebrew、SQLite/Redis/DynamoDB、idproxy、OIDC | 新 main では持たない |
 | ランタイムとタスク | mise(node 24 系と pnpm を固定)。`mise run test / test:unit / test:e2e / lint / fmt / build / dev` | グローバル規約。バージョンは logbutler の `mise.toml` に合わせる |
@@ -73,7 +73,7 @@ Go 製の kintone CLI + MCP サーバー(v0.5.6、`archive/go`)を、姉妹プ�
 - [x] M02: kintone クライアントと基盤(詳細計画: `plans/kintone-mcp-m02-client-and-foundation.md`)
 - [x] M03: 読み取りツール + 名前解決(詳細計画: `plans/kintone-mcp-m03-read-tools-resolver.md`)
 - [x] ADR 0007 の未決(書き込み系での部分一致): 完全一致のみに決定済み(2026-11-05)
-- [ ] M04: 書き込みツール
+- [x] M04: 書き込みツール(詳細計画: `plans/kintone-mcp-m04-write-tools.md`)
 - [ ] M05: デプロイ準備
 - [ ] U6/U7: 実機確認(`docs/manual-verification.md`)と Portal 登録(ユーザー)
 
