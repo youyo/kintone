@@ -12,7 +12,7 @@ kintone Remote MCP(Workers 版)はまだ実装・デプロイしていない。A
 - 結果は `OK` / `NG` / `要対応` のどれかで記入し、`メモ` に日付・環境・気づきを書く。NG は該当 ADR の「未検証の前提」を更新する。
 - 実施前の準備: ロードマップの手順 U2(OAuth クライアント登録。リダイレクト URI は `https://<domain>/callback`)・U3(利用者の設定)・U4(Access の self-hosted アプリ。`/authorize` と `/callback` のパス。AUD とチームドメインの取得)・U5(KV と Variables / Secrets。`ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` を含む)を終え、`curl -s $BASE/healthz` が `{"status":"ok"}` を返すこと。
 
-## 実環境の OAuth 確認ツール `mise run verify:oauth`(M01 で作る)
+## 実環境の OAuth 確認ツール `mise run verify:oauth`(M01 で実装済み)
 
 V01(一部)・V02・V04・V05・V15・V19(a)・P01〜P04 の確認に使う、テスト用の小さな MCP クライアント。
 
@@ -21,7 +21,8 @@ mise run verify:oauth -- $BASE/mcp                 # フル検証(ブラウザ�
 mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更新だけ(kintone のトークン期限切れ後に使う)
 ```
 
-- 人が操作するのは、ブラウザでの Access のログイン(セッションがなければ)、同意画面、kintone のログインと同意の 1 回だけ。`/authorize` と `/callback` は Access の JWT がないと 403 になるので、**ツールの `authorize` 段階はブラウザ経由が必須**(コマンドラインから `/authorize` を直接叩いても通らない)。
+- ツールは `scripts/verify-oauth/`(core.ts は Web 標準 API だけで、E2E では Worker とモック kintone に対して通しで動かしている)。実環境では `loopback.ts` が `127.0.0.1` の空きポートで待ち受け、その URL を DCR の `redirect_uri` に登録して、`main.ts` が認可 URL をブラウザで開く(開けなければ URL を表示するので手で開く)。
+- 人が操作するのは、ブラウザでの Access のログイン(セッションがなければ)、同意画面、kintone のログインと同意の 1 回だけ。同意画面には Access のログイン email が出る。次の kintone のログインでは、同じ本人のアカウントを選ぶこと(Worker は選んだアカウントを確かめられない。ADR 0010)。`/authorize` と `/callback` は Access の JWT がないと 403 になるので、**ツールの `authorize` 段階はブラウザ経由が必須**(コマンドラインから `/authorize` を直接叩いても通らない)。
 - 各段階(`metadata` `register` `authorize` `token` `tools_list` `apps_search` `refresh` `apps_search_after_refresh`)の成否と、`expires_in`、リフレッシュでトークンが変わったかが出る。
 - 状態ファイル `.verify-oauth.local.json` はリフレッシュトークンを含む(gitignore)。検証が終わったら削除する。
 - このツールが見られるのは MCP 側のトークン(Worker 発行)。**kintone 側のリフレッシュトークンの挙動は見えない**(V01 は Worker の診断ログまたは別手順で見る)。
@@ -92,7 +93,7 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 ### V07 トークンエンドポイントと REST のエラーの実形・ステータス
 - 出典: ADR 0005 / 0006。Go の分類(`internal/kintoneapi/errors.go:91-114`)は 401/403/404/429/5xx/422/`CB_VA` 接頭辞
 - 目的: 次を実測して仕様書 §6 の表を確定する。
-  1. トークンエンドポイント: 失効・取り消し済みのリフレッシュトークン、誤ったクライアントシークレットのときのステータスと本文(`error` フィールドがあるか、`invalid_grant` / `invalid_client` か)
+  1. トークンエンドポイント: 失効・取り消し済みのリフレッシュトークン、誤ったクライアントシークレットのときのステータスと本文(`error` フィールドがあるか、`invalid_grant` / `invalid_client` か。本文なし・JSON でない 4xx が返るかも確認する。実装は `error` が明示的に `invalid_grant` のときだけ grant を失効させ、それ以外の読めない 4xx は `rejected` にしている)
   2. REST: 失効したアクセストークン、アプリの権限なし、存在しないアプリ ID、不正なクエリ、必須項目の欠け、リビジョン不一致のときのステータスと `code`(`CB_VA01`・`GAIA_*` など)。HTTP 520 が返るケース
 - 手順: curl で各ケースを起こし、ステータス・`code`・`message` を記録する(トークンは貼らない)。
 - 結果: (表に記入)

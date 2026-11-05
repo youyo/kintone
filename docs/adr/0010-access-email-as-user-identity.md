@@ -1,6 +1,6 @@
 # ADR 0010: 利用者の識別子に Cloudflare Access の email を必須で使う(`/authorize` と `/callback` を Access で保護する)
 
-- 状態: 提案(M01 で採用予定。ユーザー決定 2026-11-05)
+- 状態: 採用(M01 で実装。ユーザー決定 2026-11-05)
 - 日付: 2026-11-05
 - 置き換える: ADR 0002 の「Worker 内に Access 連携を持たない」(決定 2)、ADR 0004 の「利用者の識別子: 認可ごとのランダム UUID」(決定 4)
 - 関連: ADR 0001、ADR 0002、ADR 0004、ADR 0005、ADR 0007、logbutler ADR 0009(Access 連携の削除)
@@ -23,7 +23,7 @@
 
 ### 2. JWT の検証(Worker 側。多層防御として Access の前段設定に頼らない)
 実装は logbutler の git 履歴(`git -C <logbutler> show 8dac72c^:src/auth/access-jwt.ts`)を移植する。変えるのは呼び出し側(email から `userId` を作る)だけ。
-- JWKS: `https://<ACCESS_TEAM_DOMAIN>/cdn-cgi/access/certs`。isolate 内で 5 分キャッシュ。未知の `kid` は鍵ローテーションとみなして取り直すが、取得から 60 秒未満なら取り直さない(不正な JWT の連投で Access への通信を増やさない)
+- JWKS: `https://<ACCESS_TEAM_DOMAIN>/cdn-cgi/access/certs`。isolate 内で 5 分キャッシュ。未知の `kid` は鍵ローテーションとみなして取り直すが、取得から 60 秒未満なら取り直さない(不正な JWT の連投で Access への通信を増やさない)。取得には 5 秒のタイムアウト(`AbortSignal.timeout`)を付け、超えたら `jwks_unavailable`(503)。実行中の取得 Promise は isolate 内で共有し、同時のリクエストは同じ取得を待つ(失敗したら共有を消し、次のリクエストで取り直す)
 - 検証: 署名(RS256)、`iss` = `https://<ACCESS_TEAM_DOMAIN>`、`aud` に `ACCESS_AUD` を含む(`aud` は配列。出典: awsbridge `docs/specs/architecture.md` の観測)、`exp` 必須、`email` が空でない文字列、`sub` あり
 - 失敗時の応答(理由は応答に出さない。ログには理由の種別だけ。JWT・email は出さない):
   - ヘッダーなし・検証失敗 → 403
@@ -91,3 +91,11 @@
 - Cloudflare MCP Portal 経由の MCP クライアントでブラウザが `/authorize` へ遷移したとき、Access の cookie と JWT が付くか(P04)
 - `workers.dev` のホストで Access の self-hosted アプリを使えるか(カスタムドメインが要るか)(V20)
 - kintone のリフレッシュトークンを取り消す口があるか(V21)
+
+## M01 の実装で確定・追加した点
+
+- JWT の検証は RS256 のみ(`alg` の混同は拒否)、`exp` 必須(`requiredClaims`)、`email` は空白だけでも拒否、`sub` 必須。JWKS が JSON でない・`keys` が配列でない・404/5xx・fetch 例外・タイムアウトはすべて `jwks_unavailable`(503)。
+- 未知の `kid` で JWKS を取り直すのは、前回の取得から 60 秒以上たっているときだけ(logbutler の M01 実装は時間条件なしで取り直していた。本仕様に合わせて変えた)。キャッシュが空の最初の検証で未知の `kid` でも、取得は 1 回だけ。
+- 失敗のログは `{"event":"access_jwt_rejected","reason":"missing|invalid|jwks_unavailable"}` と、email 不一致の `access_email_mismatch` だけ(JWT・email は出さない)。応答の本文は `Forbidden` / `Service Unavailable` の固定文。
+- `/callback` の email 比較は trim + 小文字化したもの同士。不一致のときは `finishUpstream` が state を使い切っているため、正しい email で送り直しても進まない(E2E で固定)。
+- E2E で、email が MCP トークンにも KV のキー・値にも現れないこと、kintone のトークンが KV に平文で残らないことを固定した(`beginUpstream` の `data` はライブラリが暗号化する)。

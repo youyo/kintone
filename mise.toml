@@ -1,2 +1,48 @@
 [tools]
-go = "1.26"
+node = "24.21.0"
+pnpm = "11.28.5"
+
+[tasks.install]
+description = "依存パッケージをロックファイルどおりに入れる"
+run = "pnpm install --frozen-lockfile"
+
+[tasks."install:update"]
+description = "依存を解決して pnpm-lock.yaml を作る・更新する (package.json を変えたときだけ。通常は install)"
+run = "pnpm install"
+
+[tasks."test:unit"]
+description = "Unit テスト (workerd 上で実行)"
+run = "pnpm exec vitest run --project unit --project node"
+
+[tasks."test:e2e"]
+description = "E2E テスト (Worker 全体に HTTP を送る。kintone と Access の JWKS は outbound fetch のモック)"
+# node-e2e プロジェクト(test/node-e2e/。生成スクリプトの実プロセス起動)は M05 から使うので、空の間はここに含めない。
+run = "pnpm exec vitest run --project e2e"
+
+[tasks."test:update-snapshots"]
+description = "tools/list のスナップショットを更新する (M02 から有効)"
+run = "pnpm exec vitest run --project unit --update test/unit/tools-list-snapshot.test.ts"
+
+[tasks.test]
+description = "Unit + E2E"
+depends = ["test:unit", "test:e2e"]
+
+[tasks.lint]
+description = "Biome + 型検査"
+run = ["pnpm exec biome check .", "pnpm exec tsc --noEmit", "pnpm exec tsc --noEmit -p scripts/tsconfig.json"]
+
+[tasks.fmt]
+description = "Biome で整形"
+run = "pnpm exec biome check --write ."
+
+[tasks.build]
+description = "デプロイせずにバンドルできることを確認する"
+run = "pnpm exec wrangler deploy --dry-run --outdir dist"
+
+[tasks.dev]
+description = "ローカル開発サーバー"
+run = "pnpm exec wrangler dev"
+
+[tasks."verify:oauth"]
+description = "実環境の OAuth 確認 (DCR → PKCE → ブラウザ(Access ログイン含む) → /token → MCP → refresh)。例: mise run verify:oauth -- https://<domain>/mcp"
+run = "node scripts/verify-oauth/main.ts"

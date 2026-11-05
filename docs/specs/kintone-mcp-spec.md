@@ -108,7 +108,7 @@ logbutler ADR 0014 と同じ方式。
 - MCP アクセストークンの寿命: 最大 30 分(`MCP_ACCESS_TOKEN_TTL_SECONDS = 1800`)、最小 60 秒(KV の最小 TTL)
 - kintone を更新するのは、保存期限(`kintoneExpiresAt`)を過ぎているときと、stale 印(`kintone-stale:<userId>:<grantId>`、TTL 15 分)があるときだけ
 - 更新で新しいアクセストークンを得た: MCP の寿命 = `clamp(残り - 60, 60, 1800)`。それ以外: `clamp(残り + 5, 60, 1800)`
-- 更新エラー: `invalid_grant`(HTTP 400/401 でボディの `error` が `invalid_grant`、または `error` が読めない 400/401)→ `OAuthError("invalid_grant")` で grant を失効。`invalid_client` / `unauthorized_client` は運用者の設定ミスなので grant を失効させず `server_error`(503)。5xx・429・通信失敗 → `temporarily_unavailable`(503)
+- 更新エラー: `invalid_grant`(HTTP 400/401 でボディの `error` が明示的に `invalid_grant`)→ `OAuthError("invalid_grant")` で grant を失効。本文がない・JSON でない・`error` がない 4xx は `rejected` とし、grant を失効させず `server_error`(503)(プロキシや WAF の一時的な拒否で再認可にしないため。実際の kintone の応答形は V07 で確認)。`invalid_client` / `unauthorized_client` は運用者の設定ミスなので grant を失効させず `server_error`(503)。5xx・429・通信失敗 → `temporarily_unavailable`(503)
 - `/mcp` で kintone が 401 を返したら、stale 印を置き、MCP の応答も HTTP 401 + `WWW-Authenticate: Bearer ... error="invalid_token" ... resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp"` にしてクライアントに更新させる
 - 診断ログ(値は出さない): `kintone_token`(`grant_type`, `expires_in`, `refresh_token_rotated`)、`token_exchange`、`kintone_unauthorized`
 

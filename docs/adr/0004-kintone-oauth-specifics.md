@@ -1,6 +1,6 @@
 # ADR 0004: kintone OAuth の仕様適用(クライアント認証・PKCE・scope・利用者の識別子)
 
-- 状態: 提案(M01 で採用予定)。決定 3(scope)・決定 4(利用者の識別子)はユーザー決定により改訂済み(2026-11-05)
+- 状態: 採用(M01 で実装)。決定 3(scope)・決定 4(利用者の識別子)はユーザー決定により改訂済み(2026-11-05)
 - 日付: 2026-11-05
 - 関連: ADR 0001、ADR 0005、ADR 0010、logbutler `src/auth/backlog-oauth.ts`
 
@@ -65,3 +65,10 @@ Go 版(`/oauth/kintone/callback`)と異なる。cybozu.com 共通管理で OAuth
 - 認可コード交換直後の `expires_in`(3600 の想定。V02)、更新のローテーション(V01)
 - REST API にも User API にも、OAuth トークンの持ち主を返す口が本当にないか: 公式の REST 一覧では確認済み(V14)。実機で OAuth トークンを使って `/v1/users.json` ほかを叩く追加確認は任意
 - Access の JWT・email に関する前提(ADR 0010 の V17〜V21、P04)
+
+## M01 の実装で確定・追加した点
+
+- `src/auth/kintone-oauth.ts` のエラー分類は 5 種: `invalid_grant` / `invalid_client`(`invalid_client`・`unauthorized_client`。運用者の設定ミス)/ `temporarily_unavailable`(5xx・429・通信失敗)/ `rejected`(上記以外の 4xx。`invalid_request` や 403 など、再試行で直らない拒否。PKCE を拒否された場合もここに入る想定で、その場合は `KINTONE_OAUTH_PKCE=off`)/ `invalid_response`(成功応答の形が想定と違う)。エラー本文は `error` コードだけを読み、`error_description` などは message に載せない(トークンを含みうるため)。
+- コード交換のフォームは `grant_type` `code` `redirect_uri` `code_verifier` の 4 つ(`client_id` も入れない。クライアント認証は Basic ヘッダーだけ)。`KINTONE_OAUTH_PKCE=off` では `code_verifier` を送らず、`beginUpstream` の `data` にも `verifier` を持たない。
+- `/callback` の失敗(コード交換・疎通確認): 通信失敗・5xx・429 は `temporarily_unavailable`、それ以外(`invalid_grant`・疎通確認の 401/403 など)は `server_error` でクライアントへ戻す。ログは失敗の種別だけ。
+- 認可の疎通確認(`GET /k/v1/apps.json?limit=1`)は E2E でコード交換のあとに 1 回呼ばれることを固定した。

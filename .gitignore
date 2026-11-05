@@ -1,10 +1,18 @@
-bin/
-*.test
-/kintone
-.env
-.DS_Store
-*.db
-build/
+node_modules/
 dist/
-coverage.out
-.serena/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+mise.local.toml
+*.log
+.DS_Store
+.claude/handover
+.claude/settings.local.json
+
+# verify:oauth が保存する状態(リフレッシュトークンを含む)
+.verify-oauth.local.json
+*.local.json
+
+# デプロイ用に生成する wrangler 設定(アカウント固有の値を含む。M05 で追加)
+wrangler.deploy*.jsonc
