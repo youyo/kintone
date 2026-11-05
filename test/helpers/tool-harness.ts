@@ -19,8 +19,23 @@ export interface RecordedGet {
   query: Query | undefined;
 }
 
+export interface RecordedWrite {
+  method: "POST" | "PUT" | "DELETE";
+  path: string;
+  body: unknown;
+}
+
+/** i 番目の書き込みの本文(なければ例外)。 */
+export function writeBody(h: { writes: RecordedWrite[] }, i = 0): ToolBody {
+  const w = h.writes[i];
+  if (!w) throw new Error(`書き込みが ${i + 1} 回目まで呼ばれていない`);
+  return w.body as ToolBody;
+}
+
 export interface HarnessOptions {
-  get: KintoneClient["get"];
+  get?: KintoneClient["get"];
+  /** 書き込み(POST / PUT / DELETE)の偽物。省略すると、書き込みは呼ばれたら例外(読み取りのテストの保証)。 */
+  write?: (method: RecordedWrite["method"], path: string, body: unknown) => unknown;
   kv?: KVNamespace;
   grant?: { userId: string; grantId: string };
   tools?: readonly ToolDefinition[];
@@ -28,6 +43,7 @@ export interface HarnessOptions {
 
 export function toolHarness(options: HarnessOptions) {
   const calls: RecordedGet[] = [];
+  const writes: RecordedWrite[] = [];
   const clientOptions: ({ maxApiCalls?: number } | undefined)[] = [];
   let unauthorized = 0;
   const factory = () =>
@@ -37,11 +53,26 @@ export function toolHarness(options: HarnessOptions) {
       ...(options.tools ? { tools: options.tools } : {}),
       getClient: (o) => {
         clientOptions.push(o);
+        const record =
+          (method: RecordedWrite["method"], impl: NonNullable<HarnessOptions["write"]>) =>
+          async (path: string, body: unknown) => {
+            writes.push({ method, path, body });
+            return impl(method, path, body);
+          };
+        const writeMethods = options.write
+          ? {
+              post: record("POST", options.write),
+              put: record("PUT", options.write),
+              delete: record("DELETE", options.write),
+            }
+          : {};
         return fakeKintoneClient({
           get: async (path, query) => {
             calls.push({ path, query });
+            if (!options.get) throw new Error(`toolHarness: 想定外の GET ${path}`);
             return options.get(path, query);
           },
+          ...writeMethods,
         });
       },
       onKintoneUnauthorized: () => {
@@ -50,13 +81,19 @@ export function toolHarness(options: HarnessOptions) {
     });
   return {
     calls,
+    writes,
     clientOptions,
     get unauthorized() {
       return unauthorized;
     },
     factory,
-    async call(name: string, args: Record<string, unknown> = {}) {
-      const rpc: RpcResponse = await rpcTo(factory, "tools/call", { name, arguments: args });
+    /** `meta` は tools/call の `params._meta`(冪等キー `idempotency_key` など)。 */
+    async call(name: string, args: Record<string, unknown> = {}, meta?: Record<string, unknown>) {
+      const rpc: RpcResponse = await rpcTo(factory, "tools/call", {
+        name,
+        arguments: args,
+        ...(meta ? { _meta: meta } : {}),
+      });
       const text = firstText(rpc);
       return {
         rpc,

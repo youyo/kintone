@@ -148,7 +148,8 @@ describe("E2E: verify:oauth(実環境確認用 CLI)を Worker とモック kinto
     expect(report.ok).toBe(true);
     expect(report.facts.issuer).toBe(ORIGIN);
     // M03 で読み取りツールが 3 つになった(M01・M02 は 1 つ)。
-    expect(report.facts.toolCount).toBe(3);
+    // M04 で書き込み 3 ツールが加わり、6 ツールになった(M03 は読み取りの 3 つ)。
+    expect(report.facts.toolCount).toBe(6);
     expect(report.facts.appCount).toBe(1);
     expect(report.facts.tokenExpiresInSeconds).toBeGreaterThan(0);
     expect(report.facts.refreshedExpiresInSeconds).toBeGreaterThan(0);

@@ -35,12 +35,15 @@ describe("tools/list", () => {
     for (const name of names) expect(name).toMatch(/^kintone_[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/);
   });
 
-  it("M03 の 3 つの読み取りツールが公開される(app_describe と records_query は app / app_ref を持つ)", async () => {
+  it("6 ツール(読み取り 3 + 書き込み 3)が公開される(app_describe と records_query は app / app_ref を持つ)", async () => {
     const tools = await listTools();
     expect(tools.map((t) => t.name)).toEqual([
       "kintone_apps_search",
       "kintone_app_describe",
       "kintone_records_query",
+      "kintone_record_create",
+      "kintone_record_update",
+      "kintone_record_delete",
     ]);
     const props = (name: string): Record<string, { description?: string }> => {
       const tool = tools.find((t) => t.name === name);
@@ -69,7 +72,7 @@ describe("tools/list", () => {
     }
   });
 
-  it("toolset: app = apps_search + app_describe、record = records_query", async () => {
+  it("toolset: app = apps_search + app_describe、record = records_query + 書き込み 3 つ", async () => {
     const names = async (toolset: Toolset) => {
       const { result } = await rpcTo(
         () =>
@@ -82,7 +85,78 @@ describe("tools/list", () => {
       return (result?.tools ?? []).map((t) => t.name);
     };
     expect(await names("app")).toEqual(["kintone_apps_search", "kintone_app_describe"]);
-    expect(await names("record")).toEqual(["kintone_records_query"]);
+    expect(await names("record")).toEqual([
+      "kintone_records_query",
+      "kintone_record_create",
+      "kintone_record_update",
+      "kintone_record_delete",
+    ]);
+  });
+
+  it("書き込み 3 ツールの引数(仕様書 §5.4〜5.6)。max_response_tokens は持たない", async () => {
+    const tools = await listTools();
+    const keys = (name: string) => {
+      const tool = tools.find((t) => t.name === name);
+      if (!tool) throw new Error(`tool not found: ${name}`);
+      return Object.keys((tool.inputSchema as { properties: object }).properties);
+    };
+    expect(keys("kintone_record_create")).toEqual(["app", "app_ref", "record", "records"]);
+    expect(keys("kintone_record_update")).toEqual([
+      "app",
+      "app_ref",
+      "id",
+      "update_key_field",
+      "update_key_field_ref",
+      "update_key_value",
+      "revision",
+      "record",
+    ]);
+    expect(keys("kintone_record_delete")).toEqual(["app", "app_ref", "ids", "revisions"]);
+  });
+
+  it("書き込みツールの annotation は 4 区分の仕様どおり(create = WriteNonIdempotent、update = WriteIdempotent、delete = Destructive)", async () => {
+    const tools = await listTools();
+    const annotations = (name: string) => tools.find((t) => t.name === name)?.annotations;
+    expect(annotations("kintone_record_create")).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    });
+    expect(annotations("kintone_record_update")).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    });
+    expect(annotations("kintone_record_delete")).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    });
+    for (const name of ["kintone_apps_search", "kintone_app_describe", "kintone_records_query"]) {
+      expect(annotations(name)).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+    }
+  });
+
+  it("書き込みツールの description に、app_ref / update_key_field_ref は完全一致だけであることが書かれている", async () => {
+    const tools = await listTools();
+    const description = (name: string) => tools.find((t) => t.name === name)?.description ?? "";
+    for (const name of [
+      "kintone_record_create",
+      "kintone_record_update",
+      "kintone_record_delete",
+    ]) {
+      expect(description(name), name).toMatch(/exact/i);
+      expect(description(name), name).toMatch(/partial/i);
+    }
+    expect(description("kintone_record_update")).toMatch(/update_key_field_ref/);
+  });
+
+  it("read_only=true では書き込み 3 ツールが tools/list から消える", async () => {
+    const names = (await listTools({ toolsets: "all", readOnly: true })).map((t) => t.name);
+    expect(names).toEqual(["kintone_apps_search", "kintone_app_describe", "kintone_records_query"]);
   });
 
   it("max_response_tokens の公開スキーマに minimum: 0 が出る(全ての読み取りツール)", async () => {
