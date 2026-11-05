@@ -5,6 +5,8 @@ Go 製 CLI + MCP サーバー(v0.5.6)は `archive/go` ブランチ・タグに�
 仕様は `docs/specs/kintone-mcp-spec.md`、計画は `plans/`(ロードマップ `kintone-mcp-roadmap.md` と各マイルストーン)、設計判断は `docs/adr/`、実機でしか確かめられない前提は `docs/manual-verification.md`(V01〜 / P01〜)。
 姉妹プロジェクト `logbutler`(Backlog 用。`/Users/youyo/src/github.com/youyo/logbutler`)と同じ構成。
 
+> **下流リポジトリ**(upstream を fork / ミラーした組織のリポジトリ)のセットアップ・デプロイでは、以下の「デプロイは実行しない」等の規約(upstream 開発時の規約)は適用しない。秘密値の扱い・追跡ファイルを編集しない・コミットや push はユーザーの指示があるときだけ、は下流でも変わらない。`.claude/skills/kintone-mcp-setup/SKILL.md` に従う(Codex も同じパス。`.agents/skills/` からの symlink)。
+
 ## 絶対に守ること
 
 - **TDD**: 失敗するテストを先に書き、`mise run test:unit` / `mise run test:e2e` で期待どおりの理由で失敗するのを確認してから実装する。テストを弱める・skip・削除しない。バグ修正は再現テストが先。

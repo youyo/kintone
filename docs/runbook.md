@@ -4,6 +4,8 @@ kintone MCP(kintone 用 Remote MCP サーバー。Cloudflare Workers)を、自�
 設計の理由は [ADR 0012](adr/0012-upstream-downstream-deploy.md)(デプロイ設定)と [ADR 0010](adr/0010-access-email-as-user-identity.md)(Access と利用者の識別)。
 **upstream の作業では実デプロイをしていない**。そのため、実機で確かめていない手順には **【未検証】** と V 番号を続けて付け(例: 【未検証】V18)、[docs/manual-verification.md](manual-verification.md) の同じ番号の項目に結んである。印のある手順は、書いてあるとおりに進まないことがありうる。実際にやってみた結果で、この手順書と V 番号の欄を直してほしい。
 
+エージェント(Claude Code / Codex)と一緒に進めるなら、下流リポジトリで `.claude/skills/kintone-mcp-setup/SKILL.md` のスキル(kintone-mcp-setup)を使う。手順の本体はこの手順書で、スキルは進行管理と停止条件を持つ。
+
 ## 全体像と順序
 
 - upstream(このリポジトリ)の追跡ファイルは、下流では**一切編集しない**。だから `git pull` が競合しない。

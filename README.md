@@ -44,6 +44,8 @@ kintone を AI から操作するための **Remote MCP サーバー**(Cloudflar
 3. Cloudflare Access の **self-hosted アプリ**(保護するのは `/authorize` と `/callback` の 2 つだけ)
 4. Cloudflare の KV namespace と、GitHub Actions の Variables / Secrets
 
+エージェント(Claude Code / Codex)に案内してもらうなら、下流リポジトリで `.claude/skills/kintone-mcp-setup/SKILL.md` のスキル(kintone-mcp-setup)を使います。
+
 このリポジトリは **upstream** です。`wrangler.jsonc` はダミー値の共有設定のままで、アカウント固有の値(Worker 名・KV id・ドメイン・kintone のホスト・Access の値・client id / secret)は書きません。下流のリポジトリ(fork またはミラー)が、GitHub の Variables / Secrets から `wrangler.deploy.jsonc` を生成してデプロイします(`mise run deploy:render` / `mise run deploy`、設計は [ADR 0012](docs/adr/0012-upstream-downstream-deploy.md))。**Variable `KINTONE_MCP_WORKER_NAME` が空の upstream では、デプロイのジョブは何もしません。**
 
 ## しくみ
