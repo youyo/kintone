@@ -5,6 +5,9 @@ export interface RecordedCall {
   url: string;
   headers: Headers;
   body: string;
+  /** リクエストの中断シグナル(タイムアウトのテストで、ハンドラが中断に反応するために使う)。 */
+  signal: AbortSignal;
+  redirect: RequestRedirect;
 }
 
 type Handler = (call: RecordedCall) => Response | Promise<Response>;
@@ -39,6 +42,8 @@ export function mockOutboundFetch(handlers: Record<string, Handler>) {
         url: req.url,
         headers: req.headers,
         body: new TextDecoder().decode(await req.arrayBuffer()),
+        signal: req.signal,
+        redirect: req.redirect,
       };
       calls.push(call);
       const handler = findHandler(handlers, `${req.method} ${url.origin}${url.pathname}`);
