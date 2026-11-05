@@ -67,7 +67,7 @@ Go 製の kintone CLI + MCP サーバー(v0.5.6、`archive/go`)を、姉妹プ�
 ## Progress
 
 - [ ] U1: `archive/go` の push(ユーザー)
-- [ ] M01: 雛形 + OAuth(詳細計画: `plans/kintone-mcp-m01-bootstrap-auth.md`)
+- [x] M01: 雛形 + OAuth(詳細計画: `plans/kintone-mcp-m01-bootstrap-auth.md`)
 - [ ] U2/U3: OAuth クライアント登録と利用者の設定(ユーザー)
 - [ ] U4/U5: Access self-hosted アプリの作成(`/authorize` と `/callback` のパス)と AUD の取得、KV と Variables / Secrets(ユーザー)
 - [ ] M02: kintone クライアントと基盤
