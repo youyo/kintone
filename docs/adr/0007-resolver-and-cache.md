@@ -74,3 +74,11 @@ Go 版の名前解決(`internal/resolver/`)は stateless で、`apps.json` / `fo
 
 - `apps.json` の `name` の部分一致が、実際に大文字小文字・全角半角をどう扱うか(完全一致の判定は大文字小文字を区別して自前で行う)
 - `codes` / `name` の 64 文字を超える `app_ref` を渡したときの kintone の応答(400 → `argument_error` の想定)
+
+## M04 の実装で確定した点
+
+- 書き込みツール 3 つ(`kintone_record_create` / `record_update` / `record_delete`)は `withResolvedApp(args, ctx, { mode: "write" }, ...)` で `app_ref` を解決する。部分一致のみなら `resolver_app_exact_match_required`(`details.candidates`)で、**kintone の書き込み API(POST / PUT / DELETE)を呼ばない**。名前解決の GET(`apps.json`)は呼ぶ。unit(各ツール)と E2E(Worker 全体への HTTP)で固定した。
+- `record_update` の `update_key_field_ref` は `resolveField(appId, ref, { mode: "write" })`(フィールドコード完全一致 → label 完全一致。部分一致のみなら 1 件でも複数件でも `resolver_field_exact_match_required` + `candidates`(コード順))。PUT の前に `form/fields.json` を 1 回だけ呼ぶ。`update_key_field`(コード直接指定)なら解決の API は呼ばない。
+- 書き込みでもキャッシュは読む(仕様書 §10 の「読む: アプリ・フィールドの名前解決」)。キャッシュで解決したアプリへの書き込みが 404 なら、読んだ段階のキーと `fields:<appId>` を消して `not_found` を返す(E2E で `record_delete` について固定)。**既知のリスク**: キャッシュ(TTL 600 秒)が古く、アプリ名が付け替わっている場合、書き込みが別のアプリに当たりうる(特に `record_delete`)。完全一致(ID・コード・名前)だけで解決するので、部分一致で当たる誤りよりは小さいが、ゼロではない。気になる運用では `app`(ID)を渡すこと。書き込みだけキャッシュを読まない案は、最悪ケースの式(A = 11)が毎回かかるので採っていない(要望があれば再検討)。
+- 書き込みツールの `app_ref` の説明は専用(`writeAppTargetShape`)。「完全一致だけ。部分一致の候補が返ったら ID で再実行」と書き、読み取りツールの説明(部分一致も可)とは分けた。
+- `app_ref` 解決の GET は読み取りなので 429・503 でリトライされる。書き込みツールの `maxApiCalls` はこれを含めて決めた(ADR 0008)。

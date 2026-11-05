@@ -170,5 +170,178 @@
       "idempotentHint": true,
       "openWorldHint": true
     }
+  },
+  {
+    "name": "kintone_record_create",
+    "title": "レコード作成",
+    "description": "Create records in a kintone app (POST /k/v1/records.json). Specify the app with exactly one of app (ID) or app_ref (ID, code or name). For writes app_ref must match the app ID, code or name EXACTLY: a partial name match is never used; when only partial matches exist the call fails with resolver_app_exact_match_required and details.candidates, so call again with app set to a candidate ID. Specify exactly one of record (1 record) or records (1-100 records), each shaped {\"<field code>\":{\"value\":...}}; all records are created or none. Returns {ids:[number], revisions:[number]}. A failed write is not retried. Re-sending identical arguments within 5 minutes returns the first result without creating again (to create an identical record on purpose, add a different idempotency_key argument).",
+    "inputSchema": {
+      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "app": {
+          "description": "kintone app ID (positive integer). Specify exactly one of app or app_ref (either one, not both).",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "app_ref": {
+          "description": "App reference: app ID, app code, or app name. Write operations accept an EXACT match only (a partial name match is never used: it fails with resolver_app_exact_match_required and details.candidates; pass a candidate ID as app). Specify exactly one of app or app_ref (either one, not both).",
+          "type": "string",
+          "minLength": 1
+        },
+        "record": {
+          "description": "One record to create: {\"<field code>\":{\"value\":...}}. Specify exactly one of record or records.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "records": {
+          "description": "Records to create (1-100), each {\"<field code>\":{\"value\":...}}. Specify exactly one of record or records.",
+          "minItems": 1,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "レコード作成",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "kintone_record_update",
+    "title": "レコード更新",
+    "description": "Update one record of a kintone app (PUT /k/v1/record.json). Specify the app with exactly one of app (ID) or app_ref (ID, code or name). For writes app_ref must match the app ID, code or name EXACTLY: a partial name match is never used; when only partial matches exist the call fails with resolver_app_exact_match_required and details.candidates, so call again with app set to a candidate ID. Identify the record with id, or with update_key_field / update_key_field_ref + update_key_value (update_key_field_ref also accepts only an EXACT field code or label; a partial label match fails with resolver_field_exact_match_required and details.candidates). record (required, not empty) holds the fields to update as {\"<field code>\":{\"value\":...}}; revision enables optimistic locking. Returns {revision:number}. A failed write is not retried.",
+    "inputSchema": {
+      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "app": {
+          "description": "kintone app ID (positive integer). Specify exactly one of app or app_ref (either one, not both).",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "app_ref": {
+          "description": "App reference: app ID, app code, or app name. Write operations accept an EXACT match only (a partial name match is never used: it fails with resolver_app_exact_match_required and details.candidates; pass a candidate ID as app). Specify exactly one of app or app_ref (either one, not both).",
+          "type": "string",
+          "minLength": 1
+        },
+        "id": {
+          "description": "ID of the record to update. Specify either id or update_key_field(_ref) + update_key_value, not both.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "update_key_field": {
+          "description": "Field code used as the update key (a text field or number field with 'prohibit duplicate values'). Exclusive with update_key_field_ref and id.",
+          "type": "string",
+          "minLength": 1
+        },
+        "update_key_field_ref": {
+          "description": "Update key field given as field code or label. For writes only an EXACT match is accepted: a partial label match fails with resolver_field_exact_match_required and details.candidates (use the code). Exclusive with update_key_field and id.",
+          "type": "string",
+          "minLength": 1
+        },
+        "update_key_value": {
+          "description": "Value of the update key field that identifies the record.",
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "description": "Expected revision of the record for optimistic locking (integer; -1 means no check).",
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 9007199254740991
+        },
+        "record": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {},
+          "description": "Fields to update: {\"<field code>\":{\"value\":...}}. Required and not empty."
+        }
+      },
+      "required": [
+        "record"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "レコード更新",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "kintone_record_delete",
+    "title": "レコード削除",
+    "description": "Delete records of a kintone app (DELETE /k/v1/records.json). This cannot be undone. Specify the app with exactly one of app (ID) or app_ref (ID, code or name). For writes app_ref must match the app ID, code or name EXACTLY: a partial name match is never used; when only partial matches exist the call fails with resolver_app_exact_match_required and details.candidates, so call again with app set to a candidate ID. ids (1-100) are the record IDs to delete; revisions (optional, same length as ids) enable optimistic locking. All records are deleted or none. Returns {deleted:number}. A failed write is not retried.",
+    "inputSchema": {
+      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "app": {
+          "description": "kintone app ID (positive integer). Specify exactly one of app or app_ref (either one, not both).",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "app_ref": {
+          "description": "App reference: app ID, app code, or app name. Write operations accept an EXACT match only (a partial name match is never used: it fails with resolver_app_exact_match_required and details.candidates; pass a candidate ID as app). Specify exactly one of app or app_ref (either one, not both).",
+          "type": "string",
+          "minLength": 1
+        },
+        "ids": {
+          "minItems": 1,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "description": "IDs of the records to delete (1-100, positive integers). Required."
+        },
+        "revisions": {
+          "description": "Expected revisions for optimistic locking, one per id in the same order (-1 means no check). Must have the same length as ids.",
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": -1,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "レコード削除",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": true
+    }
   }
 ]

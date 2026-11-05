@@ -278,6 +278,7 @@ export interface RpcResponse {
   result?: {
     tools?: {
       name: string;
+      description?: string;
       annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
       inputSchema?: unknown;
     }[];

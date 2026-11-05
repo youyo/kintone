@@ -1,6 +1,6 @@
 # ADR 0009: logbutler の規約のうち、採用するものと後回しにするもの
 
-- 状態: 採用(M01・M02・M03 の分を実装。M04・M05 の行は各マイルストーンで実装)
+- 状態: 採用(M01・M02・M03・M04 の分を実装。M05 の行は M05 で実装)
 - 日付: 2026-11-05
 - 関連: logbutler `CLAUDE.md`、logbutler ADR 0008 / 0010 / 0011 / 0005、ADR 0010
 
@@ -42,3 +42,7 @@
 - tools/list のスナップショットは `test/snapshots/tools-list.json`(`toMatchFileSnapshot`)。更新タスク `test:update-snapshots` は、ファイルを先に書いた `vitest run test/unit/tools-list-snapshot.test.ts --project unit --update`(`--update` の後ろにファイルを置くと指定が効かず unit 全体が走るため)。CI(`CI=1`)ではスナップショットを書き換えず、差分があれば失敗する。
 - 依存は追加していない。
 
+## M04 の実装で確定した点
+
+- 冪等キャッシュ `idem:` を実装した(`src/mcp/idempotency.ts`、設計は ADR 0011)。対象は WriteNonIdempotent の `kintone_record_create` だけ(`record_update` / `record_delete` は対象外)。logbutler ADR 0005 との差分は ADR 0011 に書いた(キーが grant 単位、明示キーを SHA-256 にして入れる、同じ明示キーで別の引数は `argument_error`)。
+- 依存は追加していない。

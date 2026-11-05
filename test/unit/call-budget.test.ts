@@ -3,12 +3,20 @@
  *   A = アプリ解決の最悪 = コード 1 + 名前 10 = 11、F = 1
  *   apps_search = 1(× 3 = 3)、app_describe = A + 2 = 13(× 3 = 39)、records_query = A + 1 = 12(× 3 = 36)
  * リトライ(読み取りの 429・503 を 1 呼び出しあたり最大 2 回)を含めた最悪の試行数が、宣言した maxApiCalls ちょうどになる。
+ *
+ * 書き込みツール(M04): 名前解決の GET は読み取りなのでリトライされる(× 3)が、書き込み本体はリトライしない(× 1)。
+ *   record_create = A × 3 + 1 = 34、record_update = (A + F) × 3 + 1 = 37、record_delete = A × 3 + 1 = 34(論理は 12 / 13 / 12)
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createKintoneClient } from "../../src/kintone/client";
 import { createMcpServer } from "../../src/mcp/server";
 import { ALL_TOOLS } from "../../src/mcp/tools";
-import { APP_RESOLVE_CALLS, FIELD_RESOLVE_CALLS, readBudget } from "../../src/resolver/budget";
+import {
+  APP_RESOLVE_CALLS,
+  FIELD_RESOLVE_CALLS,
+  readBudget,
+  writeBudget,
+} from "../../src/resolver/budget";
 import { appCacheKey, createResolverCache } from "../../src/resolver/cache";
 import {
   type AppRow,
@@ -63,6 +71,10 @@ function mockKintone(world: World) {
       ),
     [`GET ${ORIGIN}/k/v1/records.json`]: (call) =>
       maybe429(call, () => jsonResponse({ records: [], totalCount: "0" })),
+    // 書き込みはリトライされないので、429 は返さない(1 回で成功する)。
+    [`POST ${ORIGIN}/k/v1/records.json`]: () => jsonResponse({ ids: ["1"], revisions: ["1"] }),
+    [`PUT ${ORIGIN}/k/v1/record.json`]: () => jsonResponse({ revision: "2" }),
+    [`DELETE ${ORIGIN}/k/v1/records.json`]: () => jsonResponse({}),
   });
 }
 
@@ -194,4 +206,112 @@ describe("キャッシュの取り直しを含めても、解決の呼び出し�
     expect(m.calls.filter((c) => new URL(c.url).pathname === "/k/v1/apps.json")).toHaveLength(10);
     expect(f.store.has(await appCacheKey(GRANT, "code", "共通XX"))).toBe(true);
   });
+});
+
+// ---- M04: 書き込みツール ----
+
+const REC = { amount: { value: "1" } };
+/** app_ref で最悪(コード 1 + 名前 10 ページ)まで解決させ、書き込みまで進む引数。 */
+const WRITE_CASES = [
+  {
+    tool: "kintone_record_create",
+    args: { app_ref: "共通", record: REC },
+    /** A + 書き込み 1 */
+    logical: APP_RESOLVE_CALLS + 1,
+    budget: 34,
+    writeMethod: "POST",
+  },
+  {
+    tool: "kintone_record_update",
+    // フィールド解決(F)も最悪まで通す: label 完全一致で fields.json 1 回。
+    args: {
+      app_ref: "共通",
+      update_key_field_ref: "金額",
+      update_key_value: "1",
+      record: REC,
+    },
+    /** A + F + 書き込み 1 */
+    logical: APP_RESOLVE_CALLS + FIELD_RESOLVE_CALLS + 1,
+    budget: 37,
+    writeMethod: "PUT",
+  },
+  {
+    tool: "kintone_record_delete",
+    args: { app_ref: "共通", ids: [1] },
+    logical: APP_RESOLVE_CALLS + 1,
+    budget: 34,
+    writeMethod: "DELETE",
+  },
+] as const;
+
+describe("書き込みツールの maxApiCalls(解決の読み取り × 3 + 書き込み 1)", () => {
+  it("式の部品: writeBudget(読み取りの論理回数, 書き込み回数 = 1) = readBudget + 書き込み", () => {
+    expect(writeBudget(APP_RESOLVE_CALLS)).toBe(34);
+    expect(writeBudget(APP_RESOLVE_CALLS + FIELD_RESOLVE_CALLS)).toBe(37);
+    expect(writeBudget(0)).toBe(1);
+    expect(writeBudget(2, 1)).toBe(7);
+  });
+
+  it.each(WRITE_CASES)(
+    "$tool の maxApiCalls は $budget(論理最悪 $logical 回)",
+    ({ tool, budget, logical }) => {
+      const def = ALL_TOOLS.find((t) => t.name === tool);
+      expect(def?.maxApiCalls).toBe(budget);
+      // 論理 = 読み取り(解決)+ 書き込み 1。読み取りだけ × 3。
+      expect((logical - 1) * 3 + 1).toBe(budget);
+      // 既定の 50 以内。
+      expect(budget).toBeLessThanOrEqual(50);
+    },
+  );
+
+  it.each(WRITE_CASES)(
+    "$tool: 全ページ満杯のモックで数えた論理呼び出し数は $logical 回(リトライなし)",
+    async ({ tool, args, logical, writeMethod }) => {
+      const m = mockKintone({ apps: NINE_AND_A_HALF_PAGES });
+      const body = await callTool(tool, args);
+      expect(body.error).toBeUndefined();
+      expect(m.calls).toHaveLength(logical);
+      // 書き込みは最後に 1 回だけ。
+      expect(m.calls.filter((c) => c.method === writeMethod)).toHaveLength(1);
+      expect(m.calls.at(-1)?.method).toBe(writeMethod);
+    },
+  );
+
+  it.each(WRITE_CASES)(
+    "$tool: 解決の GET がすべて 429 を 2 回返してから成功しても、試行数は maxApiCalls($budget)ちょうどで成功する(書き込みは 1 回)",
+    async ({ tool, args, budget, writeMethod }) => {
+      const m = mockKintone({ apps: NINE_AND_A_HALF_PAGES, retryTwice: true });
+      const body = await callTool(tool, args);
+      expect(body.error).toBeUndefined();
+      expect(m.calls).toHaveLength(budget);
+      expect(m.calls.filter((c) => c.method === "GET")).toHaveLength(budget - 1);
+      expect(m.calls.filter((c) => c.method === writeMethod)).toHaveLength(1);
+    },
+  );
+
+  it.each(WRITE_CASES)(
+    "$tool: 名前検索が 10 ページ満杯なら 11 回の GET で resolver_app_list_too_large になり、書き込みを呼ばない",
+    async ({ tool, args }) => {
+      const m = mockKintone({ apps: manyApps(1500, "共通") });
+      const body = await callTool(tool, args);
+      expect(body.error.code).toBe("resolver_app_list_too_large");
+      expect(m.calls).toHaveLength(11);
+      expect(m.calls.every((c) => c.method === "GET")).toBe(true);
+    },
+  );
+
+  it.each(WRITE_CASES)(
+    "$tool: 古い『なし』のキャッシュ(コード・名前)があっても、取り直しを含めて解決の GET は A = 11 回以内",
+    async ({ tool, args, logical }) => {
+      const f = fakeKv();
+      const cache = createResolverCache(f.kv, GRANT);
+      await cache.putApps("code", "共通", []);
+      await cache.putApps("name", "共通", []);
+      const m = mockKintone({ apps: NINE_AND_A_HALF_PAGES });
+      const body = await callTool(tool, args, { kv: f.kv });
+      expect(body.error).toBeUndefined();
+      expect(m.calls).toHaveLength(logical);
+      expect(m.calls.filter((c) => new URL(c.url).pathname === "/k/v1/apps.json")).toHaveLength(11);
+    },
+  );
 });

@@ -110,6 +110,8 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 | 200 なのに JSON でない・空の本文が返ることがあるか(IP 制限・プロキシの HTML など。M02 は `api_error`・retryable・`http_status: 200` にする) | | | |
 | 3xx(リダイレクト)が返ることがあるか(M02 は辿らず `api_error`) | | | |
 | `revision` の不一致(update) | | | |
+| **存在しないアプリ(削除済みなど)に対する `records.json` / `record.json` の実ステータス**(M04 で追記。404 の想定だが、**520 などの別のステータス・`CB_VA` 以外のコードが返る可能性がある**。404 以外が返ると、M03 の「キャッシュで解決したアプリへの呼び出しが `not_found`(HTTP 404)ならキャッシュを消す」が働かず、**削除済みのアプリの `app_ref` のキャッシュが TTL(600 秒)まで残る**。そのあいだ `app_ref` は古い ID に解決され続け、読み書きがエラーを返す。実ステータスを確認し、404 でなければ「キャッシュを消す条件」を kintone のコード(`GAIA_AP01` など)に広げるか判断する。**コードは変えていない**) | | | |
+| `limit` が 500 を超える・`offset` が 10,000 を超える `records_query` のステータスと `code`(M04 で追記。E2E は 400 + `CB_VA01` → `argument_error` を想定して固定した) | | | |
 
 ---
 
@@ -124,7 +126,7 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 ### V09 `form/fields.json` の必要権限(アプリ管理権限が要るか)
 - 出典: ADR 0007。公式ページの本文を取得できなかった(404)。OAuth scope は `k:app_settings:read`(scope ページ)
 - 目的: 一般の閲覧者(アプリ管理権限なし)が `GET /k/v1/app/form/fields.json` を OAuth で呼べるか。呼べないなら `kintone_app_describe` と `update_key_field_ref` が `permission_error` になる。
-- 手順: アプリ管理権限のないユーザーで認可し、`kintone_app_describe`(M03 で実装済み)または curl で呼ぶ。
+- 手順: アプリ管理権限のないユーザーで認可し、`kintone_app_describe`(M03 で実装済み)・`kintone_record_update` の `update_key_field_ref`(M04 で実装済み)または curl で呼ぶ。
 - 結果: 呼べる [ はい / いいえ ] ／ 失敗時のステータスとコード [ ] ／ 判定 [ ] ／ メモ:
 
 ### V10 IP アドレス制限・他ドメイン
@@ -141,7 +143,7 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 
 ### V12 KV の読み書きは subrequest に数えられるか
 - 出典: ADR 0008 / 0007。logbutler ADR 0003 は「Workers 無料プランの subrequest 上限 50」を根拠にしている
-- 目的: KV の get/put が subrequest 上限に数えられるか。数えられるなら最悪ケース(論理 13 回 + KV)の見積もりを直す。M03 の `maxApiCalls`(3 / 39 / 36)は kintone への HTTP だけを数え、KV の get/put を含めない。名前解決の KV は最悪で 2 回の get + 2 回の put(+ 取り直し分)、`app_describe` はさらに fields の put 1 回。
+- 目的: KV の get/put が subrequest 上限に数えられるか。数えられるなら最悪ケース(論理 13 回 + KV)の見積もりを直す。M03 の `maxApiCalls`(3 / 39 / 36)と M04 の書き込み(34 / 37 / 34)は kintone への HTTP だけを数え、KV の get/put を含めない。名前解決の KV は最悪で 2 回の get + 2 回の put(+ 取り直し分)、`app_describe` はさらに fields の put 1 回。
 - 手順: Cloudflare の公式ドキュメント(Workers の limits)を確認し、無料プラン相当で名前解決の最悪ケース(10 ページ満杯のモック)を `wrangler dev --remote` 等で通す。
 - 結果: 数えられる [ はい / いいえ ] ／ 出典 URL [ ] ／ 判定 [ ] ／ メモ:
 
@@ -183,6 +185,18 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 - 目的: `totalCount=true` のときの実際の型(文字列の想定)。数値で返っても `Number()` で数値になるが、`null` や空のときの挙動を確認する(M03 は `null` は出力に出さず、数として読めない文字列は `api_error`)。
 - 手順: 検証アプリで `kintone_records_query` に `total_count: true` を渡す。0 件のアプリでも確認する。
 - 結果: 型 [ ] ／ 0 件のとき [ ] ／ 判定 [ ] ／ メモ:
+
+### V24 書き込み API の実際の応答形と制約(M04 で追加)
+- 出典: 仕様書 §5.4〜5.6、ADR 0006 / 0008。公式 add-records / update-record / delete-records ページ
+- 目的: (a) `POST /k/v1/records.json` の `ids` / `revisions` が文字列の配列か(M04 は文字列でも数値でも数値化し、読めなければ retryable でない `api_error`)、(b) `PUT /k/v1/record.json` の `revision` の型、(c) `DELETE /k/v1/records.json` が **JSON 本文**(`Content-Type: application/json`)を受け付けるか(Workers の `fetch` は DELETE に本文を付けられる想定。応答が `{}` か空本文か。空本文だと M02 のクライアントは 200 + JSON でない本文を `api_error` にするので要注意)、(d) `updateKey` に使えるフィールドの条件(重複禁止の文字列 1 行・数値)と、条件を満たさないときのステータス・コード、(e) `revision` の不一致(`GAIA_CO02` など)のステータス、(f) 100 件ちょうどの `records` / `ids` が通ること、(g) 一部のレコードが不正なときに全件が取り消されること。
+- 手順: 検証アプリで 3 ツールを実行し、ステータス・本文を記録する。
+- 結果: (a) [ ] ／ (b) [ ] ／ (c) [ ] ／ (d) [ ] ／ (e) [ ] ／ (f) [ ] ／ (g) [ ] ／ 判定 [ ] ／ メモ:
+
+### V25 冪等キャッシュ(`idem:`)と KV の結果整合(M04 で追加)
+- 出典: ADR 0011、V15
+- 目的: `kintone_record_create` を同じ引数で続けて再送したとき、別のロケーション・別の isolate でも保存済みの結果が見えて重複作成を防げるか。保存から再送までの時間(数秒〜60 秒)と重複の発生を観測する。
+- 手順: 検証アプリに対し、`_meta.idempotency_key` を付けた `kintone_record_create` を 1 回呼び、すぐ(1 秒以内・10 秒後・60 秒後)に同じ呼び出しを再送する。作成されたレコードの数を数える。
+- 結果: 重複した最短の間隔 [ ] ／ 判定 [ ] ／ メモ:
 
 ## C. MCP クライアント・Portal(ADR 0002)
 
@@ -268,4 +282,6 @@ mise run verify:oauth -- $BASE/mcp --refresh-only  # 保存済みの状態で更
 | V21 kintone のトークン取り消し | 0010 | 低 |
 | V22 名前検索の部分一致・長さの上限(M03) | 0007 | 中 |
 | V23 totalCount の型(M03) | 0006 | 低 |
+| V24 書き込み API の応答形・制約(M04) | 0006 / 0008 | 高(書き込みを使う前) |
+| V25 冪等キャッシュと KV の結果整合(M04) | 0011 | 中 |
 | P01〜P04 Portal | 0002 / 0010 | M05 以降(P04 は早めに) |

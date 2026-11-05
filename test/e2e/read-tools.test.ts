@@ -60,7 +60,12 @@ interface Options {
 
 /** 認可を済ませた状態の kintone のモック。認可時の疎通確認(apps.json?limit=1)には通常の応答を返す。 */
 async function setup(options: Options = {}) {
-  const state = { apps: options.apps ?? ROWS, afterFlow: false, recordsNotFound: false };
+  const state = {
+    apps: options.apps ?? ROWS,
+    afterFlow: false,
+    recordsNotFound: false,
+    recordsBadRequest: false,
+  };
   const apiCalls: RecordedCall[] = [];
   const track = (c: RecordedCall) => {
     if (state.afterFlow) apiCalls.push(c);
@@ -81,6 +86,13 @@ async function setup(options: Options = {}) {
       },
       [`GET ${KINTONE_ORIGIN}/k/v1/records.json`]: (call) => {
         track(call);
+        if (state.recordsBadRequest) {
+          // kintone は limit が 500 を超える・offset が 10,000 を超えるクエリを 400 + CB_VA01 で拒否する。
+          return jsonResponse(
+            { code: "CB_VA01", id: "bad", message: "limit must be 500 or less" },
+            400,
+          );
+        }
         if (state.recordsNotFound) {
           return jsonResponse({ code: "GAIA_AP01", id: "x", message: "app not found" }, 404);
         }
@@ -119,7 +131,7 @@ async function setup(options: Options = {}) {
 }
 
 describe("E2E: tools/list", () => {
-  it("読み取りツール 3 つが見える。?toolsets=app は 2 つ、?toolsets=record は 1 つ", async () => {
+  it("読み取り 3 + 書き込み 3 の 6 ツールが見える。?toolsets=app は 2 つ、?toolsets=record は 4 つ、?read_only=true は読み取りの 3 つ", async () => {
     const { connect } = await setup();
     const token = await connect();
     const names = async (query = "") =>
@@ -131,17 +143,32 @@ describe("E2E: tools/list", () => {
       "kintone_apps_search",
       "kintone_app_describe",
       "kintone_records_query",
+      "kintone_record_create",
+      "kintone_record_update",
+      "kintone_record_delete",
     ]);
     expect(await names("?toolsets=app")).toEqual(["kintone_apps_search", "kintone_app_describe"]);
-    expect(await names("?toolsets=record")).toEqual(["kintone_records_query"]);
-    expect(await names("?read_only=true")).toHaveLength(3);
+    expect(await names("?toolsets=record")).toEqual([
+      "kintone_records_query",
+      "kintone_record_create",
+      "kintone_record_update",
+      "kintone_record_delete",
+    ]);
+    expect(await names("?read_only=true")).toEqual([
+      "kintone_apps_search",
+      "kintone_app_describe",
+      "kintone_records_query",
+    ]);
   });
 
   it("max_response_tokens の公開スキーマに minimum: 0 が出る", async () => {
     const { connect } = await setup();
     const token = await connect();
     const tools = (await readRpc(await mcpRequest(token, "tools/list"))).result?.tools ?? [];
-    for (const t of tools) {
+    // 書き込み・破壊的ツール(M04)は max_response_tokens を持たないので、読み取りのツールだけを見る。
+    const readTools = tools.filter((t) => t.annotations?.readOnlyHint === true);
+    expect(readTools).toHaveLength(3);
+    for (const t of readTools) {
       const props = (t.inputSchema as { properties: Record<string, { minimum?: number }> })
         .properties;
       expect(props.max_response_tokens?.minimum, t.name).toBe(0);
@@ -348,6 +375,28 @@ describe("E2E: kintone_records_query", () => {
     expect(apiCalls.map(path)).toEqual(["/k/v1/records.json"]);
     expect((await env.OAUTH_KV.list({ prefix })).keys).toHaveLength(0);
   });
+
+  it.each([
+    ["limit が 500 を超える", 'customer = "山田" limit 501'],
+    ["offset が 10,000 を超える", 'customer = "山田" limit 10 offset 10001'],
+  ])(
+    "kintone が %s クエリを 400 + CB_VA01 で拒否したら argument_error(retryable でない)で返り、リトライしない",
+    async (_name, query) => {
+      const { connect, callTool, state, apiCalls } = await setup();
+      const token = await connect();
+      state.recordsBadRequest = true;
+      const r = await callTool(token, "kintone_records_query", { app: 12, query });
+      expect(r.isError).toBe(true);
+      expect(r.body.error).toMatchObject({
+        code: "argument_error",
+        retryable: false,
+        details: { http_status: 400, kintone_code: "CB_VA01" },
+      });
+      expect(r.body.error.message).toContain("limit must be 500 or less");
+      expect(apiCalls).toHaveLength(1);
+      expect(new URL((apiCalls[0] as RecordedCall).url).searchParams.get("query")).toBe(query);
+    },
+  );
 
   it("max_response_tokens: 小さい上限で response_too_large", async () => {
     const { connect, callTool } = await setup();

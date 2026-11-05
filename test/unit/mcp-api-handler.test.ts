@@ -193,21 +193,54 @@ describe("/mcp の URL クエリ(read_only / toolsets。仕様書 §8)", () => {
   };
 
   const ALL_READ = ["kintone_apps_search", "kintone_app_describe", "kintone_records_query"];
+  const WRITE = ["kintone_record_create", "kintone_record_update", "kintone_record_delete"];
 
-  it.each(["", "?read_only=true", "?read_only=false", "?toolsets=all&read_only=true", "?x=1"])(
-    "有効なクエリ(%s)では tools/list が通り、M03 の読み取りツール 3 つが見える",
+  it.each(["", "?read_only=false", "?toolsets=all", "?x=1"])(
+    "有効なクエリ(%s)では tools/list が通り、読み取り 3 つと書き込み 3 つの 6 ツールが見える",
+    async (query) => {
+      expect(await listNames(query)).toEqual([...ALL_READ, ...WRITE]);
+    },
+  );
+
+  it.each(["?read_only=true", "?toolsets=all&read_only=true"])(
+    "%s では書き込み・破壊的ツールが隠れ、読み取りの 3 つだけが見える",
     async (query) => {
       expect(await listNames(query)).toEqual(ALL_READ);
     },
   );
 
-  it("?toolsets=app は apps_search と app_describe、?toolsets=record は records_query だけ", async () => {
+  it("?toolsets=app は apps_search と app_describe、?toolsets=record は records_query と書き込み 3 つ", async () => {
     expect(await listNames("?toolsets=app")).toEqual([
       "kintone_apps_search",
       "kintone_app_describe",
     ]);
-    expect(await listNames("?toolsets=record")).toEqual(["kintone_records_query"]);
+    expect(await listNames("?toolsets=record")).toEqual(["kintone_records_query", ...WRITE]);
     expect(await listNames("?toolsets=record&read_only=true")).toEqual(["kintone_records_query"]);
+    expect(await listNames("?toolsets=app&read_only=true")).toEqual([
+      "kintone_apps_search",
+      "kintone_app_describe",
+    ]);
+  });
+
+  it("read_only=true では書き込みツールを tools/call で呼んでも実行されず、kintone を呼ばない", async () => {
+    const m = mockOutboundFetch({
+      "POST https://example.cybozu.com/k/v1/records.json": () =>
+        jsonResponse({ ids: ["1"], revisions: ["1"] }),
+      "PUT https://example.cybozu.com/k/v1/record.json": () => jsonResponse({ revision: "2" }),
+      "DELETE https://example.cybozu.com/k/v1/records.json": () => jsonResponse({}),
+    });
+    for (const [name, args] of [
+      ["kintone_record_create", { app: 12, record: { a: { value: "1" } } }],
+      ["kintone_record_update", { app: 12, id: 1, record: { a: { value: "1" } } }],
+      ["kintone_record_delete", { app: 12, ids: [1] }],
+    ] as const) {
+      const res = await rpc("?read_only=true", "tools/call", { name, arguments: args });
+      const text = await res.text();
+      // 未登録のツールなので、成功の結果にならない(JSON-RPC のエラー、または isError)。
+      expect(text, name).not.toContain('"ids"');
+      expect(text, name).toMatch(/not found|unknown|isError|error/i);
+    }
+    expect(m.calls).toEqual([]);
   });
 
   it.each([
