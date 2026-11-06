@@ -105,6 +105,7 @@ MCP アクセストークンは不透明トークン(`{userId}:{grantId}:{secret
 
 logbutler ADR 0014 と同じ方式。
 
+- MCP grant(リフレッシュトークン)の最大寿命: **7 日の固定寿命**(`MCP_REFRESH_TOKEN_TTL_SECONDS = 604800`。`refreshTokenIdleTTL` は設定しない。`tokenExchangeCallback` は `refreshTokenTTL` / `refreshTokenIdleTTL` を返さない)。DCR 登録: 30 日(`MCP_CLIENT_REGISTRATION_TTL_SECONDS`)。ADR 0010
 - MCP アクセストークンの寿命: 最大 30 分(`MCP_ACCESS_TOKEN_TTL_SECONDS = 1800`)、最小 60 秒(KV の最小 TTL)
 - kintone を更新するのは、保存期限(`kintoneExpiresAt`)を過ぎているときと、stale 印(`kintone-stale:<userId>:<grantId>`、TTL 15 分)があるときだけ
 - 更新で新しいアクセストークンを得た: MCP の寿命 = `clamp(残り - 60, 60, 1800)`。それ以外: `clamp(残り + 5, 60, 1800)`
@@ -285,6 +286,7 @@ GET の URL 長の上限は公式に記載なし(未検証 V11)。
 ### 注意(ADR 0007)
 - 部分一致の単一ヒットの自動採用は読み取り系だけ。書き込み系(特に `kintone_record_delete`)は完全一致のみで、意図しないアプリに当たらない(ユーザー決定、ADR 0007)。フィールド参照(`update_key_field_ref`)も完全一致のみ(ユーザー決定、ADR 0007)。
 - 書き込みモードでも API の呼び出し回数・順序は読み取りと同じ(§8 の式は変わらない)。
+- **書き込みモードはキャッシュを読まない**(ADR 0007)。`app_ref` も `update_key_field_ref` も毎回 API で解決する(結果はキャッシュに書く。次の読み取りは使う)。アプリ名を変えた直後に、更新や削除が TTL 600 秒の古い対象に当たらないため。最悪ケースの式は「全段階が API」を前提にしているので変わらない。ID の直接指定は従来どおり(API もキャッシュも使わない)。
 - `apps.json` は、ゲストスペースを指定しない呼び出しだと閲覧可能なゲストスペース内のアプリも返す(公式)。名前解決で採用したアプリがゲストスペースのものだと、以降の `/k/v1/...` 呼び出しは失敗する(ADR 0003 の既知の限界)。
 
 ## 8. 制限値とクライアント動作(ADR 0008)
@@ -320,6 +322,10 @@ KV の読み書きが subrequest の上限に数えられるかは未検証(V12)
 ### 応答サイズ(logbutler ADR 0007)
 
 読み取りツールの応答 JSON の推定トークン数(ASCII は 4 文字 1 トークン切り上げ、ASCII 以外は 1 文字 1 トークン)が `max_response_tokens`(既定 50000)を超えたら、切り詰めず `response_too_large`。書き込み系は対象外(成功した書き込みを失敗に見せないため)。
+
+### JSON-RPC バッチ
+
+`/mcp` の POST 本文が JSON 配列(バッチ)で、`method` が `tools/call` の要素が **2 件以上**なら、ツールも kintone も呼ばずに HTTP 400 `{"error":"invalid_request","error_description":"..."}`(`invalid_query` と同じ形式)。理由: 件ごとに `maxApiCalls` が新しく割り当てられ(1 回の POST で最大 100 件)、1 件の kintone 401 で応答全体が HTTP 401 に置き換わり、ほかの件の書き込み結果が失われるため。`tools/call` が 1 件だけのバッチ・`tools/call` 以外だけのバッチ・バッチでない通常の POST は従来どおり(`src/mcp/request-body.ts`)。参考: 2026-07-28 版のレーンは SDK がバッチ自体を 400 にする。旧版のレーンは SDK がバッチを実行する。
 
 ### URL クエリ(logbutler ADR 0008)
 
@@ -363,7 +369,7 @@ KV の読み書きが subrequest の上限に数えられるかは未検証(V12)
 | キー | `kcache:v1:<userId>:<grantId>:appcode:<ハッシュ>`、`kcache:v1:<userId>:<grantId>:appname:<ハッシュ>`、`kcache:v1:<userId>:<grantId>:fields:<appId>`。ハッシュは `ref` の SHA-256 先頭 16 文字(16 進)。`userId` は Access の email のハッシュ、`grantId` は MCP トークンから取り出す。**grant 単位で分離する**(email 単位にしない。同じ email で別の kintone アカウントを認可した grant と共有しないため。ADR 0010) |
 | 値 | アプリ: `{appId, code, name}` の配列(名前検索は全ページを連結した最大 1,000 件)。フィールド: `{code, label, type}` の配列 |
 | TTL | 600 秒(KV の最小 60 秒以上) |
-| 読む | アプリ・フィールドの名前解決。`kintone_apps_search` と `kintone_app_describe` は読まない(常に最新) |
+| 読む | 読み取りモードのアプリ・フィールドの名前解決。**書き込みモード(`record_create` / `record_update` / `record_delete`)・`kintone_apps_search`・`kintone_app_describe` は読まない**(常に最新。書き込みモードも結果は書く) |
 | 書く | 名前解決で取得したとき。`kintone_app_describe` が取得したフィールド定義でフィールドのキャッシュも更新 |
 | 無効化 | (1) TTL。(2) キャッシュ由来の解決で `not_found` になったら、**キャッシュを無視して 1 回だけ取り直す**(取り直しも最悪ケースの式の範囲内)。(3) キャッシュで解決したアプリへの呼び出しが `not_found` を返したら、そのキャッシュを消す。(4) 手動の削除手段は持たない |
 | 失敗時 | KV の読み書き失敗はツール呼び出しを止めない(キャッシュなしで続行。例外名だけログ) |
@@ -389,7 +395,7 @@ Go 版は TTL 1 年・キーにドメインだけ(利用者を含まない。出
 
 - **利用者の識別子(Access の email)が示すのは「Access にログインした人」で、「kintone で認可したアカウント」ではない**。同意画面のあとの kintone の認可画面で別のアカウントでログインしても、Worker は気づけない(kintone に持ち主を返す口がない。ADR 0010)。そのためキャッシュ・冪等キー・stale 印は grant 単位のままで、email 単位にしない。緩和策は kintone 側の「利用者の設定」と同意画面の注意書きだけ
 - 同じ email・同じ MCP クライアントの再認可は旧 grant を失効させて置き換える(別クライアントの grant は残る。DCR で毎回登録し直すクライアントの旧 grant は失効しない)。kintone 側のリフレッシュトークンは取り消されない(取り消しの口は未確認。V21)ので、10 個上限(公式)を超えたときの kintone の挙動は未検証(V06)で、置き換えが効くのは「kintone が古いトークンから失効させる」場合だけ
-- Access から外した利用者の既存 grant は残る(失効は手動。`docs/runbook.md` の「Access から外した利用者の grant を失効させる」)。Access の JWT は長寿命になりうる(awsbridge の観測で約 30 日)が、本仕様で JWT を使うのは認可の瞬間だけ
+- Access から外した利用者の既存 grant は残るが、**grant の最大寿命は 7 日(固定寿命。`refreshTokenTTL = 604800`。使い続けても延びない)**で、それ以降はリフレッシュできず再認可(Access の判定を通る)になる。すぐ止めるなら手動で失効させる(`docs/runbook.md` の「Access から外した利用者の grant を失効させる」。ADR 0010)。DCR のクライアント登録は 30 日(`clientRegistrationTTL = 2592000`。使われていれば半分を過ぎた時点でライブラリが更新する)。Access の JWT は長寿命になりうる(awsbridge の観測で約 30 日)が、本仕様で JWT を使うのは認可の瞬間だけ
 - cybozu.com 共通管理の IP 制限を使う環境では、Workers の送信元 IP を許可できず使えない可能性が高い(V10)
 - ゲストスペースのアプリは扱えない(ADR 0003)
 - `records_query` は自動ページングなし。`offset` は kintone の上限 10,000 まで(それ以上はカーソル API が必要。M05 以降)

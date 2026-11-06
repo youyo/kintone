@@ -8,7 +8,8 @@
  * mode:
  * - `read`: 部分一致の 1 件は採用、2 件以上は ambiguous
  * - `write`: 完全一致(ID・コード・名前 / フィールドコード・label)だけで解決する。部分一致しか当たらなければ
- *   1 件でも複数件でも採用せず `resolver_*_exact_match_required`(候補つき)。API の呼び出し回数・順序は read と同じ
+ *   1 件でも複数件でも採用せず `resolver_*_exact_match_required`(候補つき)。API の呼び出し回数・順序は read と同じ。
+ *   **キャッシュは読まない**(常に API で解決し、結果は書く。名前の変更直後に古い対象へ書き込まないため)
  *
  * キャッシュ(`cache`): 検索の段階ごとに結果を KV に置く(TTL 600 秒)。キャッシュ由来の解決が not_found になったら、
  * **キャッシュから読んだ段階だけ**を 1 回だけ取り直す。1 回の解決で同じ段階の API を 2 度は呼ばない(メモ化)ので、
@@ -55,6 +56,13 @@ export interface ResolverDeps {
   /** 省略時はキャッシュなし。 */
   cache?: ResolverCache;
 }
+
+/**
+ * キャッシュを読むか。`write` モードは常に読まない(アプリ名・フィールドの変更直後に、更新や削除が古い対象に
+ * 当たらないように。ADR 0007)。結果はキャッシュに書く。`useCache: false` も同じく「読まないが、書く」。
+ */
+const readsCache = (options: ResolveOptions): boolean =>
+  options.useCache !== false && options.mode !== "write";
 
 const isPositiveIntegerRef = (ref: string): boolean =>
   /^[0-9]+$/.test(ref) && Number.isSafeInteger(Number(ref)) && Number(ref) > 0;
@@ -117,7 +125,7 @@ export function createResolver(deps: ResolverDeps): Resolver {
     if (isPositiveIntegerRef(ref)) {
       return { appId: Number(ref), fromCache: false, invalidate: async () => {} };
     }
-    const useCache = options.useCache !== false;
+    const useCache = readsCache(options);
 
     // この 1 回の解決で API から取った段階の結果(同じ段階を 2 度取らない)。
     const fresh = new Map<AppStage, AppEntry[]>();
@@ -253,7 +261,7 @@ export function createResolver(deps: ResolverDeps): Resolver {
     options: ResolveOptions,
   ): Promise<string> {
     if (ref === "") throw new ArgumentError("field reference must not be empty.");
-    const useCache = options.useCache !== false;
+    const useCache = readsCache(options);
     let fresh: FieldEntry[] | undefined;
     let fromCache = false;
 

@@ -15,6 +15,15 @@ import type { GrantProps } from "./props";
  * 並列リフレッシュの競合を避けられる。
  */
 export const MCP_ACCESS_TOKEN_TTL_SECONDS = 30 * 60;
+/**
+ * MCP grant(リフレッシュトークン)の最大寿命 = 7 日の**固定寿命**(ADR 0010)。
+ * Access から外した利用者も、この期間を過ぎると /mcp を使えなくなる(再認可で Access の判定を通る)。
+ * `refreshTokenIdleTTL` は設定しない(使い続ければ延びる方式では、期限で切る目的を果たせない)。
+ * 必ず整数で `OAuthProvider` に渡す(`refreshTokenTTL: undefined` の明示は「無期限」の意味になる)。
+ */
+export const MCP_REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+/** DCR のクライアント登録の寿命(30 日)。整数で渡す(undefined の明示は「無期限」)。 */
+export const MCP_CLIENT_REGISTRATION_TTL_SECONDS = 30 * 24 * 60 * 60;
 /** kintone から新しいトークンを得たとき、その期限より手前に MCP の次の更新を置く余裕。 */
 const SKEW_SECONDS = 60;
 /**

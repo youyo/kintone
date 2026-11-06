@@ -99,3 +99,11 @@
 - 失敗のログは `{"event":"access_jwt_rejected","reason":"missing|invalid|jwks_unavailable"}` と、email 不一致の `access_email_mismatch` だけ(JWT・email は出さない)。応答の本文は `Forbidden` / `Service Unavailable` の固定文。
 - `/callback` の email 比較は trim + 小文字化したもの同士。不一致のときは `finishUpstream` が state を使い切っているため、正しい email で送り直しても進まない(E2E で固定)。
 - E2E で、email が MCP トークンにも KV のキー・値にも現れないこと、kintone のトークンが KV に平文で残らないことを固定した(`beginUpstream` の `data` はライブラリが暗号化する)。
+
+## セキュリティ強化: grant の最大寿命を 7 日(固定)にする
+
+- 問題: `refreshTokenTTL` を設定していなかったため、ライブラリの既定の 30 日が使われていた。Access から外した利用者も、最大 30 日は `/mcp` を使えた(JWT を使うのは認可の瞬間だけなので、外しても既存 grant は効く)。
+- 決定: `refreshTokenTTL: 604800`(7 日)を明示する(`MCP_REFRESH_TOKEN_TTL_SECONDS`、`src/auth/token-exchange.ts`)。grant の `expiresAt` は認可時に `now + refreshTokenTTL` で決まり、リフレッシュのたびに `Date.now()` と比べて、残りが 60 秒未満なら `invalid_grant`(`oauth-provider.js` のリフレッシュ処理)。`refreshTokenIdleTTL` は**設定しない**(設定すると使うたびに期限が延び、期限で切る目的を果たせない)。`tokenExchangeCallback` も `refreshTokenTTL` / `refreshTokenIdleTTL` を返さない(返すと grant ごとの寿命が変わる)。
+- 7 日を過ぎた利用者は再認可になり、そこで Access の判定を通る(外した人は通れない)。すぐ止めたい場合は従来どおり手動で失効させる(runbook)。
+- 実装上の注意: `refreshTokenTTL: undefined` を明示的に渡すとライブラリは「無期限」と解釈する。整数の定数を直接渡す。`clientRegistrationTTL` も同じ(30 日 = `MCP_CLIENT_REGISTRATION_TTL_SECONDS`。ライブラリの既定は 90 日)。DCR のクライアント記録には `registrationExpiresAt` と KV の `expirationTtl` が付く。
+- 影響: 利用者は最長 7 日ごとにブラウザで再認可する(Access のセッションが生きていれば同意の確認だけ)。調整は定数の変更(下流のポリシーで変えるなら runbook の手順)。テスト: `test/e2e/grant-lifetime.test.ts`(7 日の前後・使い続けても延びないこと・DCR の期限)、`test/unit/token-exchange.test.ts`。

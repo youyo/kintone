@@ -548,19 +548,24 @@ describe("E2E: kintone_record_delete", () => {
     expect(writes()).toHaveLength(1);
   });
 
-  it("キャッシュで解決したアプリへの DELETE が 404 なら、そのアプリのキャッシュを消して not_found を返す(再解決しない)", async () => {
+  it("書き込みはキャッシュを読まず毎回 API で解決する。DELETE が 404 なら not_found を返す(解決は API の最新なのでキャッシュは消さない)", async () => {
     const { connect, callTool, state, apiCalls } = await setup();
     const token = await connect();
     const [userId, grantId] = token.split(":");
     const prefix = `kcache:v1:${userId}:${grantId}:`;
     await callTool(token, "kintone_record_delete", { app_ref: "CRM", ids: [1] });
-    expect((await env.OAUTH_KV.list({ prefix })).keys.length).toBeGreaterThan(0);
+    const cached = (await env.OAUTH_KV.list({ prefix })).keys.length;
+    expect(cached).toBeGreaterThan(0); // 解決結果はキャッシュに書く
 
     state.writeStatus = 404;
     apiCalls.length = 0;
     const r = await callTool(token, "kintone_record_delete", { app_ref: "CRM", ids: [2] });
     expect(r.body.error).toMatchObject({ code: "not_found", details: { http_status: 404 } });
-    expect(apiCalls.map((c) => `${c.method} ${path(c)}`)).toEqual(["DELETE /k/v1/records.json"]);
-    expect((await env.OAUTH_KV.list({ prefix })).keys).toHaveLength(0);
+    // キャッシュがあっても、もう一度 apps.json で解決してから DELETE する
+    expect(apiCalls.map((c) => `${c.method} ${path(c)}`)).toEqual([
+      "GET /k/v1/apps.json",
+      "DELETE /k/v1/records.json",
+    ]);
+    expect((await env.OAUTH_KV.list({ prefix })).keys).toHaveLength(cached);
   });
 });

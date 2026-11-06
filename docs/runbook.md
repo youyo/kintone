@@ -118,7 +118,9 @@ AUD を取り違えると全員が 403 になる。チームドメインが違�
 
 ### 2-3. Access から外した利用者の grant を失効させる
 
-Access のポリシーから外した(または退職した)利用者の**既存の grant は残る**。Access の JWT を使うのは `/authorize` と `/callback`(認可の瞬間)だけで、そのあとの `/mcp` は Worker が発行したトークンで動くため、ポリシーから外しても、すでに認可済みの接続はトークンが生きている限り使える(ADR 0010)。外した人の接続を止めるには、次の 3 つを行う。
+Access のポリシーから外した(または退職した)利用者の**既存の grant は残る**。Access の JWT を使うのは `/authorize` と `/callback`(認可の瞬間)だけで、そのあとの `/mcp` は Worker が発行したトークンで動くため、ポリシーから外しても、すでに認可済みの接続はトークンが生きている限り使える(ADR 0010)。**grant の最大寿命は 7 日の固定寿命**(`MCP_REFRESH_TOKEN_TTL_SECONDS` = 604800 秒。使い続けても延びない)なので、何もしなくても外した人は認可から最長 7 日で `/mcp` を使えなくなり、再認可で Access に弾かれる。すぐ止めたいときは、次の 3 つを行う。
+
+寿命を変えたいとき(例: 14 日、1 日)は `src/auth/token-exchange.ts` の `MCP_REFRESH_TOKEN_TTL_SECONDS` を変えてデプロイする。変えても、**すでに発行済みの grant は元の期限のまま**(grant の `expiresAt` は認可時に決まる)。整数で指定し、60 秒以上にする。DCR のクライアント登録は 30 日(`MCP_CLIENT_REGISTRATION_TTL_SECONDS`)で、使われていれば自動で延びる。
 
 1. **Worker の grant を削除する**(これでそのユーザーの MCP トークンは使えなくなり、リフレッシュもできない)。
    1. 利用者の `userId` を計算する(`userId` = 小文字にした email の SHA-256 を base64url にしたもの。43 文字)。

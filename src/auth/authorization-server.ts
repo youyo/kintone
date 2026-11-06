@@ -3,7 +3,12 @@ import { app } from "../app";
 import type { Env } from "../env";
 import { createMcpApiHandler } from "../mcp/api-handler";
 import { baseUrl, MCP_PATH, mcpResource } from "../urls";
-import { createTokenExchangeCallback, MCP_ACCESS_TOKEN_TTL_SECONDS } from "./token-exchange";
+import {
+  createTokenExchangeCallback,
+  MCP_ACCESS_TOKEN_TTL_SECONDS,
+  MCP_CLIENT_REGISTRATION_TTL_SECONDS,
+  MCP_REFRESH_TOKEN_TTL_SECONDS,
+} from "./token-exchange";
 
 /**
  * 認可サーバー + MCP リソースサーバーを 1 つの Worker に同居させる(`OAuthProvider`。ADR 0002)。
@@ -22,6 +27,9 @@ export function createAuthorizationServer(env: Pick<Env, "PUBLIC_BASE_URL">) {
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
     accessTokenTTL: MCP_ACCESS_TOKEN_TTL_SECONDS,
+    // grant の最大寿命 7 日(固定。refreshTokenIdleTTL は設定しない)と DCR 登録の 30 日。undefined を渡さない。
+    refreshTokenTTL: MCP_REFRESH_TOKEN_TTL_SECONDS,
+    clientRegistrationTTL: MCP_CLIENT_REGISTRATION_TTL_SECONDS,
     tokenExchangeCallback: createTokenExchangeCallback(),
     resourceMetadata: {
       resource: mcpResource(env),

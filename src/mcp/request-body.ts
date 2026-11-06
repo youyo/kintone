@@ -40,7 +40,32 @@ export async function callMcpHandler(
     // 壊れた JSON は SDK に判断させる（本文は読み終えているので作り直す）。
     return handler.fetch(new Request(request, { body: text }));
   }
+  if (countToolCalls(parsedBody) >= 2) return batchRejected();
   return handler.fetch(request, { parsedBody });
+}
+
+/**
+ * tools/call を 2 件以上含む JSON-RPC バッチは受け付けない(旧版レーンは SDK がバッチを実行する。
+ * 2026-07-28 レーンは SDK がバッチ自体を 400 にする)。件ごとに maxApiCalls が新しく割り当てられ、
+ * 1 件の kintone 401 で応答全体が HTTP 401 になって他の件の書き込み結果が失われるため。
+ */
+const batchRejected = () =>
+  new Response(
+    JSON.stringify({
+      error: "invalid_request",
+      error_description:
+        "A JSON-RPC batch may contain at most one tools/call request. Send each tools/call as a separate POST.",
+    }),
+    { status: 400, headers: { "Content-Type": "application/json" } },
+  );
+
+/** 本文が配列のときだけ、method が "tools/call" の要素を数える(配列でなければ 0)。 */
+function countToolCalls(body: unknown): number {
+  if (!Array.isArray(body)) return 0;
+  return body.filter(
+    (m) =>
+      typeof m === "object" && m !== null && (m as { method?: unknown }).method === "tools/call",
+  ).length;
 }
 
 /** 上限を超えたら読むのをやめて undefined。 */
