@@ -251,3 +251,65 @@ describe("kintone_record_update: update_key_field_ref は write モード(完全
     expect(h.writes).toHaveLength(1);
   });
 });
+
+describe("書き込みツールは古い名前解決キャッシュに引きずられない(ADR 0007)", () => {
+  const GRANT = { userId: "user-a", grantId: "grant-1" };
+  // アプリ名を変えた直後: 「顧客管理」は今は ID 99。キャッシュには ID 12(古い)が残っている。
+  const CURRENT: AppRow[] = [{ appId: "99", code: "CRM2", name: "顧客管理" }];
+
+  async function staleHarness() {
+    const { fakeKv } = await import("../helpers/fake-kv");
+    const { appCacheKey, fieldsCacheKey } = await import("../../src/resolver/cache");
+    const f = fakeKv();
+    f.store.set(await appCacheKey(GRANT, "code", "顧客管理"), JSON.stringify([]));
+    f.store.set(
+      await appCacheKey(GRANT, "name", "顧客管理"),
+      JSON.stringify([{ appId: "12", code: "CRM", name: "顧客管理" }]),
+    );
+    f.store.set(
+      fieldsCacheKey(GRANT, 99),
+      JSON.stringify([{ code: "old_code", label: "顧客コード", type: "SINGLE_LINE_TEXT" }]),
+    );
+    const h = toolHarness({
+      kv: f.kv,
+      grant: GRANT,
+      get: async (path, query) => {
+        if (path === "/k/v1/apps.json") return listApps(CURRENT, query);
+        if (path === "/k/v1/app/form/fields.json") return FIELDS;
+        throw new Error(`unexpected GET ${path}`);
+      },
+      write: () => ({ revision: "7", ids: ["1"], revisions: ["1"] }),
+    });
+    return { h, f };
+  }
+
+  it("record_update: app_ref も update_key_field_ref も古いキャッシュを使わず、更新は現在のアプリ(99)に当たる", async () => {
+    const { h } = await staleHarness();
+    const r = await h.call(TOOL, {
+      app_ref: "顧客管理",
+      update_key_field_ref: "顧客コード",
+      update_key_value: "C-001",
+      record: REC,
+    });
+    expect(r.isError).toBe(false);
+    expect(h.writes).toHaveLength(1);
+    expect(h.writes[0]?.body).toMatchObject({
+      app: 99,
+      updateKey: { field: "customer_code", value: "C-001" },
+    });
+  });
+
+  it("record_delete: 古いキャッシュを使わず、削除は現在のアプリ(99)に当たる", async () => {
+    const { h } = await staleHarness();
+    const r = await h.call("kintone_record_delete", { app_ref: "顧客管理", ids: [1] });
+    expect(r.isError).toBe(false);
+    expect(writeBody(h).app).toBe(99);
+  });
+
+  it("record_create: 古いキャッシュを使わず、作成は現在のアプリ(99)に当たる", async () => {
+    const { h } = await staleHarness();
+    const r = await h.call("kintone_record_create", { app_ref: "顧客管理", record: REC });
+    expect(r.isError).toBe(false);
+    expect(writeBody(h).app).toBe(99);
+  });
+});

@@ -7,6 +7,8 @@ import {
   createTokenExchangeCallback,
   KINTONE_EXPIRY_GRACE_SECONDS,
   MCP_ACCESS_TOKEN_TTL_SECONDS,
+  MCP_CLIENT_REGISTRATION_TTL_SECONDS,
+  MCP_REFRESH_TOKEN_TTL_SECONDS,
 } from "../../src/auth/token-exchange";
 import { jsonResponse, mockOutboundFetch } from "../helpers/mock-fetch";
 
@@ -380,5 +382,27 @@ describe("tokenExchangeCallback", () => {
         access_token_ttl: 100 + KINTONE_EXPIRY_GRACE_SECONDS,
       });
     });
+  });
+});
+
+describe("grant の寿命(ADR 0010)", () => {
+  it("MCP のリフレッシュトークン(grant)の最大寿命は 7 日", async () => {
+    expect(MCP_REFRESH_TOKEN_TTL_SECONDS).toBe(7 * 24 * 3600);
+    expect(MCP_CLIENT_REGISTRATION_TTL_SECONDS).toBe(30 * 24 * 3600);
+  });
+
+  it("tokenExchangeCallback は grant の寿命(refreshTokenTTL / refreshTokenIdleTTL)を返さない(固定寿命を延ばさない)", async () => {
+    mockOutboundFetch({
+      [TOKEN_ENDPOINT]: () =>
+        jsonResponse({ access_token: "new-at", refresh_token: "new-rt", expires_in: 3600 }),
+    });
+    for (const props of [propsExpiringIn(-10), propsExpiringIn(3000)]) {
+      const refreshed = await call(GrantType.REFRESH_TOKEN, props);
+      expect(refreshed).not.toHaveProperty("refreshTokenTTL");
+      expect(refreshed).not.toHaveProperty("refreshTokenIdleTTL");
+    }
+    const authCode = await call(GrantType.AUTHORIZATION_CODE, propsExpiringIn(3000));
+    expect(authCode ?? {}).not.toHaveProperty("refreshTokenTTL");
+    expect(authCode ?? {}).not.toHaveProperty("refreshTokenIdleTTL");
   });
 });

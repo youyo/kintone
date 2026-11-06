@@ -80,12 +80,15 @@ describe("キャッシュのヒット", () => {
 
   it("キャッシュには値が両モードで同じ形(全ページ)で入り、モードは判定時に適用される", async () => {
     const { mk, state } = setup({ apps: [CRM, { appId: "13", code: "T", name: "タスク" }] });
-    // read で部分一致を解決 → キャッシュ → write は同じキャッシュから exact_match_required。
+    // read で部分一致を解決 → キャッシュ。read は同じキャッシュから API なしで解決する。
     expect((await mk().resolveApp("顧客", { mode: "read" })).appId).toBe(12);
     state.calls.length = 0;
+    expect((await mk().resolveApp("顧客", { mode: "read" })).appId).toBe(12);
+    expect(state.calls).toHaveLength(0);
+    // write はキャッシュを読まず API で解決し(コード + 名前の 2 回。ADR 0007)、同じ判定で exact_match_required。
     const e = await failure(mk().resolveApp("顧客", { mode: "write" }));
     expect(e.code).toBe("resolver_app_exact_match_required");
-    expect(state.calls).toHaveLength(0);
+    expect(state.calls).toHaveLength(2);
   });
 
   it("別の grant・別の利用者のキャッシュは使わない", async () => {
@@ -225,7 +228,7 @@ describe("not_found の取り直し(1 回だけ。読んだ段階だけ)", () =>
       fieldsCacheKey(GRANT, 12),
       JSON.stringify([{ code: "amount", label: "金額", type: "NUMBER" }]),
     );
-    expect(await mk().resolveField(12, "金額", { mode: "write" })).toBe("amount");
+    expect(await mk().resolveField(12, "金額", { mode: "read" })).toBe("amount");
     expect(state.calls).toHaveLength(0);
     const e = await failure(mk().resolveField(12, "存在しない", { mode: "read" }));
     expect(e.code).toBe("resolver_field_not_found");
@@ -322,5 +325,68 @@ describe("kintone のエラーはキャッシュ越しでも伝わる", () => {
     });
     const r = createResolver({ client, cache: createResolverCache(f.kv, GRANT) });
     await expect(r.resolveApp("x", { mode: "read" })).rejects.toBeInstanceOf(KintoneApiError);
+  });
+});
+
+describe("write モードはキャッシュを読まない(読み取りは従来どおり。結果はキャッシュに書く)", () => {
+  const RENAMED: AppRow = { appId: "99", code: "CRM", name: "顧客管理" };
+
+  async function staleAppCache(f: ReturnType<typeof fakeKv>, stage: "code" | "name") {
+    // 古いキャッシュ: 「顧客管理」は ID 12 のアプリだった。
+    const stale = stage === "code" ? [] : [{ appId: "12", code: "OLD", name: "顧客管理" }];
+    f.store.set(await appCacheKey(GRANT, stage, "顧客管理"), JSON.stringify(stale));
+  }
+
+  it("resolveApp: キャッシュに古い値があっても、write は API で解決する(read は従来どおりキャッシュ)", async () => {
+    const { f, mk, state } = setup({ apps: [RENAMED] });
+    await staleAppCache(f, "code");
+    await staleAppCache(f, "name");
+
+    const read = await mk().resolveApp("顧客管理", { mode: "read" });
+    expect(read.appId).toBe(12);
+    expect(read.fromCache).toBe(true);
+    expect(state.calls).toHaveLength(0);
+
+    const write = await mk().resolveApp("顧客管理", { mode: "write" });
+    expect(write.appId).toBe(99);
+    expect(write.fromCache).toBe(false);
+    expect(state.calls.length).toBeGreaterThan(0);
+  });
+
+  it("resolveApp: write の解決結果はキャッシュに書く(次の read はそれを使う)", async () => {
+    const { f, mk, state } = setup({ apps: [RENAMED] });
+    await staleAppCache(f, "code");
+    await staleAppCache(f, "name");
+    await mk().resolveApp("顧客管理", { mode: "write" });
+    expect(f.puts.length).toBeGreaterThan(0);
+
+    state.calls.length = 0;
+    const read = await mk().resolveApp("顧客管理", { mode: "read" });
+    expect(read.appId).toBe(99);
+    expect(read.fromCache).toBe(true);
+    expect(state.calls).toHaveLength(0);
+  });
+
+  it("resolveApp: write は KV を get しない", async () => {
+    const { f, mk } = setup({ apps: [RENAMED] });
+    await mk().resolveApp("顧客管理", { mode: "write" });
+    expect(f.gets).toEqual([]);
+  });
+
+  it("resolveField: キャッシュに古い定義があっても、write は API で解決する(read は従来どおりキャッシュ)", async () => {
+    const { f, mk, state } = setup({ apps: [] });
+    f.store.set(
+      fieldsCacheKey(GRANT, 12),
+      JSON.stringify([{ code: "old_amount", label: "金額", type: "NUMBER" }]),
+    );
+    expect(await mk().resolveField(12, "金額", { mode: "read" })).toBe("old_amount");
+    expect(state.calls).toHaveLength(0);
+
+    expect(await mk().resolveField(12, "金額", { mode: "write" })).toBe("amount");
+    expect(state.calls).toHaveLength(1);
+    // 結果はキャッシュに書かれ、次の read はそれを使う。
+    state.calls.length = 0;
+    expect(await mk().resolveField(12, "金額", { mode: "read" })).toBe("amount");
+    expect(state.calls).toHaveLength(0);
   });
 });

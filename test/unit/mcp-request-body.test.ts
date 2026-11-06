@@ -85,4 +85,67 @@ describe("callMcpHandler(MCP の POST 本文の上限)", () => {
     );
     expect(res.status).toBeLessThan(500);
   });
+
+  describe("tools/call を 2 件以上含む JSON-RPC バッチは拒否する", () => {
+    const item = (id: number, method = "tools/call", text = "x") => ({
+      jsonrpc: "2.0",
+      id,
+      method,
+      params: { name: "echo_length", arguments: { text } },
+    });
+
+    it("tools/call が 2 件のバッチは、実行せずに 400 invalid_request", async () => {
+      runs = 0;
+      const res = await callMcpHandler(handler(), post(JSON.stringify([item(1), item(2)])));
+      expect(res.status).toBe(400);
+      expect(res.headers.get("Content-Type")).toContain("application/json");
+      const body = (await res.json()) as { error: string; error_description: string };
+      expect(body.error).toBe("invalid_request");
+      expect(body.error_description).toContain("tools/call");
+      expect(runs).toBe(0);
+    });
+
+    it("tools/call が 100 件でも 400。ほかのメソッドが混ざっていても tools/call が 2 件なら 400", async () => {
+      runs = 0;
+      const many = Array.from({ length: 100 }, (_, i) => item(i + 1));
+      expect((await callMcpHandler(handler(), post(JSON.stringify(many)))).status).toBe(400);
+      const mixed = [item(1), item(2, "tools/list"), item(3)];
+      expect((await callMcpHandler(handler(), post(JSON.stringify(mixed)))).status).toBe(400);
+      expect(runs).toBe(0);
+    });
+
+    it("tools/call が 1 件だけのバッチは従来どおり通す", async () => {
+      runs = 0;
+      const res = await callMcpHandler(
+        handler(),
+        post(JSON.stringify([item(1), item(2, "tools/list")])),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain('\\"length\\":1');
+      expect(runs).toBe(1);
+    });
+
+    it("tools/call 以外だけのバッチは(2 件以上でも)この検査の対象外", async () => {
+      const res = await callMcpHandler(
+        handler(),
+        post(JSON.stringify([item(1, "tools/list"), item(2, "tools/list")])),
+      );
+      expect(res.status).toBe(200);
+    });
+
+    it("バッチでない通常の tools/call は通す。配列でない本文は method を検査しない", async () => {
+      runs = 0;
+      const res = await callMcpHandler(handler(), post(call("abc")));
+      expect(res.status).toBe(200);
+      expect(runs).toBe(1);
+    });
+
+    it("要素が object でない・method が文字列でない配列でも落ちない(数えない)", async () => {
+      const res = await callMcpHandler(
+        handler(),
+        post(JSON.stringify([null, 1, "tools/call", { method: 1 }, item(1)])),
+      );
+      expect(res.status).not.toBe(500);
+    });
+  });
 });
