@@ -5,7 +5,7 @@ Go 製 CLI + MCP サーバー(v0.5.6)は `archive/go` ブランチ・タグに�
 仕様は `docs/specs/kintone-mcp-spec.md`、計画は `plans/`(ロードマップ `kintone-mcp-roadmap.md` と各マイルストーン)、設計判断は `docs/adr/`、実機でしか確かめられない前提は `docs/manual-verification.md`(V01〜 / P01〜)。
 姉妹プロジェクト `logbutler`(Backlog 用。`/Users/youyo/src/github.com/youyo/logbutler`)と同じ構成。
 
-> **下流リポジトリ**(upstream を fork / ミラーした組織のリポジトリ)のセットアップ・デプロイでは、以下の「デプロイは実行しない」等の規約(upstream 開発時の規約)は適用しない。秘密値の扱い・追跡ファイルを編集しない・コミットや push はユーザーの指示があるときだけ、は下流でも変わらない。`.claude/skills/kintone-mcp-setup/SKILL.md` に従う(Codex も同じパス。`.agents/skills/` からの symlink)。
+> **下流リポジトリ**(upstream を fork / ミラーした組織のリポジトリ)のセットアップ・デプロイでは、以下の「デプロイは実行しない」等の規約(upstream 開発時の規約)は適用しない(下流リポジトリの作成の案内もスキルが行う)。秘密値の扱い・追跡ファイルを編集しない・コミットや push はユーザーの指示があるときだけ、は下流でも変わらない。`.claude/skills/kintone-mcp-setup/SKILL.md` に従う(Codex も同じパス。`.agents/skills/` からの symlink)。
 
 ## 絶対に守ること
 
@@ -91,7 +91,7 @@ wrangler.deploy.example.jsonc  `--example` の生成物(ダミー値だけ。追
 .github/workflows/ci.yml      lint / test / deploy:check(アクションは SHA 固定)
 .github/workflows/deploy.yml  下流のデプロイ(Variables `KINTONE_MCP_*` → deploy:render → `wrangler deploy --secrets-file`)。Variable `KINTONE_MCP_WORKER_NAME` が空(upstream)ならジョブごと飛ばす。秘密値はステップの env だけ
 docs/runbook.md               第三者がたどれる運用手順書(OAuth クライアント・Access・KV・Variables / Secrets・確認・WAF・切り分け・grant の失効)。実機で確かめていない手順は【未検証】+ V 番号
-README.md                     製品説明・6 ツールの一覧(`test/unit/readme-tools.test.ts` が突き合わせ)・商標の注記・Go 版からの移行案内
+README.md / README_ja.md       製品説明(英語版 / 日本語版)・6 ツールの一覧(`test/unit/readme-tools.test.ts` が突き合わせ)・商標の注記・Go 版からの移行案内
 test/unit/  test/e2e/  test/node/  test/node-e2e/  test/helpers/  test/snapshots/(tools/list のスナップショット)
 ```
 

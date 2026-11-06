@@ -264,8 +264,8 @@ describe("docs/runbook.md", () => {
   });
 });
 
-describe("README.md", () => {
-  const readme = read("README.md");
+describe("README_ja.md(日本語版)", () => {
+  const readme = read("README_ja.md");
 
   it("商標の注記がある(kintone はサイボウズ株式会社の商標で、本プロジェクトは無関係)", () => {
     expect(readme).toMatch(/kintone[^\n]*サイボウズ株式会社の(登録)?商標/);
@@ -288,7 +288,7 @@ describe("README.md", () => {
       "Cloudflare Access",
       "KINTONE_HOST",
     ]) {
-      expect(readme, `README に「${s}」がない`).toContain(s);
+      expect(readme, `README_ja.md に「${s}」がない`).toContain(s);
     }
   });
 
@@ -297,6 +297,81 @@ describe("README.md", () => {
       expect(readme).toContain(s);
     }
   });
+
+  it("英語版への導線がある", () => {
+    expect(readme).toContain("[English](README.md)");
+  });
+});
+
+describe("README.md(英語版)", () => {
+  const readme = read("README.md");
+
+  it("商標の注記がある(kintone is a trademark of Cybozu, Inc. で、本プロジェクトは unaffiliated)", () => {
+    expect(readme).toMatch(/kintone is a (registered )?trademark[^\n]*Cybozu, Inc\./);
+    expect(readme).toContain("Cybozu, Inc.");
+    expect(readme).toMatch(/unaffiliated|not affiliated/);
+    expect(readme).toMatch(/unofficial/);
+  });
+
+  it("Go 版の利用者への移行案内: 廃止・保存先・破壊的変更の一覧", () => {
+    for (const s of [
+      "Go",
+      "CLI",
+      "archive/go",
+      "v0.5.6",
+      "Homebrew",
+      "ghcr",
+      "breaking changes",
+      "kintone_",
+      "isError",
+      "lowercase",
+      "API token",
+      "Cloudflare Access",
+      "KINTONE_HOST",
+    ]) {
+      expect(readme, `README.md に「${s}」がない`).toContain(s);
+    }
+  });
+
+  it("runbook・仕様書・ADR への導線がある", () => {
+    for (const s of ["docs/runbook.md", "docs/specs/kintone-mcp-spec.md", "docs/adr/"]) {
+      expect(readme).toContain(s);
+    }
+  });
+
+  it("リンク先の文書が日本語であることを述べている", () => {
+    expect(readme).toMatch(/in Japanese/);
+  });
+
+  it("日本語版への導線がある", () => {
+    expect(readme).toContain("[日本語](README_ja.md)");
+  });
+});
+
+describe("README(両言語)", () => {
+  it.each(["README.md", "README_ja.md"])(
+    "%s にアカウント固有らしい値(32 桁の 16 進、実在しそうなドメイン)がない",
+    (file) => {
+      const text = read(file);
+      expect(text).not.toMatch(/\b[0-9a-f]{32}\b/);
+      for (const host of text.matchAll(
+        /[a-z0-9-]+\.(?:cybozu|cloudflareaccess|workers)\.(?:com|dev)/g,
+      )) {
+        expect(host[0], `${file} の ${host[0]} は例示用の名前(example で始まる)でない`).toMatch(
+          /^example/,
+        );
+      }
+    },
+  );
+
+  it.each(["README.md", "README_ja.md"])(
+    "%s に、使い始める節からスキルの依頼文の例がある",
+    (file) => {
+      const text = read(file);
+      expect(text).toContain(".claude/skills/kintone-mcp-setup/SKILL.md");
+      expect(text).toContain("kintone-mcp-setup");
+    },
+  );
 });
 
 describe("docs/manual-verification.md", () => {

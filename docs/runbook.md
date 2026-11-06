@@ -52,6 +52,12 @@ kintone MCP(kintone 用 Remote MCP サーバー。Cloudflare Workers)を、自�
 
 どちらでもよい。いずれも、upstream の追跡ファイルは編集しない。
 
+エージェントに案内させるなら、スキル kintone-mcp-setup(`.claude/skills/kintone-mcp-setup/SKILL.md` の Step 0-A)を使う。upstream の clone で「kintone MCP を自社で動かしたい」と伝えるか、作成後の下流リポジトリで新しいセッションを始め、次の依頼文を最初に送る。
+
+```text
+このリポジトリは kintone MCP の下流リポジトリです。`.claude/skills/kintone-mcp-setup/SKILL.md` のスキル kintone-mcp-setup に従って、Step 0 から一緒にセットアップを進めてください。秘密値は私が自分のターミナルで入れます。
+```
+
 - **fork**: GitHub の Fork で作る。**fork 先では GitHub Actions が既定で無効**なので、Actions タブで有効化する(有効化しないと `deploy.yml` が動かない)。
 - **ミラー**: 空のリポジトリを作り、upstream を remote に足して push する。
 
