@@ -1,115 +1,125 @@
 # kintone MCP
 
-kintone を AI から操作するための **Remote MCP サーバー**(Cloudflare Workers 上で動く)。MCP クライアント(Claude、Cloudflare MCP Portal など)が OAuth で接続し、**利用者ごとの kintone OAuth で認可された身元**で kintone REST API を呼びます。アプリの検索・フィールド定義の取得・レコードの検索と作成・更新・削除ができます。
+English | [日本語](README_ja.md)
 
-> **Go 版(CLI + MCP サーバー、v0.5.6 まで)を使っていた方へ**: この版は作り直しで、**破壊的変更があります**。CLI は廃止されました。→ [Go 版の利用者への移行のお知らせ](#go-版の利用者への移行のお知らせ)
+A **Remote MCP server** for kintone, running on Cloudflare Workers. MCP clients (Claude, Cloudflare MCP Portal, and others) connect over OAuth, and the server calls the kintone REST API **as the individual user, using that user's own kintone OAuth authorization**. You can search apps, read field definitions, and query, create, update, and delete records.
 
-- 利用者ごとの権限: kintone のトークンは利用者ごとの OAuth で、見えるアプリ・触れるレコードはその人の kintone の権限のまま。API トークンの共有はしません
-- 利用者の識別と入口の保護: **Cloudflare Access**(self-hosted アプリ)の email で利用者を識別し、認可の入口(`/authorize` と `/callback`)だけを守ります
-- 名前でアプリを指定できる: ID のほか、アプリコード・アプリ名(読み取りは部分一致も)で指定できます。書き込みは**完全一致だけ**(取り違えを防ぐため)
-- 書き込みの安全策: 書き込みはリトライしない、入力は送る前に検査する、`kintone_record_create` の再送は 5 分間は重複させない
-- ステートレスな MCP(Durable Objects なし)。保存先は Cloudflare KV だけ
+> **If you used the Go version (CLI + MCP server, up to v0.5.6)**: this release is a rewrite and contains **breaking changes**. The CLI has been discontinued. See [Notice for Go version users](#notice-for-go-version-users).
 
-## ツール
+> **Note on documentation language**: the documents linked from this README (the runbook, the specification, the ADRs, the manual-verification notes, and the setup skill) are written in Japanese.
 
-**6 個のツール**を、2 つの toolset(`app`・`record`)に分けて提供します。名前はすべて `kintone_` で始まります。
+- Per-user permissions: kintone tokens are issued per user through OAuth, so each person sees only the apps and records their own kintone permissions allow. No shared API token is used.
+- User identity and entry-point protection: users are identified by the email in **Cloudflare Access** (a self-hosted application). Access protects only the authorization entry points, `/authorize` and `/callback`.
+- Address apps by name: besides the app ID, you can specify an app by its app code or app name (reads also accept a partial name match). Writes accept **exact matches only**, to prevent hitting the wrong app.
+- Write safeguards: writes are never retried, input is validated before anything is sent, and a resend of `kintone_record_create` within 5 minutes does not create duplicates.
+- Stateless MCP (no Durable Objects). The only storage is Cloudflare KV.
 
-| toolset | 件数 | ツール |
+## Tools
+
+The server provides **6 tools** in two toolsets (`app` and `record`). Every tool name starts with `kintone_`.
+
+| toolset | count | tools |
 |---|---|---|
 | `app` | 2 | `kintone_apps_search`, `kintone_app_describe` |
 | `record` | 4 | `kintone_records_query`, `kintone_record_create`, `kintone_record_update`, `kintone_record_delete` |
 
-| ツール | 区分 | 内容 |
+| tool | category | description |
 |---|---|---|
-| `kintone_apps_search` | ReadOnly | アプリを検索する(ID・コード・名前・スペース)。1 回で 1 ページ |
-| `kintone_app_describe` | ReadOnly | アプリの情報とフィールド定義を取得する |
-| `kintone_records_query` | ReadOnly | kintone のクエリでレコードを検索する(`limit` / `offset` はクエリに書く。件数も取れる) |
-| `kintone_record_create` | WriteNonIdempotent | レコードを 1〜100 件作る。同じ引数の再送(5 分以内)は前回の結果を返す |
-| `kintone_record_update` | WriteIdempotent | レコードを更新する(ID、または重複禁止フィールドの値で指定。リビジョンによる排他) |
-| `kintone_record_delete` | Destructive | レコードを 1〜100 件削除する |
+| `kintone_apps_search` | ReadOnly | Search apps by ID, code, name, or space. Returns one page per call. |
+| `kintone_app_describe` | ReadOnly | Get an app's information and its field definitions. |
+| `kintone_records_query` | ReadOnly | Query records with a kintone query string (put `limit` / `offset` in the query; the total count is also available). |
+| `kintone_record_create` | WriteNonIdempotent | Create 1 to 100 records. A resend with the same arguments within 5 minutes returns the previous result. |
+| `kintone_record_update` | WriteIdempotent | Update a record, identified by its ID or by the value of a unique field. Revision-based optimistic locking is supported. |
+| `kintone_record_delete` | Destructive | Delete 1 to 100 records. |
 
-- 区分は MCP の annotation(`readOnlyHint` / `destructiveHint` / `idempotentHint`)の 4 種です。
-- 読み取りツールには、応答のサイズを制限する `max_response_tokens`(既定 50000。超えたら切り詰めず `response_too_large`)が付きます。
-- アプリは `app`(ID)または `app_ref`(ID・コード・名前)のどちらか 1 つで指定します。書き込みの `app_ref` は完全一致だけで、部分一致しかなければ候補を返し、書き込みはしません。
-- 接続 URL にクエリを付けて、ツールを絞れます: `https://<domain>/mcp?toolsets=app,record`、`?read_only=true`(読み取りのツールだけ)。
-- 出力は JSON(text content)。エラーは `isError: true` と `{"schema_version":"1","error":{"code":"...","message":"...","retryable":...}}`。仕様の全体は [docs/specs/kintone-mcp-spec.md](docs/specs/kintone-mcp-spec.md)。
-- 対象は 1 つの cybozu.com ホスト(1 デプロイ = 1 ホスト)。ゲストスペースのアプリは扱えません。
+- The category is one of the four MCP annotation combinations (`readOnlyHint` / `destructiveHint` / `idempotentHint`).
+- Read tools accept `max_response_tokens` (default 50000). If a response would exceed it, the server does not truncate; it returns `response_too_large`.
+- Specify the app with exactly one of `app` (ID) or `app_ref` (ID, code, or name). For writes, `app_ref` accepts exact matches only; if only a partial match exists, the server returns the candidates and performs no write.
+- You can narrow the tools with a query string on the connection URL: `https://<domain>/mcp?toolsets=app,record`, or `?read_only=true` (read tools only).
+- Output is JSON in a text content block. Errors are returned with `isError: true` and `{"schema_version":"1","error":{"code":"...","message":"...","retryable":...}}`. The full specification is [docs/specs/kintone-mcp-spec.md](docs/specs/kintone-mcp-spec.md) (in Japanese).
+- Each deployment targets a single cybozu.com host (one deployment = one host). Apps in guest spaces are not supported.
 
-## 使い始める(運用者向け)
+## Getting started (for operators)
 
-自分の Cloudflare アカウントと cybozu.com で動かす手順は **[docs/runbook.md](docs/runbook.md)** に、上から順にたどれるように書いてあります。必要なもの:
+The procedure for running this on your own Cloudflare account and cybozu.com is written in **[docs/runbook.md](docs/runbook.md)** (in Japanese), to be followed from top to bottom. You will need:
 
-1. 公開できるホスト名(カスタムドメイン、または `workers.dev`)
-2. cybozu.com 共通管理で登録する **OAuth クライアント**(リダイレクト URI は `https://<domain>/callback`)
-3. Cloudflare Access の **self-hosted アプリ**(保護するのは `/authorize` と `/callback` の 2 つだけ)
-4. Cloudflare の KV namespace と、GitHub Actions の Variables / Secrets
+1. A publicly reachable hostname (a custom domain, or `workers.dev`)
+2. An **OAuth client** registered in the cybozu.com administration console (the redirect URI is `https://<domain>/callback`)
+3. A Cloudflare Access **self-hosted application** (it protects only two paths: `/authorize` and `/callback`)
+4. A Cloudflare KV namespace, plus GitHub Actions Variables and Secrets
 
-エージェント(Claude Code / Codex)に案内してもらうなら、下流リポジトリで `.claude/skills/kintone-mcp-setup/SKILL.md` のスキル(kintone-mcp-setup)を使います。
+To have an agent (Claude Code / Codex) walk you through it, use the skill `kintone-mcp-setup` (`.claude/skills/kintone-mcp-setup/SKILL.md`, written in Japanese). It guides you from creating the downstream repository (fork or mirror). You can start by telling an agent opened in a clone of this repository (the upstream) that you want to run kintone MCP for your organization. When you start a new session in the directory of your downstream repository, send this first message (the skill is written in Japanese, so the message is too):
 
-このリポジトリは **upstream** です。`wrangler.jsonc` はダミー値の共有設定のままで、アカウント固有の値(Worker 名・KV id・ドメイン・kintone のホスト・Access の値・client id / secret)は書きません。下流のリポジトリ(fork またはミラー)が、GitHub の Variables / Secrets から `wrangler.deploy.jsonc` を生成してデプロイします(`mise run deploy:render` / `mise run deploy`、設計は [ADR 0012](docs/adr/0012-upstream-downstream-deploy.md))。**Variable `KINTONE_MCP_WORKER_NAME` が空の upstream では、デプロイのジョブは何もしません。**
-
-## しくみ
-
-```
-MCP クライアント ── OAuth 2.1 (DCR, PKCE) と MCP ──▶ Cloudflare Worker ──▶ https://<subdomain>.cybozu.com/k/v1/...
-                         ※ブラウザが通る /authorize と /callback だけ Cloudflare Access を経由
+```text
+このリポジトリは kintone MCP の下流リポジトリです。`.claude/skills/kintone-mcp-setup/SKILL.md` のスキル kintone-mcp-setup に従って、Step 0 から一緒にセットアップを進めてください。秘密値は私が自分のターミナルで入れます。
 ```
 
-Worker は OAuth の認可サーバーと MCP サーバーを兼ねます(`@cloudflare/workers-oauth-provider` + Hono)。利用者が初めて接続するとき、ブラウザで Access にログインし、kintone の認可画面で同意します。kintone のトークンは Worker が暗号化して KV に保存し、MCP クライアントには Worker が発行した別のトークンを渡します。詳しい設計は [docs/adr/](docs/adr/)、仕様は [docs/specs/kintone-mcp-spec.md](docs/specs/kintone-mcp-spec.md)、実機でしか確かめられない前提は [docs/manual-verification.md](docs/manual-verification.md) にあります。
+(In English: "This repository is a downstream repository of kintone MCP. Follow the kintone-mcp-setup skill in `.claude/skills/kintone-mcp-setup/SKILL.md` and walk me through the setup from Step 0. I will enter secret values myself in my own terminal.")
 
-既知の限界(抜粋。全体は仕様書 §11):
+This repository is the **upstream**. `wrangler.jsonc` stays a shared configuration with dummy values, and no account-specific values (Worker name, KV id, domain, kintone host, Access values, client id / secret) are ever written to it. A downstream repository (a fork or a mirror) generates `wrangler.deploy.jsonc` from its GitHub Variables and Secrets and deploys from there (`mise run deploy:render` / `mise run deploy`; the design is in [ADR 0012](docs/adr/0012-upstream-downstream-deploy.md), in Japanese). **While the Variable `KINTONE_MCP_WORKER_NAME` is empty, as it is in the upstream, the deploy job does nothing.**
 
-- Access の email は「Access にログインした人」で、kintone で認可したアカウントとは限りません(kintone に持ち主を返す API がないため)。キャッシュなどは grant 単位で分けています
-- cybozu.com の IP 制限を使っている環境では、Worker の送信元 IP を許可できず使えない可能性が高いです
-- `kintone_records_query` は自動ページングをしません(`offset` は 10,000 まで)
-- 冪等キャッシュは KV の結果整合の範囲で動き、ほぼ同時の 2 回の呼び出しは両方実行されえます
+## How it works
 
-## Go 版の利用者への移行のお知らせ
+```
+MCP client ── OAuth 2.1 (DCR, PKCE) and MCP ──▶ Cloudflare Worker ──▶ https://<subdomain>.cybozu.com/k/v1/...
+                 * only /authorize and /callback, which the browser visits, go through Cloudflare Access
+```
 
-以前の kintone CLI + MCP サーバー(Go 製、v0.5.6 まで)は、この版で**作り直されました**。Cloudflare Workers 上の Remote MCP サーバーに一本化し、**CLI は廃止**しました。
+The Worker is both an OAuth authorization server and an MCP server (`@cloudflare/workers-oauth-provider` + Hono). When a user connects for the first time, they sign in to Access in the browser and then consent on kintone's authorization screen. The Worker encrypts the kintone tokens and stores them in KV, and hands the MCP client a separate token issued by the Worker itself. For the detailed design, see [docs/adr/](docs/adr/); for the specification, [docs/specs/kintone-mcp-spec.md](docs/specs/kintone-mcp-spec.md); for the assumptions that can only be confirmed on a real environment, [docs/manual-verification.md](docs/manual-verification.md). All of these are in Japanese.
 
-**Go 版はそのまま使えます。**
+Known limitations (an excerpt; the full list is §11 of the specification):
 
-- ソースコードは **`archive/go` ブランチ・タグ**に保存してあります(`git checkout archive/go`)
-- **v0.5.6 の Homebrew(`brew install youyo/tap/kintone`)と ghcr(`ghcr.io/youyo/kintone`)のイメージは、そのまま使えます**。この版への移行を急ぐ必要はありません
+- The email from Access identifies "the person who signed in to Access", which is not necessarily the account authorized in kintone (kintone has no API that returns the owner of a token). Caches and similar state are therefore separated per grant.
+- If your cybozu.com environment uses IP address restrictions, you probably cannot use this server, because the Worker's outbound IP addresses cannot be allowlisted.
+- `kintone_records_query` does not paginate automatically (`offset` is limited to 10,000).
+- The idempotency cache works within the limits of KV's eventual consistency, so two nearly simultaneous calls can both be executed.
 
-Workers 版へ移る方は、次の**破壊的変更**に注意してください。
+## Notice for Go version users
 
-| 項目 | Go 版(v0.5.6 まで) | Workers 版(この版) |
+The previous kintone CLI + MCP server (written in Go, up to v0.5.6) has been **rewritten** in this release. It is now a single Remote MCP server on Cloudflare Workers, and the **CLI has been discontinued**.
+
+**The Go version remains available.**
+
+- The source code is preserved on the **`archive/go` branch and tag** (`git checkout archive/go`).
+- **The v0.5.6 Homebrew formula (`brew install youyo/tap/kintone`) and the ghcr image (`ghcr.io/youyo/kintone`) keep working as they are.** There is no need to hurry your migration to this release.
+
+If you move to the Workers version, be aware of the following **breaking changes**.
+
+| Item | Go version (up to v0.5.6) | Workers version (this release) |
 |---|---|---|
-| 提供形態 | CLI(`kintone ...`)+ MCP サーバー(stdio / HTTP)。Homebrew・Docker・`go install` | **Remote MCP サーバーのみ**(Cloudflare Workers)。CLI・stdio・Docker・Homebrew は**廃止** |
-| ツール名 | `apps_search` `app_describe` `records_query` `record_create` `record_update` `record_delete` | **`kintone_` が付く**: `kintone_apps_search` `kintone_app_describe` `kintone_records_query` `kintone_record_create` `kintone_record_update` `kintone_record_delete`。引数名は Go 版を踏襲(`app` / `app_ref` など) |
-| 出力の形式 | 成功 `{"ok":true,"data":{...}}`、失敗 `{"ok":false,"error":{...}}` | 成功は **`ok` / `data` の包みがなく、kintone のデータそのもの**(加工したものは snake_case)。失敗は **`isError: true`** と `{"schema_version":"1","error":{"code","message","retryable","details"?}}`。`{"ok":...}` を前提にしたクライアントは壊れます |
-| エラーコード | 大文字(`KINTONE_UNAUTHORIZED` `RESOLVER_APP_NOT_FOUND` など) | **小文字の snake_case**(`authentication_error` `permission_error` `not_found` `argument_error` `rate_limited` `api_error` `resolver_app_not_found` など。全一覧は仕様書 §6)。Go 版のコードとの対応は仕様書 §6 の表の「Go 版の code」の列。書き込みの `app_ref` が部分一致のみのときの `resolver_app_exact_match_required` など、新しいコードもあります |
-| 認証 | API トークン / OAuth(CLI の loopback は廃止済み)/ OIDC(idproxy)。トークンは SQLite・Redis・DynamoDB に保存 | **利用者ごとの kintone OAuth**(Worker が OAuth 認可サーバー。トークンは暗号化して Cloudflare KV)+ **Cloudflare Access の email で利用者を識別**(`/authorize` と `/callback` を Access の self-hosted アプリで保護)。OIDC(idproxy)は廃止 |
-| **API トークン** | `X-Cybozu-API-Token`(`KINTONE_API_TOKEN`) | **廃止**。共有の API トークンでは操作できません。各利用者が kintone の OAuth で認可します |
-| OAuth のリダイレクト URI | `<外部 URL>/oauth/kintone/callback` | **`<PUBLIC_BASE_URL>/callback`**。cybozu.com の OAuth クライアントの登録のやり直し(または URI の変更)が要ります。scope は Go 版と同じ 6 つ。登録した OAuth クライアントの「利用者の設定」(STEP2)で、使う利用者を許可します |
-| 設定項目 | `KINTONE_DOMAIN` `KINTONE_API_TOKEN` `KINTONE_AUTH` `KINTONE_OAUTH_CLIENT_ID` / `_SECRET` / `_REDIRECT_URL` `KINTONE_STORE_*` `KINTONE_MCP_*`(OIDC・署名鍵・Cookie)`KINTONE_CONFIG_PATH` `KINTONE_PROFILE` と `config.toml` | **Cloudflare の Variables / Secrets と wrangler の設定**: `KINTONE_HOST`(`KINTONE_DOMAIN` の後継。ホスト全体 `<subdomain>.cybozu.com`)`PUBLIC_BASE_URL` `ACCESS_TEAM_DOMAIN` `ACCESS_AUD` `KINTONE_CLIENT_ID` / `KINTONE_CLIENT_SECRET`(Secrets)`KINTONE_OAUTH_PKCE`(任意)と KV の `OAUTH_KV`。ファイルの設定・プロファイル・SQLite / Redis / DynamoDB は廃止。一覧は [docs/runbook.md](docs/runbook.md) の設定値の対応表 |
-| 名前解決とキャッシュ | キャッシュは利用者に依存しない・TTL 1 年・`cache clear` で無効化。名前検索は最大 100 ページ | キャッシュは**利用者(grant)ごと**・TTL 600 秒。名前検索は最大 10 ページ(超えたら `resolver_app_list_too_large`)。**書き込みの `app_ref` と `update_key_field_ref` は完全一致だけ** |
-| 書き込み | リトライしない | リトライしない(同じ)。`kintone_record_create` は 5 分以内の同じ引数の再送を重複させない(冪等キャッシュ) |
-| その他 | | `?toolsets=` / `?read_only=true` の URL クエリ、`max_response_tokens`、ゲストスペースは対象外、1 デプロイ = 1 ホスト |
+| Form of delivery | CLI (`kintone ...`) + MCP server (stdio / HTTP). Homebrew, Docker, `go install` | **Remote MCP server only** (Cloudflare Workers). The CLI, stdio, Docker, and Homebrew are **discontinued** |
+| Tool names | `apps_search` `app_describe` `records_query` `record_create` `record_update` `record_delete` | **Prefixed with `kintone_`**: `kintone_apps_search` `kintone_app_describe` `kintone_records_query` `kintone_record_create` `kintone_record_update` `kintone_record_delete`. Argument names follow the Go version (`app` / `app_ref`, and so on) |
+| Output format | Success: `{"ok":true,"data":{...}}`. Failure: `{"ok":false,"error":{...}}` | Success has **no `ok` / `data` wrapper; the output is the kintone data itself** (anything derived is in snake_case). Failure is **`isError: true`** with `{"schema_version":"1","error":{"code","message","retryable","details"?}}`. Clients that assume `{"ok":...}` will break |
+| Error codes | Uppercase (`KINTONE_UNAUTHORIZED`, `RESOLVER_APP_NOT_FOUND`, and so on) | **Codes are now lowercase snake_case** (`authentication_error`, `permission_error`, `not_found`, `argument_error`, `rate_limited`, `api_error`, `resolver_app_not_found`, and so on; the full list is in §6 of the specification). The mapping from Go version codes is the "Go version code" column of the table in §6. There are also new codes, such as `resolver_app_exact_match_required`, returned when a write's `app_ref` matches only partially |
+| Authentication | API token / OAuth (the CLI loopback is already removed) / OIDC (idproxy). Tokens stored in SQLite, Redis, or DynamoDB | **Per-user kintone OAuth** (the Worker is the OAuth authorization server; tokens are encrypted and stored in Cloudflare KV) plus **user identification by the Cloudflare Access email** (`/authorize` and `/callback` are protected by an Access self-hosted application). OIDC (idproxy) is discontinued |
+| **API token** | `X-Cybozu-API-Token` (`KINTONE_API_TOKEN`) | **Discontinued.** A shared API token cannot operate the server; each user authorizes through kintone OAuth |
+| OAuth redirect URI | `<external URL>/oauth/kintone/callback` | **`<PUBLIC_BASE_URL>/callback`**. You must register the OAuth client again (or change its URI) in cybozu.com. The scopes are the same six as in the Go version. In the registered OAuth client's "user settings" (STEP2), allow the users who will use it |
+| Configuration | `KINTONE_DOMAIN` `KINTONE_API_TOKEN` `KINTONE_AUTH` `KINTONE_OAUTH_CLIENT_ID` / `_SECRET` / `_REDIRECT_URL` `KINTONE_STORE_*` `KINTONE_MCP_*` (OIDC, signing key, cookies) `KINTONE_CONFIG_PATH` `KINTONE_PROFILE`, and `config.toml` | **Cloudflare Variables / Secrets and the wrangler configuration**: `KINTONE_HOST` (the successor of `KINTONE_DOMAIN`; the full host `<subdomain>.cybozu.com`), `PUBLIC_BASE_URL`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `KINTONE_CLIENT_ID` / `KINTONE_CLIENT_SECRET` (Secrets), `KINTONE_OAUTH_PKCE` (optional), and the KV binding `OAUTH_KV`. File-based configuration, profiles, and SQLite / Redis / DynamoDB are discontinued. See the settings table in [docs/runbook.md](docs/runbook.md) for the full list |
+| Name resolution and caching | The cache is user-independent, has a one-year TTL, and is invalidated with `cache clear`. Name search covers up to 100 pages | The cache is **per user (grant)** with a 600-second TTL. Name search covers up to 10 pages (beyond that, `resolver_app_list_too_large`). **A write's `app_ref` and `update_key_field_ref` accept exact matches only** |
+| Writes | Never retried | Never retried (unchanged). `kintone_record_create` does not duplicate a resend of the same arguments within 5 minutes (idempotency cache) |
+| Other | | The `?toolsets=` / `?read_only=true` URL query, `max_response_tokens`, guest spaces are out of scope, one deployment = one host |
 
-Go 版のコード(`archive/go`)と、旧仕様・旧計画書は、このブランチの履歴から辿れます。移行に関する質問や不具合は、リポジトリの Issue へ。
+The Go version's code (`archive/go`) and the old specifications and plans can be traced from this branch's history. For questions about migrating or for bug reports, please open an issue in this repository.
 
-## 開発
+## Development
 
 ```sh
 mise install
-mise run install        # 依存をロックファイルどおりに入れる
-mise run lint           # Biome + 型検査
-mise run test           # unit + e2e (kintone と Access の JWKS は fetch のモック。node-e2e は生成スクリプトの実プロセス + wrangler の dry-run)
+mise run install        # install dependencies exactly as locked
+mise run lint           # Biome + type check
+mise run test           # unit + e2e (kintone and the Access JWKS are fetch mocks; node-e2e runs the generator script as a real process + wrangler dry-run)
 mise run build          # wrangler deploy --dry-run
-mise run deploy:check   # デプロイ設定の生成と dry-run(ダミー値。Cloudflare には何も変更しない)
+mise run deploy:check   # generate the deploy configuration and dry-run it (dummy values; changes nothing on Cloudflare)
 ```
 
-- 規約: [CLAUDE.md](CLAUDE.md)、計画: [plans/kintone-mcp-roadmap.md](plans/kintone-mcp-roadmap.md)
-- `mise run verify:oauth -- https://<domain>/mcp`: デプロイ済みの Worker に対する OAuth の通し確認([docs/manual-verification.md](docs/manual-verification.md))
-- デプロイ・secret の登録・KV の作成は、運用者が [docs/runbook.md](docs/runbook.md) に従って行います(テストやエージェントは実行しません)
+- Conventions: [CLAUDE.md](CLAUDE.md). Plan: [plans/kintone-mcp-roadmap.md](plans/kintone-mcp-roadmap.md) (in Japanese).
+- `mise run verify:oauth -- https://<domain>/mcp`: an end-to-end OAuth check against a deployed Worker ([docs/manual-verification.md](docs/manual-verification.md), in Japanese).
+- Deploying, registering secrets, and creating the KV namespace are done by the operator following [docs/runbook.md](docs/runbook.md) (tests and agents do not run them).
 
-## 商標・免責
+## Trademarks and disclaimer
 
-**kintone はサイボウズ株式会社の商標(登録商標)です。本プロジェクトはサイボウズ株式会社とは無関係の、非公式のオープンソースソフトウェアです**(サイボウズ株式会社による提供・承認・保証を受けていません)。その他の会社名・製品名は各社の商標または登録商標です。
+**kintone is a trademark (registered trademark) of Cybozu, Inc. This project is unofficial open-source software unaffiliated with Cybozu, Inc., and it is not provided, endorsed, or guaranteed by Cybozu, Inc.** All other company and product names are trademarks or registered trademarks of their respective owners.
 
-## ライセンス
+## License
 
 MIT

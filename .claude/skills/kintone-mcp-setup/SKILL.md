@@ -1,6 +1,6 @@
 ---
 name: kintone-mcp-setup
-description: kintone MCP(kintone 用 Remote MCP サーバー。Cloudflare Workers)の下流リポジトリ(upstream を fork / ミラーした自組織のリポジトリ)を、運用者と一緒にセットアップし、自組織の Cloudflare と cybozu.com にデプロイして動作確認するまで案内する。新規セットアップ、失敗・中断からの再開、稼働中の設定変更を扱い、preflight、値の収集と検証、cybozu.com 共通管理での OAuth クライアント登録、Cloudflare Access の self-hosted アプリ、KV 作成、Variables / Secrets 登録、デプロイ、確認、切り分けを順に進める。運用者の言い方の例 - 「自社で kintone MCP を動かしたい」「fork したのでデプロイしたい」「OAuth クライアントを登録したい」「Access の設定がわからない」「/authorize が 403」「/healthz が 503」「Deploy が skipped になる」「upstream の更新を取り込みたい」「利用者を外したい」「KV を作り直したい」。TRIGGER when: 上記のような下流リポジトリのセットアップ・デプロイ・運用・障害の相談。DO NOT TRIGGER when: upstream(このリポジトリ自体)の開発作業、ツールの追加・修正。
+description: kintone MCP(kintone 用 Remote MCP サーバー。Cloudflare Workers)の下流リポジトリ(upstream を fork / ミラーした自組織のリポジトリ)を、運用者と一緒にセットアップし、自組織の Cloudflare と cybozu.com にデプロイして動作確認するまで案内する。新規セットアップ、失敗・中断からの再開、稼働中の設定変更を扱い、preflight、値の収集と検証、cybozu.com 共通管理での OAuth クライアント登録、Cloudflare Access の self-hosted アプリ、KV 作成、Variables / Secrets 登録、デプロイ、確認、切り分けを順に進める。運用者の言い方の例 - 「自社で kintone MCP を動かしたい」「下流リポジトリを作りたい」「ミラーしたい」「fork して始めたい」「fork したのでデプロイしたい」「OAuth クライアントを登録したい」「Access の設定がわからない」「/authorize が 403」「/healthz が 503」「Deploy が skipped になる」「upstream の更新を取り込みたい」「利用者を外したい」「KV を作り直したい」。TRIGGER when: 上記のような下流リポジトリのセットアップ・デプロイ・運用・障害の相談。DO NOT TRIGGER when: upstream(このリポジトリ自体)の開発作業、ツールの追加・修正。下流リポジトリの作成(fork・ミラー)の案内は開発作業ではないので、upstream の clone でも使ってよい(Step 0-A)。
 ---
 
 # kintone MCP 下流リポジトリのセットアップ案内
@@ -18,7 +18,7 @@ description: kintone MCP(kintone 用 Remote MCP サーバー。Cloudflare Worker
 
 ## 読者と役割分担
 
-- 読むのは**下流リポジトリで動くエージェント**(Claude Code / Codex)。操作するのは**その組織の運用者(人間)**。
+- 読むのは**下流リポジトリで動くエージェント**(Claude Code / Codex)。下流リポジトリがまだないときは、upstream の clone で動くエージェントが Step 0-A で作成まで案内する。操作するのは**その組織の運用者(人間)**。
 - 人間が行う: cybozu.com 共通管理での OAuth クライアント登録、Cloudflare ダッシュボード(Access のアプリ作成、API トークン作成)の操作、**秘密値の投入**。
 - エージェントは秘密値(`KINTONE_CLIENT_ID` / `KINTONE_CLIENT_SECRET` / `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`)を**受け取らない**。会話にもコマンドラインにも出させない。
 - Secrets は運用者が**自分の別ターミナル**で `gh secret set <NAME> --repo <OWNER/REPO>` を実行する。値は対話プロンプトで入力し、`--body` や stdin のパイプで渡さない。Claude Code の `!` 実行は対話入力ができないことがあるため、Secrets の投入には使わせない。
@@ -61,12 +61,12 @@ description: kintone MCP(kintone 用 Remote MCP サーバー。Cloudflare Worker
 
 ## Step 0: preflight と実行モードの決定
 
-目的: ここが下流で、操作対象と実行モードが確定していることを確かめる。**1 つでも欠けたら、何もせずに止まって運用者に伝える。**
+目的: ここが下流で、操作対象と実行モードが確定していることを確かめる。**1 つでも欠けたら、何もせずに止まって運用者に伝える。** ただし upstream と判定したときだけは、停止せずに Step 0-A へ進む(下記 1)。
 
 1. **操作対象の GitHub リポジトリを固定する。**
    - `git remote -v` と `gh auth status` で、GitHub のホスト、`OWNER/REPO`、認証中のユーザーを調べて運用者に提示し、**この `OWNER/REPO` が下流であること**を確認してもらう。以降の `<OWNER/REPO>` はこの値。
    - 理由: fork に upstream の remote があると、`gh` の既定のリポジトリが upstream になることがあり、そのまま Variables を書くと upstream を汚す。コマンドには常に `--repo <OWNER/REPO>` を付ける。
-   - upstream かどうかは URL の文字列ではなく、**ホストと owner/repo**で判定する(HTTPS と SSH で URL の書き方が違うため)。`git remote get-url origin` の結果から、`https://host/owner/repo(.git)`、`git@host:owner/repo(.git)`、`ssh://git@host/owner/repo(.git)` のいずれもホストと owner/repo に分解して比べる。`github.com` の `youyo/kintone` なら upstream そのものなので、「ここは upstream なので、先に下流リポジトリを作る」と伝えて**停止**する(作り方は runbook 手順 0)。
+   - upstream かどうかは URL の文字列ではなく、**ホストと owner/repo**で判定する(HTTPS と SSH で URL の書き方が違うため)。`git remote get-url origin` の結果から、`https://host/owner/repo(.git)`、`git@host:owner/repo(.git)`、`ssh://git@host/owner/repo(.git)` のいずれもホストと owner/repo に分解して比べる。`github.com` の `youyo/kintone` なら upstream そのものなので、「ここは upstream なので、先に下流リポジトリを作る」と伝え、停止せずに **Step 0-A へ進む**(下流リポジトリを作り、その下流で Step 0 の 1 からやり直す)。Variables / Secrets の登録など、Step 1 以降の操作は upstream に対して行わない。
    - `gh repo view <OWNER/REPO> --json nameWithOwner,isFork,parent,url` で、fork の親と一致するかも見る。
 2. **権限を確認する。** `gh auth status` だけでは Variables / Secrets を管理できるか分からない。`gh api repos/<OWNER/REPO> --jq .permissions` と `gh variable list --repo <OWNER/REPO>` で、書き込み・管理の権限があるかを見る。判断できなければ運用者に権限(リポジトリの admin か、Actions の変数・シークレットの管理権限)を確認する。足りなければ停止する。
 3. fork なら、Actions タブでの有効化が要る(runbook 手順 0)。運用者に確認する。
@@ -85,6 +85,30 @@ description: kintone MCP(kintone 用 Remote MCP サーバー。Cloudflare Worker
    - 実行中の Deploy が止められるとは限らない。すでに始まったジョブは、Variables を直しても止まらない(`concurrency` は多重実行を順番に流すだけで、進行中は止めない)。
 
 完了条件: 下流の `OWNER/REPO`・認証ユーザー・権限・IP 制限の有無・ignore の実態・実行モードが運用者に確認されている。
+
+## Step 0-A: 下流リポジトリの作成
+
+目的: 下流リポジトリがまだないとき(Step 0 の 1 で upstream と判定したとき、または何もない状態から頼まれたとき)に、作成までを案内する。**手順の本体は runbook 手順 0**。ここでは進行管理・確認・停止条件だけを持ち、コマンドは複製しない。
+
+1. **fork かミラーかを運用者に選んでもらう。**
+   - private にしたい、または upstream と切り離したいなら**ミラー**を勧める。
+   - **fork は GitHub の仕様で upstream と同じ公開範囲になりうる**(public の upstream の fork を private にできない場合がある)。この注意を伝えてから選んでもらう。
+2. **作成先を確認する。** `OWNER/REPO`、private / public、GitHub のホスト(`gh auth status` で認証中のホストとユーザーを示す)を運用者に確認してもらう。
+3. **停止条件。** 次のいずれかなら、何も作らずに**停止**して運用者に伝える。
+   - 作成先が upstream(github.com の `youyo/kintone`)と同じ。
+   - 作成先が既存の空でないリポジトリで、push すると既存の内容に影響する。
+   - 認証ユーザーに、作成先の owner でリポジトリを作る権限がない。
+4. **作成と push は取り返しのつかない操作として扱う。** 何をするか(対象の `OWNER/REPO`、公開範囲、どのブランチを push するか)を説明し、**操作ごとに 1 つずつ**承認を取る。前の承認を流用しない。
+   - ミラー: リポジトリの作成(`gh repo create <OWNER/REPO> --private` など。公開範囲は運用者の選択どおり)を承認後に実行し、runbook 手順 0 のコマンドで push する。`upstream` の remote を残す。
+   - fork: fork の作成(`gh repo fork` など、または運用者が GitHub の画面で行う)。fork 先の **Actions タブでの有効化は運用者の操作**。
+   - コミットや push は、運用者の指示があるときだけ(ここでの push は初回のミラー作成に限る)。
+5. **下流で Step 0 の 1 からやり直す。** 作成後、新しい下流リポジトリのディレクトリで、下流であることの判定をやり直す。エージェントの作業ディレクトリが変わる場合は、**そのディレクトリで新しいセッションを始めてもらう**。運用者が最初に送る依頼文の例:
+
+   ```text
+   このリポジトリは kintone MCP の下流リポジトリです。`.claude/skills/kintone-mcp-setup/SKILL.md` のスキル kintone-mcp-setup に従って、Step 0 から一緒にセットアップを進めてください。秘密値は私が自分のターミナルで入れます。
+   ```
+
+完了条件: 下流リポジトリが作成され、運用者が新しいセッション(または同じセッションの新しいディレクトリ)で Step 0 の 1 からやり直す段取りが決まっている。この Step では Variables / Secrets を登録しない。
 
 ## Step 1: 値の収集と検証
 
@@ -280,6 +304,7 @@ Access のポリシーから外しただけでは、**すでに認可済みの�
 ## kintone MCP セットアップ完了報告
 - 実行モード: <(a) 新規 / (b) 再開 / (c) 設定変更>
 - 対象リポジトリ: <OWNER/REPO>(認証ユーザー: <名前>、権限確認: <済/未>)
+- Step 0-A 下流リポジトリの作成: <fork/ミラー/既存>(作成した場合は公開範囲と作成先 `OWNER/REPO`。既存の下流を使った場合は「既存」)
 - Step 0 preflight: <upstream でないこと、Actions 有効化、前提、IP 制限の有無、mise.local.toml の ignore の実態>
 - Step 1 値の検証: mise run deploy:render <成功/失敗と項目名>
 - Step 2 cybozu.com OAuth クライアント: リダイレクト URI の一致 <運用者が目視で確認済み/未>、scope 6 つ <確認済み/未>、STEP2 の利用者許可 <済/未>

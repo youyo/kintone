@@ -82,8 +82,73 @@ describe("kintone-mcp-setup スキル", () => {
   });
 
   it("CLAUDE.md / README.md / docs/runbook.md からスキルへ案内している", () => {
-    for (const file of ["CLAUDE.md", "README.md", "docs/runbook.md"]) {
+    for (const file of ["CLAUDE.md", "README.md", "README_ja.md", "docs/runbook.md"]) {
       expect(read(file), `${file} にスキルへの案内がない`).toContain("kintone-mcp-setup");
     }
+  });
+});
+
+describe("kintone-mcp-setup スキル: Step 0-A 下流リポジトリの作成", () => {
+  const section = (() => {
+    const m = /^## Step 0-A[^\n]*\n([\s\S]*?)(?=^## )/m.exec(skill);
+    return m ? (m[0] as string) : "";
+  })();
+
+  it("Step 0-A の節がある", () => {
+    expect(section, "## Step 0-A の節がない").not.toBe("");
+    expect(section).toContain("下流リポジトリの作成");
+  });
+
+  it("fork かミラーの選択、作成先の確認、承認、停止条件を持つ", () => {
+    for (const s of [
+      "fork",
+      "ミラー",
+      "OWNER/REPO",
+      "private",
+      "gh repo create",
+      "承認",
+      "停止",
+      "upstream",
+    ]) {
+      expect(section, `Step 0-A に「${s}」がない`).toContain(s);
+    }
+  });
+
+  it("手順の本体は runbook 手順 0 にあると案内している", () => {
+    expect(section).toContain("runbook 手順 0");
+  });
+
+  it("新しいセッションで最初に送る依頼文の例がコードブロックである", () => {
+    const blocks = [...section.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+    expect(blocks.some((b) => b.includes("kintone-mcp-setup") && b.includes("Step 0"))).toBe(true);
+    expect(blocks.some((b) => b.includes(".claude/skills/kintone-mcp-setup/SKILL.md"))).toBe(true);
+  });
+
+  it("Step 0 の upstream 判定は停止ではなく Step 0-A へ進む", () => {
+    expect(skill).toMatch(/Step 0-A[^\n]*へ進む/);
+  });
+
+  it("Step 0 の目的の行(欠けたら止まる)が、Step 0-A へ進む例外に触れている", () => {
+    const purpose = skill.split("\n").find((l) => l.startsWith("目的: ここが下流で")) ?? "";
+    expect(purpose, "Step 0 の目的の行がない").not.toBe("");
+    expect(purpose).toContain("Step 0-A");
+  });
+
+  it("description に下流リポジトリ作成のトリガー例がある", () => {
+    const d = frontmatter(skill).description ?? "";
+    for (const s of ["下流リポジトリを作りたい", "ミラーしたい", "fork して始めたい"]) {
+      expect(d, `description に「${s}」がない`).toContain(s);
+    }
+  });
+
+  it("完了報告のフォーマットに Step 0-A の行がある", () => {
+    expect(skill).toMatch(/^- Step 0-A 下流リポジトリの作成: <fork\/ミラー\/既存>/m);
+  });
+
+  it("runbook 手順 0 からスキルへの導線がある", () => {
+    const runbook = read("docs/runbook.md");
+    const m = /^## 0\. [^\n]*\n([\s\S]*?)(?=^## )/m.exec(runbook);
+    expect(m, "runbook に手順 0 の節がない").not.toBeNull();
+    expect(m?.[0]).toContain("kintone-mcp-setup");
   });
 });
