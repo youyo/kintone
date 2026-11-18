@@ -86,7 +86,7 @@ kintone の REST API を、利用者ごとの OAuth で呼ぶためのクライ�
    - `k:app_settings:read` `k:app_settings:write`(アプリ情報の読み取り・アプリ設定)
    - `k:file:read` `k:file:write`(ファイル)
 
-   今のツール(6 個)が使うのは `k:app_record:read` / `k:app_record:write` / `k:app_settings:read` の 3 つだけだが、将来のツールのために 6 つを要求する(ADR 0004)。kintone の同意画面には、使わない権限も並ぶ。
+   今のツール(7 個。`kintone_feedback` は kintone を呼ばない)が使うのは `k:app_record:read` / `k:app_record:write` / `k:app_settings:read` の 3 つだけだが、将来のツールのために 6 つを要求する(ADR 0004)。kintone の同意画面には、使わない権限も並ぶ。
 5. **STEP2: 利用者を許可する**。同じ OAuth クライアントの **「利用者の設定」(STEP2)で、使う kintone ユーザー(組織・グループでも可)を指定する**。指定のない利用者は認可できない(公式 add-client ページ。【未検証】V03・V29)。利用者を追加・削除するときもここを変える。
 
 **注意**:
@@ -246,7 +246,7 @@ mise run verify:oauth -- $BASE/mcp                             # OAuth の通し
    curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $BASE/healthz
    curl -s -o /dev/null -w '%{http_code}\n' -X POST $BASE/mcp
    ```
-4. **`mise run verify:oauth -- $BASE/mcp`**: DCR → ブラウザの認可 → `/token` → MCP(6 ツールの一覧)→ リフレッシュまでを通す。ブラウザでは、Access のログイン(セッションがなければ)→ 同意画面(Access のログイン email が出る)→ kintone のログインと同意、の順。**kintone のログインでは、Access の email と同じ本人のアカウントを選ぶ**こと(Worker は確かめられない。ADR 0010)。詳しい使い方と、続きの確認(V01〜V30)は [docs/manual-verification.md](manual-verification.md)。
+4. **`mise run verify:oauth -- $BASE/mcp`**: DCR → ブラウザの認可 → `/token` → MCP(7 ツールの一覧)→ リフレッシュまでを通す。ブラウザでは、Access のログイン(セッションがなければ)→ 同意画面(Access のログイン email が出る)→ kintone のログインと同意、の順。**kintone のログインでは、Access の email と同じ本人のアカウントを選ぶ**こと(Worker は確かめられない。ADR 0010)。詳しい使い方と、続きの確認(V01〜V30)は [docs/manual-verification.md](manual-verification.md)。
 5. MCP クライアントに `https://<domain>/mcp` を登録して、`kintone_apps_search` が自分の見えるアプリだけを返すことを確かめる。書き込みを伴う確認は専用のアプリだけで行う(V24・V26)。
 
 ## 7. WAF / Rate Limiting

@@ -12,7 +12,7 @@ Cloudflare Workers 上で動く Remote MCP サーバー。MCP クライアント
 **利用者ごとの kintone OAuth で認可された身元**で kintone REST API を呼ぶ。利用者の識別子は **Cloudflare Access の email(必須)**で、認可の入口(`/authorize` と `/callback`)を Access の self-hosted アプリで保護し、Worker が `Cf-Access-Jwt-Assertion` を検証する(ADR 0010)。それ以外の制限は Worker の外側(Cloudflare MCP Portal / WAF)で行う(ADR 0002)。
 
 含むもの:
-- 6 ツール: `kintone_apps_search` / `kintone_app_describe` / `kintone_records_query` / `kintone_record_create` / `kintone_record_update` / `kintone_record_delete`
+- 7 ツール: `kintone_apps_search` / `kintone_app_describe` / `kintone_records_query` / `kintone_record_create` / `kintone_record_update` / `kintone_record_delete` / `kintone_feedback`(上流への GitHub issue 起票の案内を返すだけ。ADR 0013。共通仕様は logbutler の ADR 0019)
 - アプリ・フィールドの名前解決(`app` / `app_ref` / `update_key_field_ref`)
 
 含まないもの(後のマイルストーンまたは対象外):
@@ -329,7 +329,7 @@ KV の読み書きが subrequest の上限に数えられるかは未検証(V12)
 
 ### URL クエリ(logbutler ADR 0008)
 
-`/mcp?toolsets=app,record&read_only=true`。`toolsets` は `app` `record`(既定 `all`)、`read_only=true` で書き込み・破壊的ツールを隠す。不正値・綴り違いのキー(`readonly` `toolset` など `read` / `tool` で始まる未知のキー)・公開ツールが 0 個になる組み合わせは 400 `{"error":"invalid_query","error_description":"..."}`(GET / POST / DELETE のどれでも。トークンの検証のあと)。無関係なキー(`x=1` など)は無視する。M04 で公開ツールは 6 つ(`app` = `kintone_apps_search` + `kintone_app_describe`、`record` = `kintone_records_query` + 書き込み 3 つ)。`?read_only=true` は読み取りの 3 つだけ(書き込み 3 つは `tools/list` から消え、`tools/call` でも呼べず kintone を呼ばない)、`?toolsets=record&read_only=true` は `kintone_records_query` だけ。実ツールでは公開ツールが 0 個になる組み合わせはない(0 個の 400 は、書き込みだけの合成ツール一覧のテストで確かめる)。
+`/mcp?toolsets=app,record&read_only=true`。`toolsets` は `app` `record` `feedback`(既定 `all`)、`read_only=true` で書き込み・破壊的ツールを隠す。不正値・綴り違いのキー(`readonly` `toolset` など `read` / `tool` で始まる未知のキー)・公開ツールが 0 個になる組み合わせは 400 `{"error":"invalid_query","error_description":"..."}`(GET / POST / DELETE のどれでも。トークンの検証のあと)。無関係なキー(`x=1` など)は無視する。M04 で公開ツールは 6 つ、ADR 0013 で 7 つ(`app` = `kintone_apps_search` + `kintone_app_describe`、`record` = `kintone_records_query` + 書き込み 3 つ、`feedback` = `kintone_feedback`)。`?read_only=true` は読み取りの 3 つと `kintone_feedback`(ReadOnly)だけ(書き込み 3 つは `tools/list` から消え、`tools/call` でも呼べず kintone を呼ばない)、`?toolsets=record&read_only=true` は `kintone_records_query` だけ、`?toolsets=feedback`(`read_only=true` でも)は `kintone_feedback` だけ。実ツールでは公開ツールが 0 個になる組み合わせはない(0 個の 400 は、書き込みだけの合成ツール一覧のテストで確かめる)。
 
 ## 9. 設定項目(ADR 0003・0004・0009・0010)
 

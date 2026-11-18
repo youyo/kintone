@@ -90,6 +90,19 @@ describe("parseToolConfig: toolsets", () => {
     expect(() => parse("toolsets=issue")).toThrow(/app.*record|record.*app/);
   });
 
+  it("toolsets=feedback は有効な名前(feedback の toolset を新設。ADR 0013)。有効な名前の案内にも出る", () => {
+    const tools = [...TOOLS, tool("kintone_feedback", "ReadOnly", "feedback")];
+    expect(names("toolsets=feedback", tools)).toEqual(["kintone_feedback"]);
+    expect(names("toolsets=feedback&read_only=true", tools)).toEqual(["kintone_feedback"]);
+    expect(names("toolsets=app,feedback", tools)).toEqual([
+      "kintone_apps_list",
+      "kintone_feedback",
+    ]);
+    expect(names("", tools)).toHaveLength(6);
+    expect(names("toolsets=record", tools)).not.toContain("kintone_feedback");
+    expect(() => parse("toolsets=nope", tools)).toThrow(/app, record, feedback/);
+  });
+
   it("toolsets と read_only の組み合わせ", () => {
     expect(names("toolsets=record&read_only=true")).toEqual(["kintone_records_list"]);
   });

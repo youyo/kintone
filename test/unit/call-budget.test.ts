@@ -122,6 +122,20 @@ describe("maxApiCalls の宣言値(最悪ケースの式 × 3)", () => {
   });
 });
 
+describe("kintone_feedback の maxApiCalls(ADR 0013)", () => {
+  it("0(kintone を呼ばない。呼べば上限超過のエラー)", () => {
+    const tool = ALL_TOOLS.find((t) => t.name === "kintone_feedback");
+    expect(tool?.maxApiCalls).toBe(0);
+  });
+
+  it("tools/call は kintone を 1 回も呼ばない", async () => {
+    const m = mockKintone({ apps: [] });
+    const body = await callTool("kintone_feedback", {});
+    expect(body.error).toBeUndefined();
+    expect(m.calls).toHaveLength(0);
+  });
+});
+
 describe("全ページ満杯のモックで数えた論理呼び出し数(リトライなし)", () => {
   it("kintone_apps_search = 1 回", async () => {
     const m = mockKintone({ apps: NINE_AND_A_HALF_PAGES });

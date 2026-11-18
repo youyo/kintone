@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
+import { SERVER_NAME, SERVER_VERSION } from "../server-info";
 import { type RegisterDeps, registerTools, type ToolConfig, type ToolDefinition } from "./registry";
 import { ALL_TOOLS } from "./tools";
 
@@ -13,7 +14,7 @@ const ALL_ENABLED: ToolConfig = { toolsets: "all", readOnly: false };
 
 /** リクエストごとに生成する(createMcpHandler の要件。同時リクエスト間で状態を共有しない)。 */
 export function createMcpServer(deps: McpServerDeps): McpServer {
-  const server = new McpServer({ name: "kintone-mcp", version: "0.1.0" });
+  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
   registerTools(server, deps.tools ?? ALL_TOOLS, deps.config ?? ALL_ENABLED, deps);
   return server;
 }

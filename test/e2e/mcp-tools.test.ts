@@ -45,24 +45,29 @@ const callSearch = (token: string, args: Record<string, unknown> = {}, url = MCP
 describe("E2E: /mcp の URL クエリ(read_only / toolsets)", () => {
   const READ_TOOLS = ["kintone_apps_search", "kintone_app_describe", "kintone_records_query"];
   const WRITE_TOOLS = ["kintone_record_create", "kintone_record_update", "kintone_record_delete"];
+  const FEEDBACK = "kintone_feedback";
   it.each([
-    ["?read_only=true", READ_TOOLS],
+    ["?read_only=true", [...READ_TOOLS, FEEDBACK]],
     ["?toolsets=app", ["kintone_apps_search", "kintone_app_describe"]],
     ["?toolsets=record", ["kintone_records_query", ...WRITE_TOOLS]],
     ["?toolsets=record&read_only=true", ["kintone_records_query"]],
-    ["?toolsets=all&read_only=false", [...READ_TOOLS, ...WRITE_TOOLS]],
-    ["?x=1", [...READ_TOOLS, ...WRITE_TOOLS]],
-  ])("%s で tools/list と tools/call が通る(M04 で公開ツールは 6 つ)", async (query, expected) => {
-    const { token } = await connect();
-    const list = await mcpRequest(token, "tools/list", {}, `${MCP_URL}${query}`);
-    expect(list.status).toBe(200);
-    expect(((await readRpc(list)).result?.tools ?? []).map((t) => t.name)).toEqual(expected);
-    if (expected.includes("kintone_apps_search")) {
-      const call = await callSearch(token, {}, `${MCP_URL}${query}`);
-      expect(call.status).toBe(200);
-      expect((await readRpc(call)).result?.isError).toBeFalsy();
-    }
-  });
+    ["?toolsets=feedback", [FEEDBACK]],
+    ["?toolsets=all&read_only=false", [...READ_TOOLS, ...WRITE_TOOLS, FEEDBACK]],
+    ["?x=1", [...READ_TOOLS, ...WRITE_TOOLS, FEEDBACK]],
+  ])(
+    "%s で tools/list と tools/call が通る(公開ツールは 7 つ。ADR 0013 で feedback が加わった)",
+    async (query, expected) => {
+      const { token } = await connect();
+      const list = await mcpRequest(token, "tools/list", {}, `${MCP_URL}${query}`);
+      expect(list.status).toBe(200);
+      expect(((await readRpc(list)).result?.tools ?? []).map((t) => t.name)).toEqual(expected);
+      if (expected.includes("kintone_apps_search")) {
+        const call = await callSearch(token, {}, `${MCP_URL}${query}`);
+        expect(call.status).toBe(200);
+        expect((await readRpc(call)).result?.isError).toBeFalsy();
+      }
+    },
+  );
 
   it.each([
     ["未知の toolset", "?toolsets=nope"],

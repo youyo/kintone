@@ -29,7 +29,7 @@ Go 製の kintone CLI + MCP サーバー(v0.5.6、`archive/go`)を、姉妹プ�
 | 認証 | **利用者ごとの kintone OAuth**。Worker が OAuth 認可サーバー(`@cloudflare/workers-oauth-provider` v1)。kintone のトークンは grant の `props` にだけ置く。**API トークン(`X-Cybozu-API-Token`)経路は廃止** | ADR 0001。却下: API トークンの共有、Portal の passthrough |
 | 利用者の識別と保護 | **Access の email を利用者 ID に必須化**(ユーザー決定)。`/authorize` と `/callback` を Access の self-hosted アプリで保護し、Worker が `Cf-Access-Jwt-Assertion` を検証(JWKS・iss・aud・exp)。email を `beginUpstream` の data に載せ、`/callback` で同じ email か確認。`userId` は email のハッシュ。`ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` を必須設定にし、UUID へのフォールバックは作らない。同じ email・同じクライアントの再認可は旧 grant を失効させる。限界: email は「Access にログインした人」で kintone のアカウントとは限らないので、キャッシュ・冪等キー・stale 印は grant 単位 | ADR 0010(ADR 0002 の「Access 連携を持たない」を置き換え)。却下: 認可ごとのランダム UUID(草案)、Managed OAuth |
 | 範囲 | 1 デプロイ = 1 つの cybozu.com ホスト(環境変数 `KINTONE_HOST`、ホスト全体で確定)。ゲストスペースは対象外 | ADR 0003 |
-| ツール | 現行 6 ツール(`kintone_apps_search` / `app_describe` / `records_query` / `record_create` / `record_update` / `record_delete`)と名前解決(`app` / `app_ref` / `update_key_field_ref`)。拡張は M05 以降 | 仕様書 §5 |
+| ツール | 現行 7 ツール(`kintone_apps_search` / `app_describe` / `records_query` / `record_create` / `record_update` / `record_delete`、と上流への起票案内 `kintone_feedback`(ADR 0013))と名前解決(`app` / `app_ref` / `update_key_field_ref`)。拡張は M05 以降 | 仕様書 §5 |
 | 出力・エラー | JSON を text content、エラーは `isError` + `{"schema_version":"1","error":{code,message,retryable,details?}}`。コードは小文字 snake_case で確定(ユーザー決定)。Go 版の `{"ok":...}` を使っていたクライアントは壊れる | ADR 0006 |
 | ツール名・引数 | 接頭辞 `kintone_`。引数名は Go 版を踏襲 | ADR 0006 |
 | kintone OAuth | Basic 認証、PKCE(S256。`KINTONE_OAUTH_PKCE=off` の逃げ道)、**scope は Go 版と同じ 6 つ**(今のツールが使わない権限も要求。ユーザー決定)、`userId` は Access の email のハッシュ、認可時に疎通確認 | ADR 0004、ADR 0010 |

@@ -130,7 +130,7 @@ const WRITE_TOOLS = ["kintone_record_create", "kintone_record_update", "kintone_
 const READ_TOOLS = ["kintone_apps_search", "kintone_app_describe", "kintone_records_query"];
 
 describe("E2E: tools/list(書き込みツールと URL クエリ)", () => {
-  it("6 ツールが見える。?toolsets=record は 4 つ、?toolsets=app は 2 つ", async () => {
+  it("7 ツール(feedback を含む)が見える。?toolsets=record は 4 つ、?toolsets=app は 2 つ", async () => {
     const { connect } = await setup();
     const token = await connect();
     const list = async (query = "") =>
@@ -138,7 +138,7 @@ describe("E2E: tools/list(書き込みツールと URL クエリ)", () => {
         (await readRpc(await mcpRequest(token, "tools/list", {}, `${MCP_URL}${query}`))).result
           ?.tools ?? []
       ).map((t) => t.name);
-    expect(await list()).toEqual([...READ_TOOLS, ...WRITE_TOOLS]);
+    expect(await list()).toEqual([...READ_TOOLS, ...WRITE_TOOLS, "kintone_feedback"]);
     expect(await list("?toolsets=record")).toEqual(["kintone_records_query", ...WRITE_TOOLS]);
     expect(await list("?toolsets=app")).toEqual(["kintone_apps_search", "kintone_app_describe"]);
   });
@@ -171,7 +171,7 @@ describe("E2E: tools/list(書き込みツールと URL クエリ)", () => {
     const names = (
       (await readRpc(await mcpRequest(token, "tools/list", {}, url))).result?.tools ?? []
     ).map((t) => t.name);
-    expect(names).toEqual(READ_TOOLS);
+    expect(names).toEqual([...READ_TOOLS, "kintone_feedback"]);
     expect(
       (await mcpRequest(token, "tools/list", {}, `${MCP_URL}?toolsets=record&read_only=true`))
         .status,

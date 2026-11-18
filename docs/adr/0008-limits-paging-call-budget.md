@@ -50,6 +50,7 @@
 ### 応答サイズ(logbutler ADR 0007)
 - 読み取りツールに `max_response_tokens`(既定 50000、0 で無効、負は `argument_error`)。推定は ASCII 4 文字 = 1 トークン(切り上げ)、ASCII 以外 1 文字 = 1 トークン。超過は切り詰めず `response_too_large`。
 - 書き込みツールは対象外(成功した書き込みを失敗に見せない)。
+- 対象外: `kintone_feedback`(応答は固定の案内だけで数 KB。入力は `kind` だけで `max_response_tokens` を持たない。ADR 0013)。
 - `records_query` で 500 件 × 多フィールドは容易に 50000 を超える。message に `fields` の指定、`limit` を下げること、`max_response_tokens` を上げることを案内する。
 
 ## 理由

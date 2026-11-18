@@ -16,12 +16,13 @@ A **Remote MCP server** for kintone, running on Cloudflare Workers. MCP clients 
 
 ## Tools
 
-The server provides **6 tools** in two toolsets (`app` and `record`). Every tool name starts with `kintone_`.
+The server provides **7 tools** in three toolsets (`app`, `record` and `feedback`). Every tool name starts with `kintone_`.
 
 | toolset | count | tools |
 |---|---|---|
 | `app` | 2 | `kintone_apps_search`, `kintone_app_describe` |
 | `record` | 4 | `kintone_records_query`, `kintone_record_create`, `kintone_record_update`, `kintone_record_delete` |
+| `feedback` | 1 | `kintone_feedback` |
 
 | tool | category | description |
 |---|---|---|
@@ -31,11 +32,12 @@ The server provides **6 tools** in two toolsets (`app` and `record`). Every tool
 | `kintone_record_create` | WriteNonIdempotent | Create 1 to 100 records. A resend with the same arguments within 5 minutes returns the previous result. |
 | `kintone_record_update` | WriteIdempotent | Update a record, identified by its ID or by the value of a unique field. Revision-based optimistic locking is supported. |
 | `kintone_record_delete` | Destructive | Delete 1 to 100 records. |
+| `kintone_feedback` | ReadOnly | Return a guide for filing a bug report, feature request or question as a GitHub issue on the public upstream repository (it creates no issue and does not call kintone or GitHub). Input is only `kind`. |
 
 - The category is one of the four MCP annotation combinations (`readOnlyHint` / `destructiveHint` / `idempotentHint`).
-- Read tools accept `max_response_tokens` (default 50000). If a response would exceed it, the server does not truncate; it returns `response_too_large`.
+- Read tools (except `kintone_feedback`, whose response is a small fixed guide) accept `max_response_tokens` (default 50000). If a response would exceed it, the server does not truncate; it returns `response_too_large`.
 - Specify the app with exactly one of `app` (ID) or `app_ref` (ID, code, or name). For writes, `app_ref` accepts exact matches only; if only a partial match exists, the server returns the candidates and performs no write.
-- You can narrow the tools with a query string on the connection URL: `https://<domain>/mcp?toolsets=app,record`, or `?read_only=true` (read tools only).
+- You can narrow the tools with a query string on the connection URL: `https://<domain>/mcp?toolsets=app,record`, or `?read_only=true` (read tools only; `kintone_feedback` is a read tool, so it stays visible). `kintone_feedback` belongs to its own toolset `feedback`, which is included by default and disappears when you list only other toolsets.
 - Output is JSON in a text content block. Errors are returned with `isError: true` and `{"schema_version":"1","error":{"code":"...","message":"...","retryable":...}}`. The full specification is [docs/specs/kintone-mcp-spec.md](docs/specs/kintone-mcp-spec.md) (in Japanese).
 - Each deployment targets a single cybozu.com host (one deployment = one host). Apps in guest spaces are not supported.
 

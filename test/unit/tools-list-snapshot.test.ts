@@ -4,7 +4,7 @@
  * 意図した変更のときだけ `mise run test:update-snapshots` で更新し、差分を確認してからコミットする。
  */
 import { describe, expect, it } from "vitest";
-import type { Toolset } from "../../src/mcp/registry";
+import { selectTools, type Toolset } from "../../src/mcp/registry";
 import { createMcpServer } from "../../src/mcp/server";
 import { ALL_TOOLS } from "../../src/mcp/tools";
 import { fakeKintoneClient } from "../helpers/fake-kintone-client";
@@ -32,10 +32,13 @@ describe("tools/list", () => {
     const names = (await listTools()).map((t) => t.name);
     expect(names).toEqual(ALL_TOOLS.map((t) => t.name));
     expect(new Set(names).size).toBe(names.length);
-    for (const name of names) expect(name).toMatch(/^kintone_[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/);
+    // 例外は action なしの kintone_feedback だけ(ADR 0013)
+    for (const name of names) {
+      expect(name).toMatch(/^kintone_(?:[a-z][a-z0-9]*(?:_[a-z0-9]+)+|feedback)$/);
+    }
   });
 
-  it("6 ツール(読み取り 3 + 書き込み 3)が公開される(app_describe と records_query は app / app_ref を持つ)", async () => {
+  it("7 ツール(読み取り 3 + 書き込み 3 + feedback。ADR 0013)が公開される(app_describe と records_query は app / app_ref を持つ)", async () => {
     const tools = await listTools();
     expect(tools.map((t) => t.name)).toEqual([
       "kintone_apps_search",
@@ -44,6 +47,7 @@ describe("tools/list", () => {
       "kintone_record_create",
       "kintone_record_update",
       "kintone_record_delete",
+      "kintone_feedback",
     ]);
     const props = (name: string): Record<string, { description?: string }> => {
       const tool = tools.find((t) => t.name === name);
@@ -72,7 +76,7 @@ describe("tools/list", () => {
     }
   });
 
-  it("toolset: app = apps_search + app_describe、record = records_query + 書き込み 3 つ", async () => {
+  it("toolset: app = apps_search + app_describe、record = records_query + 書き込み 3 つ、feedback = kintone_feedback", async () => {
     const names = async (toolset: Toolset) => {
       const { result } = await rpcTo(
         () =>
@@ -90,6 +94,50 @@ describe("tools/list", () => {
       "kintone_record_create",
       "kintone_record_update",
       "kintone_record_delete",
+    ]);
+    expect(await names("feedback")).toEqual(["kintone_feedback"]);
+  });
+
+  it("kintone_feedback: ReadOnly(read_only=true でも見える)・openWorldHint=false・入力は kind だけ・max_response_tokens なし(ADR 0013)", async () => {
+    const listed = (await listTools()).find((t) => t.name === "kintone_feedback");
+    expect(listed?.annotations).toEqual({
+      title: "フィードバック（GitHub issue の起票案内）",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    const schema = listed?.inputSchema as {
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(Object.keys(schema.properties)).toEqual(["kind"]);
+    expect(schema.required ?? []).toEqual([]);
+    expect(
+      selectTools(ALL_TOOLS, { toolsets: "all", readOnly: true }).map((t) => t.name),
+    ).toContain("kintone_feedback");
+    expect(
+      selectTools(ALL_TOOLS, {
+        toolsets: new Set<Toolset>(["app", "record"]),
+        readOnly: false,
+      }).map((t) => t.name),
+    ).not.toContain("kintone_feedback");
+    expect(
+      selectTools(ALL_TOOLS, { toolsets: new Set<Toolset>(["feedback"]), readOnly: true }).map(
+        (t) => t.name,
+      ),
+    ).toEqual(["kintone_feedback"]);
+  });
+
+  it("feedback を足した差分は 1 ツールだけ: ほかの 6 ツールの注釈は 4 区分の既定のまま(openWorldHint=true)で、openWorldHint=false は feedback だけ", async () => {
+    const tools = await listTools();
+    const others = tools.filter((t) => t.name !== "kintone_feedback");
+    expect(others).toHaveLength(6);
+    for (const t of others) {
+      expect(t.annotations?.openWorldHint, t.name).toBe(true);
+    }
+    expect(tools.filter((t) => t.annotations?.openWorldHint !== true).map((t) => t.name)).toEqual([
+      "kintone_feedback",
     ]);
   });
 
@@ -154,14 +202,21 @@ describe("tools/list", () => {
     expect(description("kintone_record_update")).toMatch(/update_key_field_ref/);
   });
 
-  it("read_only=true では書き込み 3 ツールが tools/list から消える", async () => {
+  it("read_only=true では書き込み 3 ツールが tools/list から消える(feedback は ReadOnly なので残る)", async () => {
     const names = (await listTools({ toolsets: "all", readOnly: true })).map((t) => t.name);
-    expect(names).toEqual(["kintone_apps_search", "kintone_app_describe", "kintone_records_query"]);
+    expect(names).toEqual([
+      "kintone_apps_search",
+      "kintone_app_describe",
+      "kintone_records_query",
+      "kintone_feedback",
+    ]);
   });
 
-  it("max_response_tokens の公開スキーマに minimum: 0 が出る(全ての読み取りツール)", async () => {
-    // 書き込み・破壊的ツール(M04)は max_response_tokens を持たない(次のテスト)ので、読み取りのツールだけを見る。
-    const readTools = (await listTools()).filter((t) => t.annotations?.readOnlyHint === true);
+  it("max_response_tokens の公開スキーマに minimum: 0 が出る(feedback を除く全ての読み取りツール)", async () => {
+    // 書き込み・破壊的ツール(M04)と feedback(ADR 0013)は max_response_tokens を持たない(次のテスト)ので、それ以外の読み取りのツールだけを見る。
+    const readTools = (await listTools()).filter(
+      (t) => t.annotations?.readOnlyHint === true && t.name !== "kintone_feedback",
+    );
     expect(readTools.map((t) => t.name)).toEqual([
       "kintone_apps_search",
       "kintone_app_describe",
@@ -174,10 +229,10 @@ describe("tools/list", () => {
     }
   });
 
-  it("max_response_tokens は読み取り専用のツールだけが持つ(書き込み・破壊的は持たない)", async () => {
+  it("max_response_tokens は読み取り専用のツールだけが持つ(書き込み・破壊的・feedback は持たない)", async () => {
     for (const t of await listTools()) {
       const props = Object.keys((t.inputSchema as { properties: object }).properties);
-      const readOnly = t.annotations?.readOnlyHint === true;
+      const readOnly = t.annotations?.readOnlyHint === true && t.name !== "kintone_feedback";
       expect(props.includes("max_response_tokens"), t.name).toBe(readOnly);
     }
   });
