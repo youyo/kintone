@@ -23,7 +23,7 @@ import {
 export type ToolCategory = "ReadOnly" | "WriteIdempotent" | "WriteNonIdempotent" | "Destructive";
 
 /** リソース単位のグループ。/mcp の URL クエリ `?toolsets=` で有効にするものを選ぶ。 */
-export const TOOLSETS = ["app", "record"] as const;
+export const TOOLSETS = ["app", "record", "feedback"] as const;
 export type Toolset = (typeof TOOLSETS)[number];
 
 export interface ToolAnnotations {
@@ -89,6 +89,11 @@ export interface ToolDefinitionInput<S extends z.ZodObject> {
   title: string;
   description: string;
   category: ToolCategory;
+  /**
+   * 注釈の openWorldHint をカテゴリの既定(true)から上書きする。外部と通信しないツール用
+   * (例: feedback は案内の文字列を返すだけで、kintone にも GitHub にも通信しない。ADR 0013)。
+   */
+  openWorldHint?: boolean;
   toolset: Toolset;
   /** `z.strictObject(...)`。ReadOnly では `max_response_tokens` が自動で足される。 */
   inputSchema: S;
@@ -118,7 +123,11 @@ export interface ToolDefinition {
   readonly handler: (args: unknown, ctx: ToolContext) => Promise<unknown>;
 }
 
-const TOOL_NAME = /^kintone_[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
+/**
+ * `kintone_<resource>_<action>`。例外(action なし)は、製品をまたいで `<製品>_feedback` に揃える `kintone_feedback`
+ * (ADR 0013)だけ。
+ */
+const TOOL_NAME = /^kintone_(?:[a-z][a-z0-9]*(?:_[a-z0-9]+)+|feedback)$/;
 
 export function defineTool<S extends z.ZodObject>(input: ToolDefinitionInput<S>): ToolDefinition {
   if (!TOOL_NAME.test(input.name)) {
@@ -135,7 +144,10 @@ export function defineTool<S extends z.ZodObject>(input: ToolDefinitionInput<S>)
       : input.inputSchema,
     responseLimit,
     ...(input.maxApiCalls === undefined ? {} : { maxApiCalls: input.maxApiCalls }),
-    annotations: annotationsFor(input.category, input.title),
+    annotations: {
+      ...annotationsFor(input.category, input.title),
+      ...(input.openWorldHint === undefined ? {} : { openWorldHint: input.openWorldHint }),
+    },
     handler: (args, ctx) => input.handler(args as z.infer<S>, ctx),
   };
 }

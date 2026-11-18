@@ -18,6 +18,7 @@ Go 製の CLI + MCP サーバー(v0.5.6 まで)を、Cloudflare Workers 上の *
 
 ### Added
 
+- **feedback ツール**(`kintone_feedback`、toolset `feedback`。ADR 0013): 不具合・要望・質問を、匿名化したうえで上流 `youyo/kintone` の GitHub issue として起票するための案内(作成先・本文テンプレート・匿名化ルール・作り方)を返す。issue は作らず、kintone にも GitHub にも通信しない。入力は `kind` だけ。共通仕様は logbutler の ADR 0019。公開ツールは 7 つになった
 - **M01 雛形と OAuth**: Worker が OAuth 認可サーバー(DCR・PKCE・`/token`)と MCP サーバーを兼ねる。kintone OAuth(Basic 認証・PKCE・scope 6 つ)、Access JWT の検証と email からの利用者 ID、トークン更新、起動時の設定チェック(`/healthz`)、`mise run verify:oauth`
 - **M02 基盤**: kintone REST クライアント(直列・読み取りだけ 429 / 503 を最大 2 回リトライ・呼び出し回数の上限・10 MiB・30 秒)、エラー表、ツール登録(4 区分の annotation・toolset・`?toolsets=` / `?read_only=true`・`max_response_tokens`)、tools/list のスナップショット
 - **M03 読み取りツール**: `kintone_apps_search` / `kintone_app_describe` / `kintone_records_query`、名前解決(`app` / `app_ref`)、KV キャッシュ(grant 単位)

@@ -29,7 +29,7 @@ function simpleTool(
   category: ToolCategory,
   toolset: Toolset,
   handler: ToolDefinition["handler"] = async () => ({ ok: true }),
-  extra: { maxApiCalls?: number; responseLimit?: boolean } = {},
+  extra: { maxApiCalls?: number; responseLimit?: boolean; openWorldHint?: boolean } = {},
 ) {
   return defineTool({
     name,
@@ -122,6 +122,38 @@ describe("defineTool", () => {
     "kintone_record_create",
   ])("正しい名前は通る: %s", (name) => {
     expect(simpleTool(name, "ReadOnly", "app").name).toBe(name);
+  });
+
+  it("feedback は action なしの例外として通る(ADR 0013 の C1)。似た綴りは拒否のまま", () => {
+    expect(simpleTool("kintone_feedback", "ReadOnly", "feedback").name).toBe("kintone_feedback");
+    for (const name of [
+      "kintone_feedbacks",
+      "kintone_Feedback",
+      "kintone_feedback-x",
+      "kintone_feedback_",
+      "kintone_feedback2",
+      "kintone_xfeedback",
+      "logbutler_feedback",
+      "feedback",
+    ]) {
+      expect(() => simpleTool(name, "ReadOnly", "feedback"), name).toThrow(
+        /kintone_<resource>_<action>/,
+      );
+    }
+  });
+
+  it("openWorldHint はカテゴリの既定(true)を上書きできる。ほかの注釈は変えず、省略時は既定のまま(ADR 0013 の C2)", () => {
+    const closed = simpleTool("kintone_feedback", "ReadOnly", "feedback", undefined, {
+      openWorldHint: false,
+    });
+    expect(closed.annotations).toEqual({
+      title: "テスト",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    expect(simpleTool("kintone_apps_list", "ReadOnly", "app").annotations.openWorldHint).toBe(true);
   });
 
   it("annotation は区分から決まり、title は日本語のまま", () => {

@@ -195,19 +195,27 @@ describe("/mcp の URL クエリ(read_only / toolsets。仕様書 §8)", () => {
   const ALL_READ = ["kintone_apps_search", "kintone_app_describe", "kintone_records_query"];
   const WRITE = ["kintone_record_create", "kintone_record_update", "kintone_record_delete"];
 
+  const FEEDBACK = "kintone_feedback";
+
   it.each(["", "?read_only=false", "?toolsets=all", "?x=1"])(
-    "有効なクエリ(%s)では tools/list が通り、読み取り 3 つと書き込み 3 つの 6 ツールが見える",
+    "有効なクエリ(%s)では tools/list が通り、読み取り 3 つと書き込み 3 つと feedback の 7 ツールが見える",
     async (query) => {
-      expect(await listNames(query)).toEqual([...ALL_READ, ...WRITE]);
+      expect(await listNames(query)).toEqual([...ALL_READ, ...WRITE, FEEDBACK]);
     },
   );
 
   it.each(["?read_only=true", "?toolsets=all&read_only=true"])(
-    "%s では書き込み・破壊的ツールが隠れ、読み取りの 3 つだけが見える",
+    "%s では書き込み・破壊的ツールが隠れ、読み取りの 3 つと feedback(ReadOnly)だけが見える",
     async (query) => {
-      expect(await listNames(query)).toEqual(ALL_READ);
+      expect(await listNames(query)).toEqual([...ALL_READ, FEEDBACK]);
     },
   );
+
+  it("?toolsets=feedback は feedback だけ(read_only=true でも)、?toolsets=app,record では feedback が消える", async () => {
+    expect(await listNames("?toolsets=feedback")).toEqual([FEEDBACK]);
+    expect(await listNames("?toolsets=feedback&read_only=true")).toEqual([FEEDBACK]);
+    expect(await listNames("?toolsets=app,record")).toEqual([...ALL_READ, ...WRITE]);
+  });
 
   it("?toolsets=app は apps_search と app_describe、?toolsets=record は records_query と書き込み 3 つ", async () => {
     expect(await listNames("?toolsets=app")).toEqual([

@@ -48,7 +48,21 @@ export const worker = {
   },
 };
 
+/**
+ * OAuth の通しを流す相手(Worker の入口と、その公開 URL のオリジン)。既定はテストの wrangler 設定の Worker。
+ * env(PUBLIC_BASE_URL・KINTONE_HOST など)を変えた Worker(`import worker from "../../src/index"` に別の env を渡す)で
+ * 通すときに差し替える(feedback ツールの「環境が違っても応答が一致する」E2E)。
+ */
+export interface FlowTarget {
+  fetch: (url: string, init?: RequestInit) => Promise<Response>;
+  /** PUBLIC_BASE_URL と同じオリジン。`/mcp` がリソース識別子になる。 */
+  origin: string;
+}
+export const DEFAULT_TARGET: FlowTarget = { fetch: worker.fetch, origin: ORIGIN };
+
 export interface MockOptions {
+  /** kintone のオリジン(既定 KINTONE_ORIGIN)。env の KINTONE_HOST を変えた Worker 用。 */
+  kintoneOrigin?: string;
   kintoneToken?: (call: RecordedCall) => Response | Promise<Response>;
   kintoneApps?: (call: RecordedCall) => Response | Promise<Response>;
   jwks?: (call: RecordedCall) => Response | Promise<Response>;
@@ -78,10 +92,11 @@ export async function setupMocks(opts: MockOptions = {}) {
       call.headers.get("authorization")?.startsWith("Bearer kintone-at-")
         ? jsonResponse({ apps: [{ appId: "1", code: "CRM", name: "顧客管理" }] })
         : jsonResponse({ code: "CB_AU01", message: "unauthorized" }, 401));
+  const kintoneOrigin = opts.kintoneOrigin ?? KINTONE_ORIGIN;
   const mocks = mockOutboundFetch({
     [CERTS_URL]: opts.jwks ?? (() => jwksResponse(accessKey)),
-    [KINTONE_TOKEN]: kintoneToken,
-    [KINTONE_APPS]: kintoneApps,
+    [`POST ${kintoneOrigin}/oauth2/token`]: kintoneToken,
+    [`GET ${kintoneOrigin}/k/v1/apps.json`]: kintoneApps,
     ...(opts.extra ?? {}),
   });
   return { accessKey, ...mocks };
@@ -126,8 +141,11 @@ export async function pkcePair() {
   return { verifier, challenge: base64url(new Uint8Array(digest)) };
 }
 
-export async function registerClient(clientName = "Test MCP Client"): Promise<string> {
-  const res = await worker.fetch(`${ORIGIN}/register`, {
+export async function registerClient(
+  clientName = "Test MCP Client",
+  target: FlowTarget = DEFAULT_TARGET,
+): Promise<string> {
+  const res = await target.fetch(`${target.origin}/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -144,9 +162,13 @@ export async function registerClient(clientName = "Test MCP Client"): Promise<st
 }
 
 /** MCP クライアントが送る /authorize の URL。 */
-export async function authorizeUrl(clientId: string, state = "client-state-1") {
+export async function authorizeUrl(
+  clientId: string,
+  state = "client-state-1",
+  origin: string = ORIGIN,
+) {
   const { verifier, challenge } = await pkcePair();
-  const url = new URL(`${ORIGIN}/authorize`);
+  const url = new URL(`${origin}/authorize`);
   url.search = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
@@ -154,7 +176,7 @@ export async function authorizeUrl(clientId: string, state = "client-state-1") {
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",
-    resource: MCP_URL,
+    resource: `${origin}/mcp`,
   }).toString();
   return { url: url.toString(), verifier };
 }
@@ -175,16 +197,20 @@ export interface FlowOptions {
   /** 登録済みのクライアントを使う(省略時は新しく DCR する)。 */
   clientId?: string;
   clientName?: string;
+  /** 流す相手の Worker(省略時は既定の Worker)。 */
+  target?: FlowTarget;
 }
 
 /** /register → /authorize(同意)→ kintone(モック)→ /callback → /token を通しで行う。各リクエストに Access の JWT を付ける。 */
 export async function runAuthorizationFlow(opts: FlowOptions) {
   const email = opts.email ?? DEFAULT_EMAIL;
-  const clientId = opts.clientId ?? (await registerClient(opts.clientName));
-  const { url, verifier } = await authorizeUrl(clientId);
+  const target = opts.target ?? DEFAULT_TARGET;
+  const origin = target.origin;
+  const clientId = opts.clientId ?? (await registerClient(opts.clientName, target));
+  const { url, verifier } = await authorizeUrl(clientId, undefined, origin);
   const jar = new CookieJar();
 
-  const consent = await worker.fetch(url, {
+  const consent = await target.fetch(url, {
     headers: await accessHeaders(opts.accessKey, { email }),
   });
   expect(consent.status).toBe(200);
@@ -193,7 +219,7 @@ export async function runAuthorizationFlow(opts: FlowOptions) {
   const handle = /name="handle" value="([^"]+)"/.exec(html)?.[1] ?? "";
   expect(handle).not.toBe("");
 
-  const kintoneRedirect = await worker.fetch(`${ORIGIN}/authorize`, {
+  const kintoneRedirect = await target.fetch(`${origin}/authorize`, {
     method: "POST",
     headers: {
       Cookie: jar.header(),
@@ -204,10 +230,10 @@ export async function runAuthorizationFlow(opts: FlowOptions) {
   });
   jar.update(kintoneRedirect);
   const kintoneLocation = kintoneRedirect.headers.get("Location") ?? "";
-  const state = new URL(kintoneLocation, ORIGIN).searchParams.get("state") ?? "";
+  const state = new URL(kintoneLocation, origin).searchParams.get("state") ?? "";
 
-  const callbackResponse = await worker.fetch(
-    `${ORIGIN}/callback?code=kintone-code&state=${encodeURIComponent(state)}`,
+  const callbackResponse = await target.fetch(
+    `${origin}/callback?code=kintone-code&state=${encodeURIComponent(state)}`,
     {
       headers: {
         Cookie: jar.header(),
@@ -216,9 +242,9 @@ export async function runAuthorizationFlow(opts: FlowOptions) {
     },
   );
   const back = callbackResponse.headers.get("Location") ?? "";
-  const clientCode = new URL(back, ORIGIN).searchParams.get("code") ?? "";
+  const clientCode = new URL(back, origin).searchParams.get("code") ?? "";
 
-  const tokenResponse = await worker.fetch(`${ORIGIN}/token`, {
+  const tokenResponse = await target.fetch(`${origin}/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -227,7 +253,7 @@ export async function runAuthorizationFlow(opts: FlowOptions) {
       client_id: clientId,
       redirect_uri: CLIENT_REDIRECT,
       code_verifier: verifier,
-      resource: MCP_URL,
+      resource: `${origin}/mcp`,
     }),
   });
 
@@ -262,8 +288,9 @@ export function mcpRequest(
   method: string,
   params: Record<string, unknown> = {},
   url: string = MCP_URL,
+  fetch: FlowTarget["fetch"] = worker.fetch,
 ): Promise<Response> {
-  return worker.fetch(url, {
+  return fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -279,7 +306,12 @@ export interface RpcResponse {
     tools?: {
       name: string;
       description?: string;
-      annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+      annotations?: {
+        readOnlyHint?: boolean;
+        destructiveHint?: boolean;
+        idempotentHint?: boolean;
+        openWorldHint?: boolean;
+      };
       inputSchema?: unknown;
     }[];
     content?: { type: string; text: string }[];

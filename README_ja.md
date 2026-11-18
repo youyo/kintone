@@ -14,12 +14,13 @@ kintone を AI から操作するための **Remote MCP サーバー**(Cloudflar
 
 ## ツール
 
-**6 個のツール**を、2 つの toolset(`app`・`record`)に分けて提供します。名前はすべて `kintone_` で始まります。
+**7 個のツール**を、3 つの toolset(`app`・`record`・`feedback`)に分けて提供します。名前はすべて `kintone_` で始まります。
 
 | toolset | 件数 | ツール |
 |---|---|---|
 | `app` | 2 | `kintone_apps_search`, `kintone_app_describe` |
 | `record` | 4 | `kintone_records_query`, `kintone_record_create`, `kintone_record_update`, `kintone_record_delete` |
+| `feedback` | 1 | `kintone_feedback` |
 
 | ツール | 区分 | 内容 |
 |---|---|---|
@@ -29,11 +30,12 @@ kintone を AI から操作するための **Remote MCP サーバー**(Cloudflar
 | `kintone_record_create` | WriteNonIdempotent | レコードを 1〜100 件作る。同じ引数の再送(5 分以内)は前回の結果を返す |
 | `kintone_record_update` | WriteIdempotent | レコードを更新する(ID、または重複禁止フィールドの値で指定。リビジョンによる排他) |
 | `kintone_record_delete` | Destructive | レコードを 1〜100 件削除する |
+| `kintone_feedback` | ReadOnly | 不具合・要望・質問を、上流の公開リポジトリに GitHub issue として起票するための案内(作成先・本文テンプレート・匿名化ルール・作り方)を返す。issue は作らず、kintone にも GitHub にも通信しない。入力は `kind` だけ |
 
 - 区分は MCP の annotation(`readOnlyHint` / `destructiveHint` / `idempotentHint`)の 4 種です。
-- 読み取りツールには、応答のサイズを制限する `max_response_tokens`(既定 50000。超えたら切り詰めず `response_too_large`)が付きます。
+- 読み取りツール(固定の案内を返す `kintone_feedback` を除く)には、応答のサイズを制限する `max_response_tokens`(既定 50000。超えたら切り詰めず `response_too_large`)が付きます。
 - アプリは `app`(ID)または `app_ref`(ID・コード・名前)のどちらか 1 つで指定します。書き込みの `app_ref` は完全一致だけで、部分一致しかなければ候補を返し、書き込みはしません。
-- 接続 URL にクエリを付けて、ツールを絞れます: `https://<domain>/mcp?toolsets=app,record`、`?read_only=true`(読み取りのツールだけ)。
+- 接続 URL にクエリを付けて、ツールを絞れます: `https://<domain>/mcp?toolsets=app,record`、`?read_only=true`(読み取りのツールだけ。`kintone_feedback` は読み取りのツールなので残ります)。`kintone_feedback` は専用の toolset `feedback` に属し、既定で公開されます(`toolsets` で他の toolset だけを指定すると消えます)。
 - 出力は JSON(text content)。エラーは `isError: true` と `{"schema_version":"1","error":{"code":"...","message":"...","retryable":...}}`。仕様の全体は [docs/specs/kintone-mcp-spec.md](docs/specs/kintone-mcp-spec.md)。
 - 対象は 1 つの cybozu.com ホスト(1 デプロイ = 1 ホスト)。ゲストスペースのアプリは扱えません。
 

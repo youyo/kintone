@@ -131,7 +131,7 @@ async function setup(options: Options = {}) {
 }
 
 describe("E2E: tools/list", () => {
-  it("読み取り 3 + 書き込み 3 の 6 ツールが見える。?toolsets=app は 2 つ、?toolsets=record は 4 つ、?read_only=true は読み取りの 3 つ", async () => {
+  it("読み取り 3 + 書き込み 3 + feedback の 7 ツールが見える。?toolsets=app は 2 つ、?toolsets=record は 4 つ、?read_only=true は読み取りの 3 つと feedback", async () => {
     const { connect } = await setup();
     const token = await connect();
     const names = async (query = "") =>
@@ -146,6 +146,7 @@ describe("E2E: tools/list", () => {
       "kintone_record_create",
       "kintone_record_update",
       "kintone_record_delete",
+      "kintone_feedback",
     ]);
     expect(await names("?toolsets=app")).toEqual(["kintone_apps_search", "kintone_app_describe"]);
     expect(await names("?toolsets=record")).toEqual([
@@ -158,6 +159,7 @@ describe("E2E: tools/list", () => {
       "kintone_apps_search",
       "kintone_app_describe",
       "kintone_records_query",
+      "kintone_feedback",
     ]);
   });
 
@@ -165,8 +167,10 @@ describe("E2E: tools/list", () => {
     const { connect } = await setup();
     const token = await connect();
     const tools = (await readRpc(await mcpRequest(token, "tools/list"))).result?.tools ?? [];
-    // 書き込み・破壊的ツール(M04)は max_response_tokens を持たないので、読み取りのツールだけを見る。
-    const readTools = tools.filter((t) => t.annotations?.readOnlyHint === true);
+    // 書き込み・破壊的ツール(M04)と feedback(ADR 0013)は max_response_tokens を持たないので、それ以外の読み取りのツールだけを見る。
+    const readTools = tools.filter(
+      (t) => t.annotations?.readOnlyHint === true && t.name !== "kintone_feedback",
+    );
     expect(readTools).toHaveLength(3);
     for (const t of readTools) {
       const props = (t.inputSchema as { properties: Record<string, { minimum?: number }> })
